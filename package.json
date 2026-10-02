@@ -1,0 +1,24 @@
+{
+  "name": "sand-office-tools",
+  "version": "1.0.0",
+  "description": "SAND Office Tools — Personal & Office Utility Platform (Sansai Administration Network)",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/preview.mjs",
+    "typecheck": "tsc -p jsconfig.json",
+    "test": "node --test \"tests/unit/*.test.mjs\" tests/gas.test.mjs",
+    "test:e2e": "node scripts/build.mjs && node tests/e2e/run.mjs",
+    "test:all": "npm run typecheck && npm test && npm run test:e2e"
+  },
+  "devDependencies": {
+    "playwright": "^1.50.0",
+    "typescript": "^5.6.0"
+  }
+}
