@@ -1,8 +1,0 @@
-{
-  "compilerOptions": {
-    "target": "ES2022", "module": "ES2022", "moduleResolution": "Bundler", "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "checkJs": true, "allowJs": true, "noEmit": true, "strict": false, "noImplicitAny": false, "skipLibCheck": true, "resolveJsonModule": true
-  },
-  "include": ["src/js/globals.d.ts", "src/js/core/**/*.js", "src/js/modules/**/*.js", "src/js/main.js"],
-  "exclude": ["src/js/vendor/**", "node_modules", "dist"]
-}
