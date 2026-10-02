@@ -1,9 +1,9 @@
-/** @typedef {{gasUrl:string,googleClientId:string,googleApiKey:string,googleAppId:string,requireLogin:boolean,maxFileSizeMB:number,conversionTimeoutSec:number,version:string}} SandConfig */
+/** @typedef {{gasUrl:string,googleClientId:string,googleApiKey:string,googleAppId:string,requireLogin:boolean,archiveFiles:boolean,maxFileSizeMB:number,conversionTimeoutSec:number,version:string}} SandConfig */
 
 /** @type {SandConfig} */
 const defaults = {
   gasUrl: '', googleClientId: '', googleApiKey: '', googleAppId: '',
-  requireLogin: false, maxFileSizeMB: 25, conversionTimeoutSec: 60, version: 'dev'
+  requireLogin: false, archiveFiles: true, maxFileSizeMB: 25, conversionTimeoutSec: 60, version: 'dev'
 };
 
 /** Runtime configuration injected by config.js (generated at build time). */

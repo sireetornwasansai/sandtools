@@ -8,12 +8,20 @@ export const TOOLS = [
   { id: 'qr', path: '/qr', title: 'QR Code', fullTitle: 'QR Code Generator', desc: 'สร้าง QR จากลิงก์ ข้อความ Wi-Fi อีเมล โทรศัพท์ vCard',
     icon: ICONS.qr, keywords: 'qr qrcode คิวอาร์ barcode wifi vcard url sms email โทรศัพท์', load: () => import('../modules/qr.js') },
   { id: 'converter', path: '/converter', title: 'แปลงไฟล์', fullTitle: 'File Converter', desc: 'แปลง PDF, Word, PowerPoint, Excel, CSV, HTML เป็น Markdown',
-    icon: ICONS.file, keywords: 'converter convert pdf docx word pptx powerpoint xlsx excel csv html txt markitdown แปลง ไฟล์', load: () => import('../modules/converter.js') }
+    icon: ICONS.file, keywords: 'converter convert pdf docx word pptx powerpoint xlsx excel csv html txt markitdown แปลง ไฟล์', load: () => import('../modules/converter.js') },
+  { id: 'compress', path: '/compress', title: 'ย่อไฟล์', fullTitle: 'ย่อไฟล์', desc: 'ลดขนาดรูปภาพ และรวมไฟล์เป็น ZIP เพื่อส่งหรืออัปโหลด',
+    icon: ICONS.crop, keywords: 'compress resize shrink zip ย่อ ลดขนาด บีบอัด รูป ภาพ ไฟล์ใหญ่', load: () => import('../modules/compress.js') },
+  { id: 'prompt', path: '/prompt', title: 'สร้าง Prompt', fullTitle: 'สร้าง Prompt', desc: 'Prompt สำหรับสร้างเว็บ หรือระดมไอเดียระบบสาธารณสุข',
+    icon: ICONS.edit, keywords: 'prompt พรอมต์ เว็บ website ai chatgpt claude ไอเดีย สาธารณสุข สุขภาพ ระบบ', load: () => import('../modules/prompt.js') },
+  { id: 'skill', path: '/skill', title: 'skill.md', fullTitle: 'สร้าง skill.md', desc: 'แปลงเอกสารเป็น SKILL.md ให้ AI อ่านง่าย',
+    icon: ICONS.markdown, keywords: 'skill md markdown ai agent claude แปลง เอกสาร คู่มือ', load: () => import('../modules/skill.js') }
 ];
+export const HISTORY_ROUTE = { id: 'history', path: '/history', title: 'ประวัติ', fullTitle: 'ประวัติการใช้งาน', desc: 'ดูประวัติการใช้งานที่หน่วยงานบันทึกไว้',
+  icon: ICONS.list, keywords: 'history log ประวัติ บันทึก การใช้งาน', load: () => import('../modules/history.js') };
 export const SETTINGS_ROUTE = { id: 'settings', path: '/settings', title: 'ตั้งค่า', fullTitle: 'Settings', desc: 'ธีม ความเป็นส่วนตัว สถานะระบบ',
   icon: ICONS.settings, keywords: 'settings ตั้งค่า theme ธีม dark light privacy ล้างข้อมูล', load: () => import('../modules/settings.js') };
 export const HOME_ROUTE = { id: 'home', path: '/', title: 'หน้าแรก', fullTitle: 'Dashboard', desc: 'หน้าแรก', icon: ICONS.home, keywords: 'home dashboard หน้าแรก', load: () => import('../modules/dashboard.js') };
-export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, SETTINGS_ROUTE];
+export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, HISTORY_ROUTE, SETTINGS_ROUTE];
 
 /** Parse "#/path?x=1" into {path, params}. */
 export function parseHash(hash = location.hash) {
