@@ -2,17 +2,14 @@
 
 **SAND — Sansai Administration Network** · เครื่องมือดิจิทัลสำหรับงานสำนักงาน ในที่เดียว
 
-Personal & office utility web app for hospital/office staff. Five tools in one portal, Thai-first UI,
+Personal & office utility web app for hospital/office staff. Two tools in one portal (QR Code + File Converter), Thai-first UI,
 privacy-first (everything runs in the browser), small Google Apps Script backend for sign-in.
 
 ## Features
 | Tool | What it does |
 |---|---|
-| **Markdown** | Split editor + live preview, resizable/hide/focus/fullscreen, light/dark, find & replace, TOC, word/char/line counts, toolbar + shortcuts (Ctrl+S/F/H/B/I/K), tables/checklists/code highlighting, autosave (IndexedDB), open/import/download `.md` byte-exactly (UTF-8/Thai, CRLF/LF, tabs preserved; TIS-620 read), optional Google Drive open/save |
 | **QR Code** | URL, text, Wi-Fi, email, phone, SMS, vCard · size, margin, error correction, colours, square/rounded/dots, centre logo · live preview · PNG/SVG download · copy image/content · contrast warnings |
-| **File Converter** | PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT (+ image info) → Markdown, in the browser. Drop → convert → *Open in Markdown Editor* / preview / download `report.md` / copy |
-| **Image Tools** | JPG/PNG/WEBP: resize, compress (quality or target KB), convert, crop, rotate — client-side only |
-| **Utilities** | Text counter, text formatter, case converter, URL encode/decode, JSON format/minify/validate, Base64 (UTF-8), Thai/BE date tools, Unix timestamp |
+| **File Converter** | PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT (+ image info) → Markdown, in the browser. Drop → convert → preview / download `report.md` / copy |
 | **Everywhere** | Command palette (Ctrl+K), tool search, drag & drop routing, PWA/offline, recent items (local), Settings, responsive (bottom nav on mobile), accessibility (labels, focus, reduced motion) |
 
 ## Important design decisions

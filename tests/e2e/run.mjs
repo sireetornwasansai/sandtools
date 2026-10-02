@@ -1,0 +1,201 @@
+// End-to-end tests: production build (dist/) served with the real CSP/security headers, driven by headless Chromium.
+// Run: npm run build && npm run test:e2e   (needs `npm i` for playwright + `npx playwright install chromium`)
+import { chromium } from 'playwright';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createPreview } from '../../scripts/preview.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const fx = (n) => path.join(here, '..', 'fixtures', n);
+const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sand-e2e-'));
+const server = createPreview(); await new Promise((r) => server.listen(0, r));
+const base = `http://localhost:${server.address().port}`;
+const browser = await chromium.launch();
+
+let pass = 0; const failures = [];
+async function test(name, fn, { viewport, ignore } = {}) {
+  if (process.env.E2E_ONLY && !new RegExp(process.env.E2E_ONLY, 'i').test(name)) return;
+  const ctx = await browser.newContext({ acceptDownloads: true, viewport: viewport || { width: 1280, height: 800 }, locale: 'th-TH' });
+  const page = await ctx.newPage();
+  const problems = [];
+  page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => { if (m.type() === 'error' && !(ignore && ignore.test(m.text()))) problems.push(`console: ${m.text()}`); });
+  await page.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => console.error(`CSP violation: ${e.violatedDirective} ${e.blockedURI}`)));
+  try {
+    await fn(page, ctx);
+    if (problems.length) throw new Error(`browser errors:\n  ${problems.join('\n  ')}`);
+    pass++; console.log(`  ✓ ${name}`);
+  } catch (e) { failures.push(name); console.log(`  ✗ ${name}\n      ${String(e.message).split('\n').join('\n      ')}`); }
+  await ctx.close();
+}
+const eq = (a, b, msg = '') => { if (a !== b) throw new Error(`${msg} expected ${JSON.stringify(b)} got ${JSON.stringify(a)}`); };
+const ok = (c, msg) => { if (!c) throw new Error(msg || 'assertion failed'); };
+const go = async (page, hash = '/') => { await page.goto(`${base}/index.html#${hash}`); await page.waitForSelector('#main'); await page.waitForFunction(() => !document.querySelector('.loading')); };
+const dl = async (page, click) => { const [d] = await Promise.all([page.waitForEvent('download'), click()]); const p = path.join(out, `${Date.now()}-${d.suggestedFilename()}`); await d.saveAs(p); return { name: d.suggestedFilename(), path: p, buf: fs.readFileSync(p) }; };
+const ROUTES = ['/', '/qr', '/converter', '/settings'];
+
+console.log('\nSAND Office Tools — E2E');
+console.log('\nShell & navigation');
+await test('dashboard shows 2 tools, tagline, mandatory privacy warning', async (page) => {
+  await go(page);
+  eq(await page.locator('.tool-card').count(), 2); ok((await page.textContent('.hero')).includes('เครื่องมือดิจิทัลสำหรับงานสำนักงาน ในที่เดียว'));
+  ok((await page.textContent('main')).includes('หลีกเลี่ยงการอัปโหลดข้อมูลผู้ป่วยหรือข้อมูลสุขภาพที่สามารถระบุตัวบุคคลได้ หากระบบไม่ได้รับการอนุมัติให้ใช้กับข้อมูลดังกล่าว'));
+});
+await test('command palette (Ctrl+K): search "pdf" opens File Converter; Esc closes; arrows work', async (page) => {
+  await go(page); await page.keyboard.press('Control+k'); await page.waitForSelector('.palette');
+  await page.keyboard.type('pdf'); eq(await page.locator('.palette-item').first().textContent().then((t) => t.includes('File Converter')), true); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => location.hash === '#/converter'); eq(await page.locator('.palette').count(), 0);
+  await page.keyboard.press('Control+k'); await page.keyboard.type('QR'); ok((await page.locator('.palette-item').first().textContent()).includes('QR')); await page.keyboard.press('Escape'); eq(await page.locator('.palette').count(), 0);
+  await page.fill('.palette-input', 'zzzzqq'); ok((await page.textContent('.palette-list')).includes('ไม่พบ'));
+});
+await test('theme toggle persists across reload; reduced theme tokens apply', async (page) => {
+  await go(page); const before = await page.getAttribute('html', 'data-theme'); await page.click('button[aria-label="สลับโหมดมืด/สว่าง"]');
+  const after = await page.getAttribute('html', 'data-theme'); ok(before !== after); await page.reload(); await page.waitForSelector('#main'); eq(await page.getAttribute('html', 'data-theme'), after);
+});
+await test('sidebar collapses and remembers state', async (page) => {
+  await go(page); await page.click('.collapse-btn'); eq(await page.getAttribute('.shell', 'data-collapsed'), 'true'); await page.reload(); await page.waitForSelector('.shell'); eq(await page.getAttribute('.shell', 'data-collapsed'), 'true');
+});
+await test('every route loads without console/CSP errors and every control has an accessible name', async (page) => {
+  for (const r of ROUTES) {
+    await go(page, r);
+    const bad = await page.evaluate(() => Array.from(document.querySelectorAll('button, a[href], input, select, textarea, [role="button"]')).filter((el) => {
+      if (el.hidden || el.closest('[hidden]') || el.type === 'file' || el.type === 'hidden') return false;
+      const name = (el.getAttribute('aria-label') || el.textContent || el.title || '').trim() || (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest('label') || el.getAttribute('aria-labelledby') || el.getAttribute('placeholder');
+      return !name;
+    }).map((el) => el.outerHTML.slice(0, 120)));
+    eq(bad.length, 0, `unnamed controls on ${r}: ${bad.join(' | ')}`);
+  }
+});
+
+console.log('\nQR Code');
+await test('generate URL QR, preview, download PNG + SVG; scanned content matches (OpenCV decode if available)', async (page) => {
+  await go(page, '/qr'); await page.fill('input[inputmode=url]', 'sansai.go.th/ทดสอบ'); await page.waitForSelector('.qr-canvas-wrap:not([hidden])');
+  ok((await page.textContent('.qr-info')).includes('โมดูล'));
+  const png = await dl(page, () => page.click('button:has-text("ดาวน์โหลด PNG")')); const svg = await dl(page, () => page.click('button:has-text("ดาวน์โหลด SVG")'));
+  eq(png.name, 'qr-link.png'); ok(png.buf.subarray(0, 4).toString('hex') === '89504e47'); ok(svg.buf.toString().startsWith('<svg'));
+  fs.copyFileSync(png.path, path.join(out, 'url.png')); const py = spawnSync('python3', ['-c', `import cv2,sys\nv,_,_=cv2.QRCodeDetector().detectAndDecode(cv2.imread(sys.argv[1]))\nprint(v)`, png.path], { encoding: 'utf8' });
+  if (py.status === 0) eq(py.stdout.trim(), 'https://sansai.go.th/ทดสอบ', 'decoded content'); else console.log('      (OpenCV not available — decode check skipped)');
+});
+await test('Wi-Fi, vCard, SMS, email, phone, text payloads produce QR; too-long data gives a friendly error', async (page) => {
+  await go(page, '/qr');
+  for (const [tab, fill] of [['Wi-Fi', async () => { await page.fill('label:has-text("ชื่อเครือข่าย") >> xpath=following-sibling::input', 'Hospital'); }], ['โทรศัพท์', async () => { await page.fill('input[type=tel]', '0812345678'); }], ['อีเมล', async () => { await page.fill('input[type=email]', 'a@b.go.th'); }], ['ข้อความ', async () => { await page.fill('textarea', 'สวัสดี'); }], ['นามบัตร (vCard)', async () => { await page.fill('label:has-text("ชื่อ") >> nth=0 >> xpath=following-sibling::input', 'สมชาย'); }]]) {
+    await page.click(`[role=tab]:has-text("${tab}")`); await fill(); await page.waitForSelector('.qr-canvas-wrap:not([hidden])'); }
+  await page.click('[role=tab]:has-text("ข้อความ")'); await page.fill('textarea', 'x'.repeat(3000)); await page.waitForSelector('.notice-error'); ok((await page.textContent('.notice-error')).includes('ยาวเกินไป') || (await page.textContent('.notice-error')).includes('ยาวเกิน'));
+});
+await test('customisation: size/colour/style/logo; low-contrast warning', async (page) => {
+  await go(page, '/qr'); await page.fill('input[inputmode=url]', 'https://example.com'); await page.fill('input[type=number] >> nth=0', '256'); await page.selectOption('select >> nth=1', 'rounded');
+  await page.waitForSelector('.qr-canvas-wrap:not([hidden])'); const w = await page.evaluate(() => document.querySelector('.qr-canvas-wrap canvas').width); ok(w >= 200 && w <= 256, `canvas ${w}`);
+  await page.evaluate(() => { const i = document.querySelectorAll('input[type=color]'); i[0].value = '#dddddd'; i[0].dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForSelector('.notice-warn');
+});
+
+console.log('\nFile converter (runs in the browser)');
+for (const [f, expectIn] of [['sample.docx', ['# รายงานการประชุม', '## วาระที่ 1', '**ตัวหนา**', '*ตัวเอียง*', '* รายการที่ 1', '1. ขั้นที่ 1', '| สมชาย | การเงิน | 10 |']], ['sample.pptx', ['<!-- Slide number: 1 -->', '# แผนงานประจำปี', '### Notes:', 'บันทึกผู้พูด', '| A | B |']], ['sample.xlsx', ['## งบประมาณ', '| กระดาษ | 5 | 120.5 |', '## Sheet2']], ['sample.csv', ['| ชื่อ | อายุ |', '| สม, หญิง | 25 |']], ['sample.html', ['# หัวข้อ', '**หนา**', '[ลิงก์](https://example.com)', '```', '| a | b |']], ['sample.txt', ['บรรทัดหนึ่ง']], ['english.pdf', ['# Annual Report 2026', '* First point']]]) {
+  await test(`convert ${f} → ${f.replace(/\.[^.]+$/, '.md')} with UI result actions`, async (page) => {
+    await go(page, '/converter'); await page.setInputFiles('input[type=file]', fx(f)); await page.waitForSelector('.notice-success', { timeout: 30000 });
+    const text = await page.inputValue('textarea[aria-label="ผลลัพธ์ Markdown"]'); for (const s of expectIn) ok(text.includes(s), `missing "${s}" in:\n${text}`);
+    const d = await dl(page, () => page.click(`button:has-text("ดาวน์โหลด")`)); eq(d.name, f.replace(/\.[^.]+$/, '.md'), 'download keeps base name'); eq(d.buf.toString('utf8'), text);
+    await page.click('button:has-text("ดูตัวอย่าง")'); await page.waitForSelector('.md-preview:not([hidden]) >> nth=0');
+  });
+}
+await test('drag & drop: file dropped on dashboard routes to the converter', async (page) => {
+  await go(page, '/');
+  const drop = async (name, buf, type) => { await page.evaluate(({ name, b64, type }) => { const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); const dt = new DataTransfer(); dt.items.add(new File([bytes], name, { type })); window.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true })); window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }, { name, b64: buf.toString('base64'), type }); };
+  await drop('sample.docx', fs.readFileSync(fx('sample.docx')), ''); await page.waitForSelector('.notice-success'); eq(await page.evaluate(() => location.hash), '#/converter');
+  await page.goto(`${base}/index.html#/`); await page.waitForSelector('.hero'); await drop('a.md', Buffer.from('# dropped'), ''); await page.waitForSelector('.toast'); eq(await page.evaluate(() => location.hash), '#/');
+});
+console.log('\nConverter — hostile / invalid input (friendly errors, no crash)');
+for (const [f, label, mustHave] of [['fake.docx', 'PDF renamed .docx', 'ไม่ตรงกับนามสกุล'], ['legacy.xls', 'legacy .xls', '.xlsx'], ['encrypted.docx', 'password-protected/legacy OLE', 'รหัสผ่าน'], ['corrupt.docx', 'corrupt zip', 'เสียหาย'], ['bomb.docx', 'zip bomb (350 MB expansion)', 'ใหญ่เกินไป'], ['bomb2.xlsx', 'many-part bomb', 'ไม่ปลอดภัย'], ['xxe.docx', 'XXE / DOCTYPE', 'ไม่ปลอดภัย'], ['empty.pdf', 'empty file', 'ว่างเปล่า']]) {
+  await test(`rejects ${label}`, async (page) => {
+    await go(page, '/converter'); const t0 = Date.now(); await page.setInputFiles('input[type=file]', fx(f)); await page.waitForSelector('.notice-error', { timeout: 30000 });
+    const t = await page.textContent('.notice-error'); ok(t.includes('ไม่สามารถแปลงไฟล์นี้ได้') || t.includes('ว่างเปล่า') || t.includes('ใหญ่เกินไป'), t); ok(t.includes(mustHave) || (await page.textContent('details.tech')).includes(mustHave), `expected "${mustHave}" in: ${t}`);
+    ok(!/500|Internal Server|undefined|\[object/.test(t), 'no technical jargon'); ok(Date.now() - t0 < 20000, 'fails fast'); await page.click('button:has-text("ลองไฟล์อื่น")'); await page.waitForSelector('.dropzone');
+  });
+}
+await test('path-traversal zip entry is neutralised (no crash, nothing read from disk)', async (page) => {
+  await go(page, '/converter'); await page.setInputFiles('input[type=file]', fx('traversal.docx')); await page.waitForSelector('.notice-success, .notice-error, .notice-warn:not(.notice-privacy)', { timeout: 20000 });
+  const t = await page.textContent('#main'); ok(!/root:|passwd|evil/.test(t));
+});
+await test('rejects oversized file (> limit) and unsupported extension', async (page) => {
+  await go(page, '/converter'); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(26 * 1024 * 1024)], 'big.pdf', { type: 'application/pdf' })); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); });
+  await page.waitForSelector('.notice-error'); ok((await page.textContent('.notice-error')).includes('ใหญ่เกินไป'));
+  await page.click('button:has-text("ลองไฟล์อื่น")'); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'run.exe')); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); }); await page.waitForSelector('.toast-error'); ok((await page.textContent('.toast-error')).includes('ไม่รองรับ'));
+});
+await test('MIME/extension mismatch is rejected (image/png declared for .pdf)', async (page) => {
+  await go(page, '/converter'); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(1000)], 'x.pdf', { type: 'image/png' })); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); });
+  await page.waitForSelector('.notice-error'); ok((await page.textContent('.notice-error')).includes('ไม่ตรงกับ'));
+});
+
+console.log('\nSettings & privacy');
+await test('settings: clear local data wipes storage', async (page) => {
+  await go(page, '/qr'); await go(page, '/'); ok((await page.textContent('.recent-list')).includes('QR Code'));
+  await go(page, '/settings'); page.once('dialog', (d) => d.accept()); await page.click('button:has-text("ล้างข้อมูลในเครื่องทั้งหมด")'); await page.waitForTimeout(1200); await page.waitForSelector('#main');
+  const left = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('sand:'))); eq(left.length, 0, `localStorage: ${left}`);
+});
+await test('settings system status: converter engine reports ready', async (page) => {
+  await go(page, '/settings'); await page.click('button:has-text("ตรวจสอบเอนจิน")'); await page.waitForFunction(() => document.body.textContent.includes('พร้อมใช้งาน · JSZip'), null, { timeout: 15000 });
+});
+await test('recent activity is stored locally and shown on dashboard', async (page) => {
+  await go(page, '/qr'); await go(page, '/'); ok((await page.textContent('.recent-list')).includes('QR Code'));
+});
+
+console.log('\nAuthentication (Google sign-in against a mocked backend)');
+const GAS = 'https://script.google.com/macros/s/TEST/exec';
+async function authSetup(ctx, { loginResponse, requireLogin = true }) {
+  const calls = [];
+  await ctx.route((u) => u.pathname === '/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.SAND_CONFIG=${JSON.stringify({ gasUrl: GAS, googleClientId: 'test-client', requireLogin, maxFileSizeMB: 25, conversionTimeoutSec: 60, version: 'dev' })};` }));
+  await ctx.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.google={accounts:{id:{initialize:function(o){window.__cb=o.callback},renderButton:function(el){var b=document.createElement('button');b.textContent='Sign in with Google';b.id='fake-google';b.onclick=function(){window.__cb({credential:'FAKE.ID.TOKEN'})};el.appendChild(b)},disableAutoSelect:function(){}}}};` }));
+  await ctx.route(`${GAS}**`, async (r) => {
+    const req = r.request(); const body = req.method() === 'POST' ? JSON.parse(req.postData() || '{}') : { action: new URL(req.url()).searchParams.get('action') }; calls.push(body);
+    const h = { 'access-control-allow-origin': '*' };
+    if (body.action === 'health') return r.fulfill({ headers: h, contentType: 'application/json', body: JSON.stringify({ success: true, data: { status: 'ok', version: '1.0.0' } }) });
+    if (body.action === 'login') return r.fulfill({ headers: h, contentType: 'application/json', body: JSON.stringify(loginResponse(body)) });
+    if (body.action === 'me') return r.fulfill({ headers: h, contentType: 'application/json', body: JSON.stringify(body.session === 'SESSION-OK' ? { success: true, data: { email: 'a@example.go.th' } } : { success: false, error: { code: 'INVALID_SESSION', message: 'x' } }) });
+    return r.fulfill({ headers: h, contentType: 'application/json', body: '{"success":false,"error":{"code":"UNKNOWN_ACTION","message":"x"}}' });
+  });
+  return calls;
+}
+await test('UNAUTHORIZED: login required → app content is NOT shown until backend accepts', async (page, ctx) => {
+  await authSetup(ctx, { loginResponse: () => ({ success: false, error: { code: 'DOMAIN_NOT_ALLOWED', message: 'x' } }) });
+  await page.goto(`${base}/index.html#/qr`); await page.waitForSelector('#fake-google'); eq(await page.locator('.sidebar').count(), 0); eq(await page.locator('.qr-canvas-wrap').count(), 0);
+  await page.click('#fake-google'); await page.waitForSelector('.login-status.error'); ok((await page.textContent('.login-status')).includes('ไม่ได้อยู่ในโดเมนที่อนุญาต')); eq(await page.locator('.sidebar').count(), 0, 'still locked'); eq(await page.evaluate(() => sessionStorage.getItem('sand:session')), null);
+});
+await test('login success → app opens, user shown, session validated server-side on reload, logout clears it', async (page, ctx) => {
+  const calls = await authSetup(ctx, { loginResponse: () => ({ success: true, data: { session: 'SESSION-OK', exp: Math.floor(Date.now() / 1000) + 3600, user: { email: 'a@example.go.th', name: 'สมชาย ใจดี' } } }) });
+  await page.goto(`${base}/index.html#/`); await page.click('#fake-google'); await page.waitForSelector('.sidebar'); ok((await page.textContent('.user-box')).includes('สมชาย ใจดี'));
+  ok(calls.some((c) => c.action === 'login' && c.idToken === 'FAKE.ID.TOKEN'), 'id token sent to backend'); await page.reload(); await page.waitForSelector('.sidebar'); ok(calls.some((c) => c.action === 'me' && c.session === 'SESSION-OK'), 'session re-validated by backend');
+  await page.evaluate(() => sessionStorage.setItem('sand:session', JSON.stringify({ token: 'FORGED', exp: 9999999999, user: { email: 'x@y.z', name: 'x' } }))); await page.reload(); await page.waitForSelector('#fake-google'); eq(await page.locator('.sidebar').count(), 0, 'forged session rejected by backend');
+});
+await test('backend unreachable at login → friendly Thai error, app stays locked', async (page, ctx) => {
+  await authSetup(ctx, { loginResponse: () => ({}) }); await ctx.route(`${GAS}**`, (r) => r.abort()); await page.goto(`${base}/index.html#/`); await page.click('#fake-google'); await page.waitForSelector('.login-status.error'); ok((await page.textContent('.login-status')).includes('เชื่อมต่อ Backend ไม่ได้')); eq(await page.locator('.sidebar').count(), 0);
+}, { ignore: /Failed to load resource/ });
+await test('backend health check in Settings (no login mode)', async (page, ctx) => {
+  await authSetup(ctx, { requireLogin: false, loginResponse: () => ({}) }); await go(page, '/settings'); await page.click('button:has-text("ตรวจสอบ Backend")'); await page.waitForFunction(() => document.body.textContent.includes('พร้อมใช้งาน · เวอร์ชัน 1.0.0'));
+});
+
+console.log('\nResponsive & offline');
+for (const r of ROUTES) {
+  await test(`mobile 390px: ${r} has no horizontal overflow, bottom nav visible, sidebar hidden`, async (page) => {
+    await go(page, r); eq(await page.locator('.bottomnav').isVisible(), true); eq(await page.locator('.sidebar').isVisible(), false);
+    const overflow = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]); ok(overflow[0] <= overflow[1] + 1, `scrollWidth ${overflow[0]} > ${overflow[1]}`);
+  }, { viewport: { width: 390, height: 800 } });
+}
+await test('PWA: service worker installs; QR and the converter work fully offline', async (page, ctx) => {
+  await go(page, '/'); await page.evaluate(() => navigator.serviceWorker.ready); await page.waitForFunction(() => navigator.serviceWorker.controller || true); await page.reload(); await page.waitForFunction(() => navigator.serviceWorker.controller, null, { timeout: 10000 });
+  await ctx.setOffline(true); await page.reload(); await page.waitForSelector('.hero');
+  await page.goto(`${base}/index.html#/qr`); await page.reload(); await page.fill('input[inputmode=url]', 'offline.example'); await page.waitForSelector('.qr-canvas-wrap:not([hidden])');
+  await page.goto(`${base}/index.html#/converter`); await page.reload(); await page.setInputFiles('input[type=file]', fx('sample.docx')); await page.waitForSelector('.notice-success', { timeout: 20000 });
+  await page.click('button:has-text("แปลงไฟล์อื่น")'); await page.setInputFiles('input[type=file]', fx('english.pdf')); await page.waitForSelector('.notice-success', { timeout: 20000 }); await ctx.setOffline(false);
+});
+await test('security headers & CSP are served by the preview (same as vercel.json)', async (page) => {
+  const res = await page.goto(`${base}/index.html`); const h = res.headers();
+  ok(h['content-security-policy'].includes("object-src 'none'") && h['content-security-policy'].includes("frame-ancestors 'none'")); eq(h['x-content-type-options'], 'nosniff'); eq(h['x-frame-options'], 'DENY'); eq(h['referrer-policy'], 'no-referrer'); ok(h['strict-transport-security'].includes('max-age'));
+  const cfg = await (await page.request.get(`${base}/config.js`)).text(); ok(!/SECRET|secret|password/i.test(cfg), 'no secrets in config.js');
+});
+
+await browser.close(); server.close();
+console.log(`\n${pass} passed, ${failures.length} failed${failures.length ? `\nFailed: ${failures.join('; ')}` : ''}`);
+process.exit(failures.length ? 1 : 0);
