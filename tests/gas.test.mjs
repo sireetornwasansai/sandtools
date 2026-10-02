@@ -106,3 +106,10 @@ test('audit log never contains tokens, secrets or emails', () => {
   assert.ok(!all.includes('SUPER-SECRET-TOKEN')); assert.ok(!all.includes('secret-secret')); assert.ok(!all.includes('somchai'));
   const entry = JSON.parse(e.logs[0]); for (const k of ['ts', 'requestId', 'operation', 'success', 'ms']) assert.ok(k in entry);
 });
+
+test('log/archive require a valid session and neutralise formula injection', () => {
+  const rows = []; const env = makeEnv({ ...base, LOG_SHEET_ID: 'sheet', DRIVE_FOLDER_ID: 'folder' });
+  assert.equal(env.post({ action: 'log', session: 'bad', tool: 'qr', op: 'x' }).error.code, 'INVALID_SESSION');
+  assert.equal(env.post({ action: 'archive', session: 'bad', name: 'a.txt', data: 'AAAA' }).error.code, 'INVALID_SESSION');
+  assert.equal(env.post('{"action":"log","pad":"' + 'x'.repeat(9000) + '"}').error.code, 'REQUEST_TOO_LARGE');
+});
