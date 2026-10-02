@@ -14,6 +14,13 @@ const app = document.getElementById('app');
 let main;
 let unmountCurrent = null;
 let routeToken = 0;
+const bar = h('div', { id: 'route-bar', 'aria-hidden': 'true' });
+let barTimer = 0;
+const barStart = () => { clearTimeout(barTimer); bar.className = 'run'; };
+const barEnd = () => { bar.className = 'end'; barTimer = window.setTimeout(() => { bar.className = ''; }, 400); };
+const skeleton = () => h('div', { class: 'page', role: 'status', 'aria-label': 'กำลังโหลด' },
+  h('div', { class: 'skeleton', style: 'height:2rem;width:40%;margin-bottom:.75rem' }), h('div', { class: 'skeleton', style: 'height:1rem;width:62%;margin-bottom:1.5rem' }),
+  h('div', { class: 'tool-grid' }, [1, 2, 3].map(() => h('div', { class: 'skeleton', style: 'height:120px' }))));
 
 function wordmark() {
   return h('a', { class: 'wordmark', href: '#/', 'aria-label': `${APP_NAME} — หน้าแรก` },
@@ -57,7 +64,7 @@ function buildShell() {
       h('div', { class: 'nav-group nav-bottom' }, navLink(SETTINGS_ROUTE), collapseBtn)),
     (main = h('main', { id: 'main', class: 'main', tabindex: '-1' })),
     h('nav', { class: 'bottomnav', 'aria-label': 'เมนูหลัก (มือถือ)' }, navLink(HOME_ROUTE, 'bn-link'), ...TOOLS.map((t) => navLink(t, 'bn-link'))));
-  app.replaceChildren(shell);
+  app.replaceChildren(shell, bar);
   return shell;
 }
 
@@ -74,7 +81,8 @@ async function route() {
   if (unmountCurrent) { try { await unmountCurrent(); } catch { /* ignore */ } unmountCurrent = null; }
   setActive(r.id);
   document.title = r.id === 'home' ? `${APP_NAME} — เครื่องมือดิจิทัลสำหรับงานสำนักงาน` : `${r.fullTitle} · ${APP_NAME}`;
-  main.replaceChildren(h('div', { class: 'loading', role: 'status' }, h('span', { class: 'bar' }), 'กำลังโหลด…'));
+  barStart();
+  main.replaceChildren(skeleton());
   try {
     const mod = await r.load();
     if (token !== routeToken) return;
@@ -83,10 +91,11 @@ async function route() {
     const un = await mod.mount(main, { params, navigate });
     if (token !== routeToken) { if (typeof un === 'function') un(); return; }
     unmountCurrent = typeof un === 'function' ? un : null;
+    barEnd();
     main.focus({ preventScroll: true });
     main.scrollTop = 0; window.scrollTo(0, 0);
   } catch (e) {
-    console.error(e);
+    console.error(e); barEnd();
     main.replaceChildren(h('div', { class: 'notice notice-error', role: 'alert' }, svgIcon(ICONS.alert),
       h('div', null, h('strong', null, 'ไม่สามารถเปิดหน้านี้ได้'), h('p', null, 'กรุณาลองโหลดหน้าใหม่ หากยังพบปัญหาให้แจ้งผู้ดูแลระบบ'),
         h('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, 'โหลดหน้าใหม่'))));
