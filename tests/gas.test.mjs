@@ -113,3 +113,8 @@ test('log/archive require a valid session and neutralise formula injection', () 
   assert.equal(env.post({ action: 'archive', session: 'bad', name: 'a.txt', data: 'AAAA' }).error.code, 'INVALID_SESSION');
   assert.equal(env.post('{"action":"log","pad":"' + 'x'.repeat(9000) + '"}').error.code, 'REQUEST_TOO_LARGE');
 });
+
+test('history requires a valid session', () => {
+  const env = makeEnv({ ...base, LOG_SHEET_ID: 'sheet' });
+  assert.equal(env.post({ action: 'history', session: 'bad' }).error.code, 'INVALID_SESSION');
+});
