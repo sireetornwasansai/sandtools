@@ -2,11 +2,14 @@ import { h, field, svgIcon, debounce } from '../core/dom.js';
 import { ICONS } from '../core/icons.js';
 import { downloadBlob, copyText } from '../core/download.js';
 import { toast } from '../core/toast.js';
+import { record } from '../core/logger.js';
 import { buildMatrix, PAYLOADS, toSvg, drawToCanvas, byteLength, MAX_BYTES, contrastRatio } from './qr-engine.js';
 
 const TYPES = [
   ['url', 'ลิงก์ (URL)'], ['text', 'ข้อความ'], ['wifi', 'Wi-Fi'], ['email', 'อีเมล'], ['phone', 'โทรศัพท์'], ['sms', 'SMS'], ['vcard', 'นามบัตร (vCard)']
 ];
+const CATS = [['general', 'ทั่วไป', ''], ['vaccine', 'งานวัคซีน', 'ลงทะเบียนรับวัคซีน'], ['hrd', 'งาน HRD / อบรม', 'ลงทะเบียนอบรม'], ['queue', 'ลงทะเบียน / นัดหมาย / คิว', 'จองคิวเข้ารับบริการ'],
+  ['survey', 'แบบประเมิน / ความพึงพอใจ', 'ประเมินความพึงพอใจ'], ['asset', 'ครุภัณฑ์ / ทรัพย์สิน', 'ทะเบียนครุภัณฑ์'], ['doc', 'เอกสาร / คู่มือ', 'ดาวน์โหลดเอกสาร']];
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 export function mount(root) {
@@ -68,6 +71,8 @@ export function mount(root) {
     img.src = url;
   }
 
+  const catIn = h('select', { 'aria-label': 'หมวดงาน', onchange: () => { capIn.placeholder = (CATS.find((c) => c[0] === catIn.value) || [])[2] || 'เช่น สแกนเพื่อลงทะเบียน'; schedule(); } }, CATS.map(([v, t]) => h('option', { value: v }, t)));
+  const capIn = h('input', { type: 'text', maxlength: '40', placeholder: 'เช่น สแกนเพื่อลงทะเบียน', oninput: () => schedule() });
   /* output */
   const canvas = h('canvas', { role: 'img', 'aria-label': 'ตัวอย่าง QR Code' });
   const placeholder = h('p', { class: 'muted', style: 'padding:2rem;text-align:center' }, 'กรอกข้อมูลทางซ้ายเพื่อสร้าง QR Code');
@@ -110,10 +115,14 @@ export function mount(root) {
     if (logoImage && ecIn.value !== 'H') warn.append(h('div', { class: 'notice notice-warn' }, svgIcon(ICONS.alert), h('div', null, 'มีโลโก้กลาง QR แนะนำให้ใช้ระดับแก้ไขข้อผิดพลาด H')));
   }
 
-  function fileBase() { return ({ url: 'qr-link', text: 'qr-text', wifi: 'qr-wifi', email: 'qr-email', phone: 'qr-phone', sms: 'qr-sms', vcard: 'qr-contact' })[type]; }
+  function fileBase() { return (catIn.value !== 'general' ? `${catIn.value}-` : '') + ({ url: 'qr-link', text: 'qr-text', wifi: 'qr-wifi', email: 'qr-email', phone: 'qr-phone', sms: 'qr-sms', vcard: 'qr-contact' })[type]; }
   function downloadPng() {
     if (!current) return;
-    canvas.toBlob((b) => { if (b) downloadBlob(b, `${fileBase()}.png`); else toast('สร้างไฟล์ PNG ไม่สำเร็จ', 'error'); }, 'image/png');
+    const cap = capIn.value.trim(); let src = canvas;
+    if (cap) { const o = current.opts; const bar = Math.round(o.size * 0.11); src = document.createElement('canvas'); src.width = canvas.width; src.height = canvas.height + bar;
+      const g = src.getContext('2d'); g.fillStyle = o.bg; g.fillRect(0, 0, src.width, src.height); g.drawImage(canvas, 0, 0); g.fillStyle = o.fg; g.font = `600 ${Math.round(bar * 0.5)}px "Noto Sans Thai", Tahoma, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(cap, src.width / 2, canvas.height + bar / 2, src.width * 0.92); }
+    record('qr', 'download_png', { fileName: `${fileBase()}.png`, extra: { type, category: catIn.value, caption: cap } });
+    src.toBlob((b) => { if (b) downloadBlob(b, `${fileBase()}.png`); else toast('สร้างไฟล์ PNG ไม่สำเร็จ', 'error'); }, 'image/png');
   }
   function downloadSvg() {
     if (!current) return;
@@ -135,6 +144,7 @@ export function mount(root) {
     h('div', { class: 'two-col' },
       h('div', null,
         h('div', { class: 'card' }, tabs, fieldHost),
+        h('div', { class: 'card' }, h('h2', null, 'หมวดงานและข้อความใต้ QR'), h('div', { class: 'grid-2' }, field('หมวดงาน', catIn, 'ตั้งชื่อไฟล์ตามหมวด เช่น vaccine-qr-link.png').root, field('ข้อความใต้ QR (ไม่บังคับ)', capIn).root)),
         h('div', { class: 'card' }, h('h2', null, 'ปรับแต่ง'),
           h('div', { class: 'grid-2' },
             field('ขนาดภาพ (px)', sizeIn).root, field('ขอบขาว (โมดูล)', marginIn).root,

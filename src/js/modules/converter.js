@@ -5,6 +5,7 @@ import { downloadText, copyText } from '../core/download.js';
 import { toast } from '../core/toast.js';
 import { takePendingFile } from '../core/handoff.js';
 import { privacyNotice, notice } from '../core/notices.js';
+import { record, recording, recordingNote } from '../core/logger.js';
 import { convertFile, detectFormat, FORMATS, ACCEPT } from './converters/index.js';
 
 const STAGES = [['reading', 'อ่านไฟล์'], ['converting', 'กำลังแปลง'], ['done', 'เสร็จเรียบร้อย']];
@@ -66,6 +67,7 @@ export function mount(root, _ctx) {
       });
       steps.replaceChildren(stepList('done')); setBar(1);
       showResult(file, r);
+      record('converter', 'convert', { fileName: file.name, sizeIn: file.size, sizeOut: r.markdown.length, inputs: [file], outputs: [new Blob([r.markdown], { type: 'text/markdown' })], outputName: r.filename });
     } catch (e) {
       if (!(e && e.name === 'ConversionError')) console.error(e); // expected, user-facing failures are not logged as errors
       statusHost.replaceChildren(h('div', { class: 'card' }, meta), friendlyError(e, file));
@@ -97,7 +99,7 @@ export function mount(root, _ctx) {
 
   root.append(h('div', { class: 'page' },
     h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'File Converter'), h('p', null, 'แปลงเอกสารเป็น Markdown — วางไฟล์ แปลง แล้วดาวน์โหลดหรือคัดลอกได้ทันที'))),
-    privacyNotice({ detail: 'การแปลงทำงานในเบราว์เซอร์ของคุณทั้งหมด ไฟล์ไม่ถูกอัปโหลดหรือเก็บไว้ที่เซิร์ฟเวอร์ใด ๆ' }),
+    privacyNotice({ detail: recording() ? `การแปลงทำงานในเบราว์เซอร์ของคุณ · ${recordingNote()}` : 'การแปลงทำงานในเบราว์เซอร์ของคุณทั้งหมด ไฟล์ไม่ถูกอัปโหลดหรือเก็บไว้ที่เซิร์ฟเวอร์ใด ๆ' }),
     zoneHost, statusHost, resultHost,
     h('details', { class: 'card', style: 'margin-top:1rem' }, h('summary', null, 'ข้อจำกัดของการแปลง'),
       h('ul', null,
