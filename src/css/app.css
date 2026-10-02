@@ -220,3 +220,24 @@ table.kv { border-collapse: collapse; width: 100%; } table.kv th, table.kv td { 
 @media (max-width: 480px) { .bn-link .nav-label { font-size: .62rem; } .hero h1 { font-size: 1.5rem; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @media print { .topbar, .sidebar, .bottomnav { display: none !important; } }
+
+/* ---- Clean white refresh ---- */
+:root { --bg: #f7f9fb; --border: #e3e8ee; --primary: #0f5c9e; --primary-hover: #0b4a82; --accent: #0b7a7c; --radius: 12px; --shadow: 0 1px 2px rgb(16 32 52 / .04), 0 4px 16px rgb(16 32 52 / .05); }
+.topbar { background: var(--surface); color: var(--text); border-bottom: 1px solid var(--border); }
+:root[data-theme="dark"] .topbar { background: var(--surface); }
+.topbar .icon-btn, .topbar .search-btn { color: var(--text); }
+.wm-sand { color: var(--primary); } :root[data-theme="dark"] .wm-sand { color: var(--accent); }
+.search-btn { background: var(--surface-2); border-color: var(--border); } .search-btn:hover { background: var(--border); } .search-btn kbd { color: var(--muted); border-color: var(--border-strong); }
+.badge { background: var(--surface-2); color: var(--muted); }
+.sidebar { border-right-color: var(--border); }
+.nav-link[aria-current="page"] { background: color-mix(in srgb, var(--primary) 10%, transparent); color: var(--primary); }
+:root[data-theme="dark"] .nav-link[aria-current="page"] { color: var(--accent); }
+.main { padding: 2rem 1.5rem; } h1 { font-weight: 700; letter-spacing: -.01em; }
+.card, .tool-card { border-color: var(--border); }
+.tool-card { padding: 1.25rem; transition: border-color .15s, box-shadow .15s; } .tool-card:hover { box-shadow: 0 6px 20px rgb(16 32 52 / .08); }
+.tool-card .icon { width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.btn { border-radius: 10px; } .btn-primary { box-shadow: 0 1px 2px rgb(15 92 158 / .3); }
+.dropzone { border-color: var(--border-strong); background: var(--surface); }
+.result-row { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; padding: .6rem 0; border-bottom: 1px solid var(--border); } .result-row:last-child { border-bottom: 0; } .result-row b { flex: 1 1 200px; overflow-wrap: anywhere; }
+.results { margin-top: 1rem; } .results:has(.result-row:empty), .results:not(:has(.result-row)) { display: none; }
+textarea[readonly] { background: var(--surface-2); }
