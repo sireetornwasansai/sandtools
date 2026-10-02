@@ -12,6 +12,7 @@ export function buildConfig(env, version) {
     googleApiKey: (env.SAND_GOOGLE_API_KEY || '').trim(),
     googleAppId: (env.SAND_GOOGLE_APP_ID || '').trim(),
     requireLogin: bool(env.SAND_REQUIRE_LOGIN),
+    archiveFiles: env.SAND_ARCHIVE_FILES === undefined ? true : bool(env.SAND_ARCHIVE_FILES),
     maxFileSizeMB: num(env.SAND_MAX_FILE_SIZE_MB, 25),
     conversionTimeoutSec: num(env.SAND_CONVERSION_TIMEOUT_SEC, 60),
     version
