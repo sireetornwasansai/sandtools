@@ -13,6 +13,7 @@ export function h(tag, props, ...children) {
       if (k === 'class') el.className = v;
       else if (k === 'text') el.textContent = v;
       else if (k === 'dataset') Object.assign(el.dataset, v);
+      else if (k === 'onclick' && typeof v === 'function') el.addEventListener('click', (e) => { const r = v(e); if (r && typeof r.then === 'function') trackBusy(el, r); });
       else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
       else if (k === 'value' || k === 'checked' || k === 'disabled' || k === 'selected') /** @type {any} */ (el)[k] = v;
       else el.setAttribute(k, v === true ? '' : String(v));
@@ -84,4 +85,12 @@ export function loadScript(src) {
     }));
   }
   return scriptCache.get(src);
+}
+
+/** Show a spinner on a button while an async click handler runs (applies to every h() button whose onclick returns a Promise). */
+function trackBusy(el, promise) {
+  if (!el.classList.contains('btn')) return;
+  el.classList.add('is-loading'); el.setAttribute('aria-busy', 'true');
+  const done = () => { el.classList.remove('is-loading'); el.removeAttribute('aria-busy'); };
+  promise.then(done, done);
 }
