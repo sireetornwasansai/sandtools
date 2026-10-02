@@ -4,8 +4,9 @@ import { ICONS } from './core/icons.js';
 import { config, APP_NAME } from './core/config.js';
 import { getSettings, setSettings, addRecent } from './core/store.js';
 import { recording } from './core/logger.js';
-import { TOOLS, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
+import { TOOLS, LIBRARY_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
 import { openPalette } from './core/palette.js';
+import { backendConfigured } from './core/api.js';
 import { loginRequired, validateSession, renderLogin, currentUser, signOut } from './core/auth.js';
 import { setPendingFile, routeForFile } from './core/handoff.js';
 import { toast } from './core/toast.js';
@@ -60,7 +61,7 @@ function buildShell() {
     h('header', { class: 'topbar' }, wordmark(), searchBtn, h('div', { class: 'spacer' }), themeBtn,
       h('a', { class: 'icon-btn', href: `#${SETTINGS_ROUTE.path}`, 'aria-label': 'ตั้งค่า', title: 'ตั้งค่า' }, svgIcon(ICONS.settings)), userBox),
     h('nav', { class: 'sidebar', 'aria-label': 'เมนูหลัก' },
-      h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), ...TOOLS.map((t) => navLink(t)), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
+      h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), ...TOOLS.map((t) => navLink(t)), ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
       h('div', { class: 'nav-group nav-bottom' }, navLink(SETTINGS_ROUTE), collapseBtn)),
     (main = h('main', { id: 'main', class: 'main', tabindex: '-1' })),
     h('nav', { class: 'bottomnav', 'aria-label': 'เมนูหลัก (มือถือ)' }, navLink(HOME_ROUTE, 'bn-link'), ...TOOLS.map((t) => navLink(t, 'bn-link'))));
