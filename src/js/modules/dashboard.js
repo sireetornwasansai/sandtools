@@ -19,7 +19,7 @@ export function mount(root) {
   root.append(h('div', { class: 'page' },
     h('section', { class: 'hero' },
       h('h1', null, 'SAND Office Tools'),
-      h('p', null, 'เครื่องมือดิจิทัลสำหรับงานสำนักงาน ในที่เดียว'),
+      h('p', null, 'เครื่องมือดิจิทัลสำหรับงานสำนักงาน ในที่เดียว — แปลงไฟล์ จัดการ PDF ย่อรูป สร้าง QR และอื่น ๆ ทำงานในเบราว์เซอร์ของคุณ'),
       h('button', { class: 'btn', type: 'button', onclick: openPalette }, svgIcon('<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>', 18), 'ค้นหาเครื่องมือ (Ctrl+K)')),
     h('div', { class: 'tool-grid' }, cards),
     tools.length ? h('section', { class: 'block' }, h('h2', null, 'ใช้งานล่าสุด'), chips(tools)) : null,

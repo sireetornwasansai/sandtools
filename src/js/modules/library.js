@@ -58,10 +58,10 @@ function ensureCss() {
 }
 
 /** Call the backend "library" action. A dead session signs the user out so the next reload shows the login page. */
-async function call(op, params = {}) {
+async function call(op, params = {}, timeout = 90000) {
   const s = getSession();
   if (!s) { const e = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); e.code = 'INVALID_SESSION'; throw e; }
-  try { return (await gasCall('library', { session: s.token, op, ...params }, 90000)).data; }
+  try { return (await gasCall('library', { session: s.token, op, ...params }, timeout)).data; }
   catch (e) { if (e && (e.code === 'INVALID_SESSION' || e.code === 'DOMAIN_NOT_ALLOWED')) signOut(); throw e; }
 }
 
@@ -133,14 +133,15 @@ export async function mount(root) {
   if (!s) { host.append(notice('warn', 'ต้องเข้าสู่ระบบก่อน', 'คลังข้อมูลแสดงเฉพาะผู้ที่ล็อกอินแล้ว')); return () => {}; }
 
   const saved = memory.get();
-  const st = { view: saved.view === 'recent' ? 'recent' : 'folders', folderId: typeof saved.folderId === 'string' ? saved.folderId : '', kind: '', q: '', sort: saved.sort || 'new', recent: null, folder: null, admin: false, canTrash: true };
+  const st = { view: ['recent', 'search'].includes(saved.view) ? saved.view : 'folders', folderId: typeof saved.folderId === 'string' ? saved.folderId : '', kind: '', tag: '', q: '', search: null, sort: saved.sort || 'new', recent: null, folder: null, admin: false, canTrash: true };
   let seq = 0;
 
   const tabRecent = h('button', { class: 'tab', type: 'button', role: 'tab', onclick: () => setView('recent') }, 'ล่าสุด');
   const tabFolders = h('button', { class: 'tab', type: 'button', role: 'tab', onclick: () => setView('folders') }, 'โฟลเดอร์');
-  const tabs = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'มุมมองคลังข้อมูล' }, tabRecent, tabFolders);
+  const tabSearch = h('button', { class: 'tab', type: 'button', role: 'tab', onclick: () => setView('search') }, 'ค้นหาทั้งคลัง');
+  const tabs = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'มุมมองคลังข้อมูล' }, tabRecent, tabFolders, tabSearch);
   const search = h('input', { type: 'search', 'aria-label': 'ค้นหา' });
-  search.addEventListener('input', debounce(() => { st.q = search.value.trim().toLowerCase(); draw(); }, 150));
+  search.addEventListener('input', debounce(() => { st.q = search.value.trim().toLowerCase(); if (st.view === 'search') loadSearch(true); else draw(); }, 300));
   const refresh = h('button', { class: 'btn', type: 'button', onclick: () => reload() }, svgIcon(ICONS.rotate, 18), 'รีเฟรช');
   const crumbs = h('nav', { class: 'lib-crumbs', 'aria-label': 'ตำแหน่งโฟลเดอร์' });
   const sortSel = h('select', { 'aria-label': 'เรียงลำดับ', onchange: () => { st.sort = sortSel.value; memory.set({ sort: st.sort }); draw(); } },
@@ -148,10 +149,12 @@ export async function mount(root) {
   sortSel.value = st.sort;
   const newBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => newFolder() }, svgIcon(ICONS.plus, 18), 'โฟลเดอร์ใหม่');
   const folderBar = h('div', { class: 'lib-folderbar' }, crumbs, h('div', { class: 'spacer' }), newBtn, sortSel);
+  const tagRow = h('div', { class: 'chip-row', role: 'group', 'aria-label': 'กรองตามแท็ก' });
   const chips = h('div', { class: 'chip-row', role: 'group', 'aria-label': 'กรองตามประเภทไฟล์' });
   const list = h('div', { class: 'hist-list' });
   const foot = h('p', { class: 'hint' });
-  host.append(h('div', { class: 'card hist-card' }, tabs, h('div', { class: 'hist-tools' }, search, refresh), folderBar, chips, list, foot));
+  const reindexBtn = h('button', { class: 'btn btn-sm', type: 'button', hidden: true, onclick: () => reindex() }, svgIcon(ICONS.rotate, 16), 'สร้างดัชนีค้นหาใหม่');
+  host.append(h('div', { class: 'card hist-card' }, tabs, h('div', { class: 'hist-tools' }, search, refresh), folderBar, tagRow, chips, list, h('div', { class: 'btn-row' }, foot, reindexBtn)));
 
   const skeleton = () => list.replaceChildren(...[1, 2, 3, 4].map(() => h('div', { class: 'skeleton', style: 'height:56px;margin-bottom:.5rem' })));
   const showError = (e) => {
@@ -161,12 +164,12 @@ export async function mount(root) {
   };
 
   function setView(v) {
-    st.view = v; st.kind = ''; memory.set({ view: v });
+    st.view = v; st.kind = ''; st.tag = ''; memory.set({ view: v });
     search.value = ''; st.q = '';
-    if (v === 'recent' && !st.recent) loadRecent(); else if (v === 'folders' && !st.folder) loadFolder(st.folderId); else draw();
+    if (v === 'recent' && !st.recent) loadRecent(); else if (v === 'folders' && !st.folder) loadFolder(st.folderId); else if (v === 'search') loadSearch(true); else draw();
   }
-  function reload() { return st.view === 'recent' ? loadRecent() : loadFolder(st.folderId); }
-  /** After a change both views may be stale. */
+  function reload() { return st.view === 'recent' ? loadRecent() : st.view === 'search' ? loadSearch(true) : loadFolder(st.folderId); }
+  /** After a change every view may be stale. */
   async function changed() { st.recent = null; await reload(); }
 
   async function loadRecent() {
@@ -186,12 +189,32 @@ export async function mount(root) {
       showError(e);
     }
   }
+  async function loadSearch(reset) {
+    const my = ++seq;
+    if (reset) { skeleton(); draw(true); }
+    try {
+      const d = await call('search', { q: search.value.trim(), tag: st.tag, offset: reset ? 0 : st.search.next, limit: 20 });
+      if (my !== seq) return;
+      if (reset) st.search = { items: d.items, next: d.next, total: d.total, tags: d.tags || (st.search ? st.search.tags : []), indexed: d.indexed, builtAt: d.builtAt };
+      else { st.search.items.push(...d.items); st.search.next = d.next; st.search.total = d.total; }
+      st.admin = d.admin; draw();
+    } catch (e) { if (my === seq) showError(e); }
+  }
+  async function reindex() {
+    if (!(await confirmBox({ title: 'สร้างดัชนีค้นหาใหม่?', message: 'ระบบจะสแกนทุกโฟลเดอร์ในคลังเพื่ออัปเดตดัชนี ใช้เวลาตั้งแต่ไม่กี่วินาทีถึงหลายนาที ขึ้นอยู่กับจำนวนไฟล์', confirm: 'เริ่มสร้าง' }))) return;
+    reindexBtn.disabled = true; toast('กำลังสร้างดัชนี… อย่าปิดหน้านี้', 'info', 4000);
+    try {
+      const r = await call('reindex', {}, 330000);
+      toast(r.done ? `สร้างดัชนีเสร็จแล้ว (${r.indexed} รายการ)` : `ยังไม่เสร็จ เหลืออีก ${r.remaining} โฟลเดอร์ — กดอีกครั้งเพื่อทำต่อ`, r.done ? 'success' : 'info', 6000);
+      await loadSearch(true);
+    } catch (e) { toast(e.message, 'error', 6000); } finally { reindexBtn.disabled = false; }
+  }
   function openFolder(id) { st.kind = ''; search.value = ''; st.q = ''; st.view = 'folders'; memory.set({ view: 'folders' }); loadFolder(id); }
 
   /* ---- drawing ---- */
   function filtered(items) {
-    return items.filter((e) => (!st.kind || (e.kind === 'file' && kindOf(e) === st.kind)) &&
-      (!st.q || `${e.name} ${e.note || ''} ${e.folderName || ''} ${TOOL_NAME[e.tool] || e.tool || ''} ${e.email || ''}`.toLowerCase().includes(st.q)));
+    return items.filter((e) => (!st.kind || (e.kind === 'file' && kindOf(e) === st.kind)) && (!st.tag || (e.tags || []).some((t) => t.toLowerCase() === st.tag.toLowerCase())) &&
+      (st.view === 'search' || !st.q || `${e.name} ${e.note || ''} ${(e.tags || []).join(' ')} ${e.folderName || ''} ${TOOL_NAME[e.tool] || e.tool || ''} ${e.email || ''}`.toLowerCase().includes(st.q)));
   }
   function sorted(items) {
     const byName = (a, b) => a.name.localeCompare(b.name, 'th');
@@ -205,15 +228,37 @@ export async function mount(root) {
     chips.replaceChildren(...[['', 'ทุกประเภท', total], ...Object.keys(counts).map((k) => [k, KIND_LABEL[k], counts[k]])].map(([k, label, n]) =>
       h('button', { class: 'chip', type: 'button', 'aria-pressed': String(st.kind === k), onclick: () => { st.kind = k; draw(); } }, `${label} `, h('span', null, n))));
   }
+  /** Tag filter row. In the search view the list comes from the server (whole library), elsewhere from the items on screen. */
+  function tagCounts(items) {
+    const m = new Map(); items.forEach((e) => (e.tags || []).forEach((t) => { const k = t.toLowerCase(); const c = m.get(k) || { name: t, n: 0 }; c.n += 1; m.set(k, c); }));
+    return [...m.values()].sort((a, b) => b.n - a.n);
+  }
+  function knownTags() {
+    const all = [...(st.search ? st.search.tags : []), ...tagCounts([...(st.folder ? st.folder.items : []), ...(st.recent || []), ...(st.search ? st.search.items : [])])];
+    const seen = new Set(); return all.filter((t) => { const k = t.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).map((t) => t.name);
+  }
+  function drawTags(list) {
+    if (!list.length) { tagRow.replaceChildren(); return; }
+    tagRow.replaceChildren(h('span', { class: 'muted lib-tag-label' }, 'แท็ก'), ...list.slice(0, 24).map((t) =>
+      h('button', { class: 'chip lib-tagchip', type: 'button', 'aria-pressed': String(st.tag.toLowerCase() === t.name.toLowerCase()), onclick: () => {
+        st.tag = st.tag.toLowerCase() === t.name.toLowerCase() ? '' : t.name; if (st.view === 'search') loadSearch(true); else draw(); } }, `#${t.name} `, h('span', null, t.n))));
+  }
 
   function draw(loadingOnly = false) {
-    const recent = st.view === 'recent';
-    tabRecent.setAttribute('aria-selected', String(recent)); tabFolders.setAttribute('aria-selected', String(!recent));
-    folderBar.hidden = recent; sortSel.hidden = recent;
-    search.placeholder = recent ? 'ค้นหาชื่อไฟล์ โฟลเดอร์ หรือเครื่องมือ…' : 'ค้นหาในโฟลเดอร์นี้…';
-    if (loadingOnly) { if (!recent) drawCrumbs(); return; }
-    if (recent) { drawChips(st.recent || []); drawRecent(); foot.textContent = 'แสดงไฟล์ที่ระบบเก็บสำเนาไว้ล่าสุด 30 รายการ (เรียงตามเวลาแก้ไขล่าสุด) — ไฟล์ที่นำมาวางเองใน Drive ให้ดูในมุมมอง "โฟลเดอร์"'; return; }
-    drawCrumbs(); drawChips(st.folder.items); drawFolder();
+    const v = st.view;
+    tabRecent.setAttribute('aria-selected', String(v === 'recent')); tabFolders.setAttribute('aria-selected', String(v === 'folders')); tabSearch.setAttribute('aria-selected', String(v === 'search'));
+    folderBar.hidden = v !== 'folders'; sortSel.hidden = v !== 'folders';
+    reindexBtn.hidden = !(v === 'search' && st.admin);
+    search.placeholder = v === 'recent' ? 'ค้นหาชื่อไฟล์ โฟลเดอร์ หรือเครื่องมือ…' : v === 'search' ? 'ค้นหาชื่อไฟล์ แท็ก หรือหมายเหตุ ทั้งคลัง…' : 'ค้นหาในโฟลเดอร์นี้…';
+    if (loadingOnly) { if (v === 'folders') drawCrumbs(); return; }
+    if (v === 'recent') { drawTags(tagCounts(st.recent || [])); drawChips(st.recent || []); drawRecent(); foot.textContent = 'แสดงไฟล์ที่ระบบเก็บสำเนาไว้ล่าสุด 30 รายการ (เรียงตามเวลาแก้ไขล่าสุด) — ไฟล์ที่นำมาวางเองใน Drive ให้ดูในมุมมอง "โฟลเดอร์" หรือ "ค้นหาทั้งคลัง"'; return; }
+    if (v === 'search') {
+      const s = st.search; if (!s) return;
+      drawTags(s.tags || []); drawChips(s.items); drawSearch();
+      foot.textContent = `ดัชนี ${s.indexed || 0} รายการ · อัปเดตล่าสุด ${s.builtAt ? when(s.builtAt) : 'ยังไม่เคยสร้างทั้งระบบ'} · ไฟล์ที่นำมาวางเองใน Drive จะค้นเจอหลังระบบสร้างดัชนีรอบถัดไป`;
+      return;
+    }
+    drawCrumbs(); drawTags(tagCounts(st.folder.items)); drawChips(st.folder.items); drawFolder();
     foot.textContent = st.folder.truncated ? 'โฟลเดอร์นี้มีรายการมาก แสดงเพียงส่วนแรก — แบ่งไฟล์ออกเป็นโฟลเดอร์ย่อยเพื่อให้ค้นหาง่ายขึ้น' : (st.folder.canTrash ? 'การลบ = ย้ายไปถังขยะของ Drive (กู้คืนได้ภายใน 30 วัน)' : 'การลบไฟล์จำกัดไว้เฉพาะผู้ดูแลระบบ');
   }
 
@@ -242,18 +287,30 @@ export async function mount(root) {
     list.replaceChildren(...shown.map((e) => row(e, { showWhere: true })));
   }
 
+  function drawSearch() {
+    const s = st.search; const shown = filtered(s.items);
+    if (!shown.length) {
+      list.replaceChildren(empty(!s.indexed ? 'ดัชนีค้นหายังว่าง — ผู้ดูแลระบบต้องรัน setupSearchIndex() ใน Apps Script หรือกด "สร้างดัชนีค้นหาใหม่"'
+        : (search.value.trim() || st.tag) ? 'ไม่พบรายการที่ตรงกับคำค้นหรือแท็กนี้' : 'ยังไม่มีรายการในดัชนี'));
+      return;
+    }
+    list.replaceChildren(...shown.map((e) => row(e, { showWhere: true })),
+      s.next != null ? h('button', { class: 'btn lib-more', type: 'button', onclick: () => loadSearch(false) }, `แสดงเพิ่ม (พบทั้งหมด ${s.total} รายการ)`) : null);
+  }
+
   function row(e, { showWhere }) {
     const isFolder = e.kind === 'folder';
     const p = parseName(e.name);
     const kind = isFolder ? 'folder' : kindOf(e);
     const tl = TOOLS.find((t) => t.id === e.tool);
     const meta = isFolder
-      ? [e.updated ? `แก้ไข ${ago(e.updated)}` : '', e.note].filter(Boolean).join(' · ')
-      : [KIND_LABEL[kind], formatBytes(Number(e.size) || 0), `แก้ไข ${ago(e.updated)}`, showWhere && e.folderName ? `ใน ${e.folderName}` : '', showWhere && st.admin && e.email ? e.email : '', !showWhere && e.note ? e.note : ''].filter(Boolean).join(' · ');
+      ? [showWhere && e.path ? `ใน ${e.path}` : '', e.updated ? `แก้ไข ${ago(e.updated)}` : '', e.note].filter(Boolean).join(' · ')
+      : [KIND_LABEL[kind], formatBytes(Number(e.size) || 0), `แก้ไข ${ago(e.updated)}`, showWhere && (e.path || e.folderName) ? `ใน ${e.path || e.folderName}` : '', showWhere && st.admin && e.email ? e.email : '', !showWhere && e.note ? e.note : ''].filter(Boolean).join(' · ');
     const main = h('button', { class: 'lib-main', type: 'button', onclick: () => (isFolder ? openFolder(e.id) : openDrawer(e)) },
       h('span', { class: `hist-ico${isFolder ? ' lib-ico-folder' : ''}` }, svgIcon(isFolder ? ICONS.folder : ICONS.file, 20)),
       h('span', { class: 'hist-main' }, h('b', { title: e.name }, p.title), h('small', { class: 'muted' }, meta)));
     return h('div', { class: 'lib-row' }, main,
+      ...(e.tags || []).slice(0, 3).map((t) => h('button', { class: 'pill lib-tag', type: 'button', title: `กรองด้วยแท็ก ${t}`, onclick: () => { st.tag = t; if (st.view === 'search') loadSearch(true); else draw(); } }, `#${t}`)),
       p.role ? h('span', { class: 'pill' }, p.role === 'output' ? 'ผลลัพธ์' : 'ต้นฉบับ') : null,
       tl && showWhere ? h('span', { class: 'pill lib-pill-tool' }, svgIcon(tl.icon, 14), tl.title) : null,
       isFolder ? null : h('a', { class: 'icon-btn lib-act', href: e.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `เปิด ${p.title} ใน Drive`, title: 'เปิดใน Drive' }, svgIcon(I.out, 18)),
@@ -314,12 +371,28 @@ export async function mount(root) {
     const noteIn = h('textarea', { rows: 4, maxlength: 500, placeholder: 'เช่น ใช้ประกอบรายงานประจำเดือน / รอตรวจสอบ' }); noteIn.value = e.note || '';
     const kind = isFolder ? 'folder' : 'file';
     const tl = TOOLS.find((t) => t.id === e.tool);
+    let tags = [...(e.tags || [])];
+    const tagBox = h('div', { class: 'lib-tagbox' }); const sugg = h('div', { class: 'chip-row' });
+    const tagIn = h('input', { type: 'text', maxlength: 24, placeholder: 'พิมพ์แท็ก แล้วกด Enter', autocomplete: 'off', 'aria-label': 'เพิ่มแท็ก' });
+    const addTags = (raw) => {
+      for (let t of String(raw).split(',')) { t = t.replace(/^#+/, '').replace(/\s+/g, ' ').trim().slice(0, 24); if (t && tags.length < 10 && !tags.some((x) => x.toLowerCase() === t.toLowerCase())) tags.push(t); }
+      tagIn.value = ''; drawTagEditor();
+    };
+    function drawTagEditor() {
+      tagBox.replaceChildren(...tags.map((t) => h('span', { class: 'pill lib-tag-edit' }, `#${t}`, h('button', { type: 'button', 'aria-label': `เอาแท็ก ${t} ออก`, onclick: () => { tags = tags.filter((x) => x !== t); drawTagEditor(); } }, '×'))));
+      const rest = knownTags().filter((k) => !tags.some((x) => x.toLowerCase() === k.toLowerCase())).slice(0, 8);
+      sugg.replaceChildren(...rest.map((k) => h('button', { class: 'chip', type: 'button', onclick: () => addTags(k) }, `+ ${k}`)));
+      sugg.hidden = !rest.length || tags.length >= 10;
+    }
+    tagIn.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ',') { ev.preventDefault(); if (tagIn.value.trim()) addTags(tagIn.value); } else if (ev.key === 'Backspace' && !tagIn.value && tags.length) { tags.pop(); drawTagEditor(); } });
+    tagIn.addEventListener('blur', () => { if (tagIn.value.trim()) addTags(tagIn.value); });
+    drawTagEditor();
     const saveBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: async () => {
       const newName = nameIn.value.trim(); const newNote = noteIn.value;
       if (!newName) { nameIn.focus(); return; }
       try {
         if (newName !== e.name) await call('rename', { id: e.id, kind, name: newName });
-        if (newNote !== (e.note || '')) await call('note', { id: e.id, kind, note: newNote });
+        if (newNote !== (e.note || '') || JSON.stringify(tags) !== JSON.stringify(e.tags || [])) await call('note', { id: e.id, kind, note: newNote, tags });
         toast('บันทึกแล้ว', 'success'); closeDrawer(); await changed();
       } catch (err) { toast(err.message, 'error', 5000); }
     } }, svgIcon(ICONS.save, 18), 'บันทึก');
@@ -340,6 +413,7 @@ export async function mount(root) {
       h('div', { class: 'drawer-head' }, h('h2', null, p.title), h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'ปิด', onclick: () => closeDrawer() }, svgIcon(I.close))),
       h('dl', { class: 'meta' }, dl.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)])),
       field('ชื่อ', nameIn, isFolder ? null : 'ถ้าเปลี่ยนชื่อ อย่าลืมนามสกุลไฟล์ เช่น .pdf').root,
+      field('แท็ก', h('div', null, tagBox, tagIn, sugg), 'ใช้จัดหมวดหมู่ข้ามโฟลเดอร์ เช่น ด่วน รอลงนาม งบประมาณ (สูงสุด 10 แท็ก)').root,
       field('หมายเหตุ', noteIn, 'บันทึกสั้น ๆ ช่วยให้ค้นหาได้ในภายหลัง (ไม่เกิน 500 ตัวอักษร)').root,
       h('div', { class: 'btn-row' }, saveBtn, isFolder ? null : h('a', { class: 'btn', href: e.url, target: '_blank', rel: 'noopener noreferrer' }, svgIcon(I.out, 18), 'เปิด/แก้ไขใน Drive')),
       h('hr', { class: 'lib-hr' }),

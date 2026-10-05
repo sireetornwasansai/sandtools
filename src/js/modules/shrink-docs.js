@@ -21,7 +21,7 @@ export async function shrinkOffice(file, { maxDim, quality }) {
 /** PDF: render each page to a JPEG and rebuild a PDF from the images. Text becomes an image (no selectable text). */
 export async function shrinkPdf(file, { quality, scale = 1.4, onPage }) {
   const pdfjs = await import('../vendor/pdf.min.mjs');
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.min.mjs', import.meta.url).href;
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.shim.mjs', import.meta.url).href;
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false, verbosity: 0 }).promise;
   const pages = [];
   for (let i = 1; i <= doc.numPages; i++) {
