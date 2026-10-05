@@ -1,0 +1,33 @@
+/* SAND Office Tools — PDF tools. Loaded on demand by modules/pdf.js; reuses the tokens in app.css. */
+.pdf-zone { margin-bottom: 1rem; padding: 1.6rem 1rem; }
+.pdf-list { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem; }
+.pdf-row { display: flex; align-items: center; gap: .6rem; padding: .4rem .6rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.pdf-no { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--primary-soft); color: var(--primary); font-size: .85rem; font-weight: 600; }
+.pdf-main { flex: 1; min-width: 0; display: flex; flex-direction: column; } .pdf-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-actions { align-items: flex-end; margin-top: 1rem; } .pdf-actions .field { margin: 0; min-width: 14rem; flex: 1 1 14rem; }
+.pdf-results { margin-top: 1rem; display: flex; flex-direction: column; gap: .4rem; } .pdf-results:empty { display: none; }
+.pdf-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-bottom: .6rem; } .pdf-toolbar input[type="text"] { width: 10rem; min-height: 32px; padding: .2rem .5rem; }
+.pdf-toolbar input[type="number"], .pdf-export input[type="number"] { width: 5rem; min-height: 32px; }
+.pdf-fname { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .75rem; margin: .5rem 0 1rem; }
+.pdf-card { position: relative; border: 2px solid var(--border); border-radius: 14px; background: var(--surface); transition: border-color .15s, box-shadow .15s, opacity .15s; }
+.pdf-card:hover { border-color: color-mix(in srgb, var(--primary) 50%, var(--border)); box-shadow: var(--shadow-md); }
+.pdf-card[aria-selected="true"] { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-ring); }
+.pdf-card.drag { opacity: .4; } .pdf-card.over { border-color: var(--primary); border-style: dashed; }
+.pdf-pick { display: flex; flex-direction: column; align-items: center; gap: .3rem; width: 100%; padding: .5rem; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; border-radius: 10px; }
+.pdf-box { display: grid; place-items: center; width: 100%; height: 190px; overflow: hidden; border-radius: 6px; background: var(--surface-2); }
+.pdf-thumb { display: block; max-width: 100%; max-height: 100%; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / .25); transition: transform .2s; }
+.pdf-label { font-size: .85rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pdf-label small { font-weight: 400; color: var(--muted); }
+.pdf-card[aria-selected="true"] .pdf-pick::after { content: "✓"; position: absolute; top: .65rem; right: .65rem; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--primary); color: var(--primary-contrast); font-weight: 700; font-size: .85rem; }
+.pdf-grid-img .pdf-box { height: 170px; } .pdf-card-img { padding: .5rem; } .pdf-card-img img { max-width: 100%; max-height: 100%; transition: transform .2s; }
+.pdf-card-img .pdf-label { display: block; margin-top: .3rem; text-align: center; }
+.pdf-mini { display: flex; justify-content: center; gap: 2px; } .pdf-mini .icon-btn { width: 32px; height: 32px; } .pdf-mini .icon-btn:disabled { opacity: .3; cursor: default; }
+.pdf-export { margin-top: 1rem; display: flex; flex-direction: column; gap: .6rem; }
+.pdf-opts { margin-top: 1rem; } .pdf-check { display: flex; align-items: center; gap: .5rem; font-weight: 400; }
+.pdf-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 440px); gap: 1.25rem; align-items: start; }
+.pdf-sec { padding: .75rem 1rem; margin-bottom: .75rem; } .pdf-sec + .pdf-sec { margin-top: 0; }
+.pdf-sec-head { display: flex; align-items: center; gap: .6rem; cursor: pointer; } .pdf-sec-body { margin-top: .75rem; }
+.pdf-preview-wrap { position: sticky; top: 0; display: flex; flex-direction: column; align-items: center; gap: .5rem; padding: .75rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.pdf-preview { width: 100%; height: auto; background: #fff; box-shadow: 0 2px 10px rgb(0 0 0 / .25); }
+@media (max-width: 900px) { .pdf-two { grid-template-columns: 1fr; } .pdf-preview-wrap { position: static; order: -1; } .pdf-fname { max-width: 12rem; } }
+@media (max-width: 480px) { .pdf-grid { grid-template-columns: repeat(2, 1fr); } .pdf-box { height: 150px; } }
