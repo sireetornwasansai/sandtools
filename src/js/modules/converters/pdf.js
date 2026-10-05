@@ -4,7 +4,7 @@ let pdfjsPromise = null;
 export function getPdfjs() {
   if (!pdfjsPromise) {
     pdfjsPromise = import('../../vendor/pdf.min.mjs').then((m) => {
-      m.GlobalWorkerOptions.workerSrc = new URL('../../vendor/pdf.worker.min.mjs', import.meta.url).href;
+      m.GlobalWorkerOptions.workerSrc = new URL('../../vendor/pdf.worker.shim.mjs', import.meta.url).href;
       return m;
     });
     pdfjsPromise.catch(() => { pdfjsPromise = null; });
