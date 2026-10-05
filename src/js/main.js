@@ -1,3 +1,4 @@
+import './core/polyfills.js';
 import { h, svgIcon } from './core/dom.js';
 import { initTheme } from './core/theme.js';
 import { ICONS } from './core/icons.js';
@@ -61,10 +62,12 @@ function buildShell() {
     h('header', { class: 'topbar' }, wordmark(), searchBtn, h('div', { class: 'spacer' }), themeBtn,
       h('a', { class: 'icon-btn', href: `#${SETTINGS_ROUTE.path}`, 'aria-label': 'ตั้งค่า', title: 'ตั้งค่า' }, svgIcon(ICONS.settings)), userBox),
     h('nav', { class: 'sidebar', 'aria-label': 'เมนูหลัก' },
-      h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), ...TOOLS.map((t) => navLink(t)), ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
+      h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), h('div', { class: 'nav-title' }, 'เครื่องมือ'), ...TOOLS.map((t) => navLink(t)),
+        ...((backendConfigured() && user) || recording() ? [h('div', { class: 'nav-title' }, 'ข้อมูลของฉัน')] : []),
+        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
       h('div', { class: 'nav-group nav-bottom' }, navLink(SETTINGS_ROUTE), collapseBtn)),
     (main = h('main', { id: 'main', class: 'main', tabindex: '-1' })),
-    h('nav', { class: 'bottomnav', 'aria-label': 'เมนูหลัก (มือถือ)' }, navLink(HOME_ROUTE, 'bn-link'), ...TOOLS.map((t) => navLink(t, 'bn-link'))));
+    h('nav', { class: 'bottomnav', 'aria-label': 'เมนูหลัก (มือถือ)', style: `grid-template-columns:repeat(${TOOLS.length + 1},1fr)` }, navLink(HOME_ROUTE, 'bn-link'), ...TOOLS.map((t) => navLink(t, 'bn-link'))));
   app.replaceChildren(shell, bar);
   return shell;
 }
