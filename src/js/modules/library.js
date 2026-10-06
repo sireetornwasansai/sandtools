@@ -5,6 +5,8 @@ import { gasCall } from '../core/api.js';
 import { notice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { TOOLS } from '../core/routes.js';
+import { addLayer, modal, askText, confirmBox, closeAllLayers } from '../core/layers.js';
+import { copyText } from '../core/download.js';
 
 /* ------------------------------ small helpers ------------------------------ */
 
@@ -65,63 +67,6 @@ async function call(op, params = {}, timeout = 90000) {
   catch (e) { if (e && (e.code === 'INVALID_SESSION' || e.code === 'DOMAIN_NOT_ALLOWED')) signOut(); throw e; }
 }
 
-/* --------------------------- layers (drawer / modal) --------------------------- */
-
-const layers = [];
-function onKey(e) { if (e.key === 'Escape' && layers.length) { e.stopPropagation(); layers[layers.length - 1].dismiss(); } }
-/** Show `wrap` as the top layer. Esc / click outside call onDismiss (default: close). Returns close(). */
-function addLayer(wrap, { onClose, onDismiss } = {}) {
-  const opener = document.activeElement;
-  let closed = false;
-  const entry = { dismiss: () => (onDismiss ? onDismiss() : close()), close: () => close() };
-  function close() {
-    if (closed) return; closed = true;
-    const i = layers.indexOf(entry); if (i >= 0) layers.splice(i, 1);
-    if (!layers.length) document.removeEventListener('keydown', onKey, true);
-    wrap.remove();
-    if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus({ preventScroll: true });
-    if (onClose) onClose();
-  }
-  if (!layers.length) document.addEventListener('keydown', onKey, true);
-  layers.push(entry);
-  wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) entry.dismiss(); });
-  document.body.append(wrap);
-  const first = wrap.querySelector('input, textarea, select, button');
-  if (first) first.focus({ preventScroll: true });
-  return close;
-}
-
-function modal(title, bodyEls, buttons, { wide = false, onDismiss, onClose } = {}) {
-  const box = h('div', { class: `lib-modal${wide ? ' lib-modal-wide' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('h2', null, title), ...bodyEls, h('div', { class: 'btn-row lib-modal-actions' }, buttons));
-  const close = addLayer(h('div', { class: 'lib-modal-wrap' }, box), { onDismiss, onClose });
-  return { close, box };
-}
-
-function askText({ title, label, value = '', confirm = 'ตกลง', hint, suggestions }) {
-  return new Promise((resolve) => {
-    const input = h('input', { type: 'text', maxlength: 120, value, autocomplete: 'off' });
-    const f = field(label, input, hint);
-    const chips = suggestions ? h('div', { class: 'chip-row' }, suggestions.map((s) => h('button', { class: 'chip', type: 'button', onclick: () => { input.value = s; input.focus(); } }, s))) : null;
-    let done = false, m = null;
-    const finish = (v) => { if (done) return; done = true; resolve(v); if (m) m.close(); };
-    const ok = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => { const v = input.value.trim(); if (v) finish(v); else input.focus(); } }, confirm);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ok.click(); } });
-    m = modal(title, [f.root, chips], [ok, h('button', { class: 'btn', type: 'button', onclick: () => finish(null) }, 'ยกเลิก')], { onDismiss: () => finish(null), onClose: () => finish(null) });
-    input.select();
-  });
-}
-
-function confirmBox({ title, message, confirm = 'ยืนยัน', danger = false }) {
-  return new Promise((resolve) => {
-    let done = false, m = null;
-    const finish = (v) => { if (done) return; done = true; resolve(v); if (m) m.close(); };
-    const ok = h('button', { class: `btn ${danger ? 'btn-danger' : 'btn-primary'}`, type: 'button', onclick: () => finish(true) }, confirm);
-    m = modal(title, [h('p', null, message)], [ok, h('button', { class: 'btn', type: 'button', onclick: () => finish(false) }, 'ยกเลิก')], { onDismiss: () => finish(false), onClose: () => finish(false) });
-    ok.focus();
-  });
-}
-
 /* --------------------------------- the page --------------------------------- */
 
 export async function mount(root) {
@@ -159,8 +104,8 @@ export async function mount(root) {
   const skeleton = () => list.replaceChildren(...[1, 2, 3, 4].map(() => h('div', { class: 'skeleton', style: 'height:56px;margin-bottom:.5rem' })));
   const showError = (e) => {
     const expired = e && e.code === 'INVALID_SESSION';
-    list.replaceChildren(notice('error', expired ? 'เซสชันหมดอายุ' : 'โหลดข้อมูลไม่ได้', e && e.message),
-      expired ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, 'เข้าสู่ระบบใหม่') : null);
+    list.replaceChildren(...[notice('error', expired ? 'เซสชันหมดอายุ' : 'โหลดข้อมูลไม่ได้', e && e.message),
+      expired ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, 'เข้าสู่ระบบใหม่') : null].filter(Boolean));
   };
 
   function setView(v) {
@@ -294,8 +239,8 @@ export async function mount(root) {
         : (search.value.trim() || st.tag) ? 'ไม่พบรายการที่ตรงกับคำค้นหรือแท็กนี้' : 'ยังไม่มีรายการในดัชนี'));
       return;
     }
-    list.replaceChildren(...shown.map((e) => row(e, { showWhere: true })),
-      s.next != null ? h('button', { class: 'btn lib-more', type: 'button', onclick: () => loadSearch(false) }, `แสดงเพิ่ม (พบทั้งหมด ${s.total} รายการ)`) : null);
+    list.replaceChildren(...[...shown.map((e) => row(e, { showWhere: true })),
+      s.next != null ? h('button', { class: 'btn lib-more', type: 'button', onclick: () => loadSearch(false) }, `แสดงเพิ่ม (พบทั้งหมด ${s.total} รายการ)`) : null].filter(Boolean));
   }
 
   function row(e, { showWhere }) {
@@ -401,6 +346,14 @@ export async function mount(root) {
       if (!dest) return;
       try { const r = await call('move', { id: e.id, kind, destId: dest }); toast(r.moved ? 'ย้ายแล้ว' : 'อยู่ในโฟลเดอร์นี้แล้ว', 'success'); if (r.moved) { closeDrawer(); await changed(); } } catch (err) { toast(err.message, 'error', 5000); }
     } }, svgIcon(I.move, 18), 'ย้ายไป…');
+    const linkBtn = h('button', { class: 'btn', type: 'button', onclick: async () => {
+      linkBtn.disabled = true;
+      try {
+        const sess = getSession(); const r = (await gasCall('links', { session: sess.token, op: 'create', ref: e.id, refKind: kind, title: p.title }, 60000)).data;
+        const full = `${String(r.base || location.origin).replace(/\/+$/, '')}/s/${r.link.code}`; await copyText(full);
+        toast(r.existing ? 'มีลิงก์ย่อของรายการนี้อยู่แล้ว คัดลอกให้แล้ว' : 'สร้างลิงก์ย่อแล้ว และคัดลอกไว้ในคลิปบอร์ด — ดูสถิติที่เมนู "ลิงก์ย่อ"', 'success', 5000);
+      } catch (err) { toast(err.message, 'error', 5000); } finally { linkBtn.disabled = false; }
+    } }, svgIcon(ICONS.copy, 18), 'สร้างลิงก์ย่อ + ติดตามสถิติ');
     const trashBtn = h('button', { class: 'btn btn-danger', type: 'button', onclick: async () => {
       const ok = await confirmBox({ title: isFolder ? 'ลบโฟลเดอร์นี้?' : 'ลบไฟล์นี้?', danger: true, confirm: 'ย้ายไปถังขยะ',
         message: `“${p.title}”${isFolder ? ' และไฟล์ทั้งหมดข้างใน' : ''} จะถูกย้ายไปถังขยะของ Google Drive และกู้คืนได้ภายใน 30 วัน` });
@@ -416,6 +369,7 @@ export async function mount(root) {
       field('แท็ก', h('div', null, tagBox, tagIn, sugg), 'ใช้จัดหมวดหมู่ข้ามโฟลเดอร์ เช่น ด่วน รอลงนาม งบประมาณ (สูงสุด 10 แท็ก)').root,
       field('หมายเหตุ', noteIn, 'บันทึกสั้น ๆ ช่วยให้ค้นหาได้ในภายหลัง (ไม่เกิน 500 ตัวอักษร)').root,
       h('div', { class: 'btn-row' }, saveBtn, isFolder ? null : h('a', { class: 'btn', href: e.url, target: '_blank', rel: 'noopener noreferrer' }, svgIcon(I.out, 18), 'เปิด/แก้ไขใน Drive')),
+      h('div', { class: 'btn-row' }, linkBtn), h('p', { class: 'hint' }, 'ลิงก์ย่อจะพาไปที่ไฟล์/โฟลเดอร์นี้ใน Drive — ผู้รับต้องมีสิทธิ์เข้าถึงจึงจะเปิดได้'),
       h('hr', { class: 'lib-hr' }),
       h('div', { class: 'btn-row' }, moveBtn, e.folderId && st.view === 'recent' ? h('button', { class: 'btn', type: 'button', onclick: () => { closeDrawer(); openFolder(e.folderId); } }, svgIcon(ICONS.folder, 18), 'ไปที่โฟลเดอร์') : null,
         st.canTrash !== false ? trashBtn : null));
@@ -425,5 +379,5 @@ export async function mount(root) {
 
   // first paint
   if (st.view === 'recent') loadRecent(); else loadFolder(st.folderId);
-  return () => { seq += 1; layers.slice().reverse().forEach((l) => l.close()); };
+  return () => { seq += 1; closeAllLayers(); };
 }

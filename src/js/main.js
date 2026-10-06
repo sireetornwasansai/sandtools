@@ -5,7 +5,7 @@ import { ICONS } from './core/icons.js';
 import { config, APP_NAME } from './core/config.js';
 import { getSettings, setSettings, addRecent } from './core/store.js';
 import { recording } from './core/logger.js';
-import { TOOLS, LIBRARY_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
+import { TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, PROJECTS_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
 import { openPalette } from './core/palette.js';
 import { backendConfigured } from './core/api.js';
 import { loginRequired, validateSession, renderLogin, currentUser, signOut } from './core/auth.js';
@@ -64,7 +64,7 @@ function buildShell() {
     h('nav', { class: 'sidebar', 'aria-label': 'เมนูหลัก' },
       h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), h('div', { class: 'nav-title' }, 'เครื่องมือ'), ...TOOLS.map((t) => navLink(t)),
         ...((backendConfigured() && user) || recording() ? [h('div', { class: 'nav-title' }, 'ข้อมูลของฉัน')] : []),
-        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
+        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE), navLink(LINKS_ROUTE), navLink(PROJECTS_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
       h('div', { class: 'nav-group nav-bottom' }, navLink(SETTINGS_ROUTE), collapseBtn)),
     (main = h('main', { id: 'main', class: 'main', tabindex: '-1' })),
     h('nav', { class: 'bottomnav', 'aria-label': 'เมนูหลัก (มือถือ)', style: `grid-template-columns:repeat(${TOOLS.length + 1},1fr)` }, navLink(HOME_ROUTE, 'bn-link'), ...TOOLS.map((t) => navLink(t, 'bn-link'))));
