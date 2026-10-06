@@ -5,7 +5,8 @@
  *   GET  ?action=go&c=<code>          resolves a short code to its target (used by the Vercel edge function /api/go)
  *   POST {action:"click", secret,…}   records one visit — only accepted with EDGE_SECRET, which only the edge function knows
  * Signed-in part:
- *   POST {action:"links", session, op: list | create | update | delete | stats | export}
+ *   POST {action:"links", session, op: list | get | create | update | delete | stats | export}
+ *     create: kind 'link' (default) | 'qr' (tracked QR) | 'qrs' (static QR saved in the history)
  *
  * Sheet tabs (created by setupLinks):  Links (one row per short link)  ·  Clicks (one row per visit, newest at the bottom)
  *
@@ -16,13 +17,23 @@
  *   EDGE_SECRET            (required)  created by setupLinks(); the same value must be set in Vercel as SAND_EDGE_SECRET
  *   SHORT_BASE             (optional)  e.g. https://sand.example.go.th — used to build short URLs and to refuse loops
  *   LINK_BLOCK_DOMAINS     (optional)  comma-separated domains that cannot be shortened
- *   LINK_MAX_PER_USER      (optional)  active links per user, default 500
+ *   LINK_MAX_PER_USER      (optional)  active short links per user, default 500
+ *   QR_MAX_PER_USER        (optional)  saved QR codes (history) per user, default 1000
  *   LINK_LIMIT_PER_MIN     (optional)  create/update calls per minute (all users), default 60
  * A link can be attached to a project (Analytics.gs) through the 12th column "โครงการ".
+ * The same table also stores QR Codes (column 13 "ชนิด"): kind 'link' = plain short link, 'qr' = tracked QR (a QR that encodes the short URL, so scans
+ * are counted and the destination can be edited later), 'qrs' = static QR saved in the history (no short link, no statistics). Column 14 holds the QR
+ * design / form data as JSON (never a Wi-Fi password).
+ * QR history = every row whose kind is 'qr' or 'qrs' (title = what the QR is for, tags/note/"cat" = category). Statistics of a tracked QR are the visits
+ * of its short link (every visit through a tracked QR's short URL is a "scan"; robots are not counted).
  * Uses helpers from Code.gs (requireUser, sheetTab, cell, rateLimit, httpError, prop, intProp, listProp, safeEqual) and Library.gs.
  */
 
-var LNK_LINK_HEADERS = ['รหัสลิงก์', 'ปลายทาง', 'ชื่อเรียก', 'เจ้าของ', 'สร้างเมื่อ', 'หมดอายุ', 'สถานะ', 'หมายเหตุ', 'แท็ก', 'อ้างอิง (Drive id)', 'ชนิดอ้างอิง', 'โครงการ'];
+var LNK_LINK_HEADERS = ['รหัสลิงก์', 'ปลายทาง', 'ชื่อเรียก', 'เจ้าของ', 'สร้างเมื่อ', 'หมดอายุ', 'สถานะ', 'หมายเหตุ', 'แท็ก', 'อ้างอิง (Drive id)', 'ชนิดอ้างอิง', 'โครงการ', 'ชนิด', 'ข้อมูล QR'];
+var LNK_COLS = 14;
+var LNK_KINDS = ['link', 'qr', 'qrs'];
+var LNK_QR_TYPES = ['url', 'text', 'wifi', 'email', 'phone', 'sms', 'vcard'];
+var LNK_QR_STYLES = ['square', 'rounded', 'dots'];
 var LNK_CLICK_HEADERS = ['เวลา', 'รหัสลิงก์', 'ประเทศ', 'อุปกรณ์', 'เบราว์เซอร์', 'ระบบปฏิบัติการ', 'มาจาก', 'ผู้เข้าชม (hash)', 'บอท'];
 var LNK_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';   // no look-alike characters (i l o 0 1)
 var LNK_CODE_LEN = 7;
@@ -47,23 +58,29 @@ function lnkText(v, max) {
   v = cell(v, max);
   return /^\d+$/.test(v) ? "'" + v : v;
 }
+/** Runs fn under the script lock so two simultaneous creates can never get the same code. */
+function lnkLocked(fn) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(10000); } catch (x) { throw httpError('BUSY', 'ระบบกำลังประมวลผลคำขออื่นอยู่ กรุณาลองใหม่อีกครั้ง'); }
+  try { return fn(); } finally { try { lock.releaseLock(); } catch (y) { /* not held */ } }
+}
 function lnkScope(u) {
   return { email: u.email, admin: listProp('ADMIN_EMAILS').indexOf(u.email) >= 0, rootId: prop('DRIVE_FOLDER_ID'), memo: {} };
 }
-function lnkLog(u, op, code, extra) {
-  try { sheetTab('Logs', LOG_HEADERS).appendRow([new Date(), Utilities.getUuid().slice(0, 8), u.email, 'links', op, 'ok', cell(code, 200), 0, 0, cell(JSON.stringify(extra || {}), 500)]); } catch (x) { console.error('lnkLog ' + x); }
+function lnkLog(u, op, code, extra, tool) {
+  try { sheetTab('Logs', LOG_HEADERS).appendRow([new Date(), Utilities.getUuid().slice(0, 8), u.email, tool || 'links', op, 'ok', cell(code, 200), 0, 0, cell(JSON.stringify(extra || {}), 500)]); } catch (x) { console.error('lnkLog ' + x); }
 }
 function lnkObj(r, row) {
   return { row: row, code: String(r[0]), url: String(r[1]), title: String(r[2] || ''), owner: String(r[3] || '').toLowerCase(), created: String(r[4] || ''), expires: String(r[5] || ''),
-    status: String(r[6] || 'active'), note: String(r[7] || ''), tags: libTags(String(r[8] || '')), ref: String(r[9] || ''), refKind: String(r[10] || ''), project: String(r[11] || '') };
+    status: String(r[6] || 'active'), note: String(r[7] || ''), tags: libTags(String(r[8] || '')), ref: String(r[9] || ''), refKind: String(r[10] || ''), project: String(r[11] || ''), kind: LNK_KINDS.indexOf(String(r[12])) >= 0 ? String(r[12]) : 'link', data: String(r[13] || '') };
 }
 function lnkRowOf(l) {
-  return [l.code, l.url, lnkText(l.title, 120), l.owner, l.created, l.expires, l.status, lnkText(l.note, 300), l.tags.join(', '), l.ref, l.refKind, l.project || ''];
+  return [l.code, l.url, lnkText(l.title, 120), l.owner, l.created, l.expires, l.status, lnkText(l.note, 300), l.tags.join(', '), l.ref, l.refKind, l.project || '', l.kind || 'link', l.data || ''];
 }
 function lnkAll() {
   var sh = sheetTab('Links', LNK_LINK_HEADERS), last = sh.getLastRow();
   if (last < 2) return [];
-  return sh.getRange(2, 1, last - 1, 12).getValues().map(function (r, i) { return lnkObj(r, i + 2); }).filter(function (l) { return l.code; });
+  return sh.getRange(2, 1, last - 1, LNK_COLS).getValues().map(function (r, i) { return lnkObj(r, i + 2); }).filter(function (l) { return l.code; });
 }
 function lnkFind(code) {
   var all = lnkAll();
@@ -72,7 +89,7 @@ function lnkFind(code) {
 }
 function lnkPublic(l, c) {
   c = c || {};
-  return { code: l.code, url: l.url, title: l.title, owner: l.owner, created: l.created, expires: l.expires, status: l.status, note: l.note, tags: l.tags, ref: l.ref, refKind: l.refKind, project: l.project || '',
+  return { code: l.code, url: l.url, title: l.title, owner: l.owner, created: l.created, expires: l.expires, status: l.status, note: l.note, tags: l.tags, ref: l.ref, refKind: l.refKind, project: l.project || '', kind: l.kind || 'link', qr: lnkQrParse(l.data),
     clicks: c.total || 0, week: c.week || 0, last: c.last || 0 };
 }
 function lnkBase() { return prop('SHORT_BASE').replace(/\/+$/, ''); }
@@ -101,6 +118,27 @@ function lnkCheckUrl(raw) {
     if (bm && bm[1].toLowerCase() === host && /^https?:\/\/[^\/?#]*\/s\//i.test(s)) throw httpError('LOOP', 'ไม่สามารถย่อลิงก์ย่อซ้ำได้');
   }
   return s;
+}
+function lnkQrParse(data) { if (!data) return null; try { return JSON.parse(data); } catch (x) { return null; } }
+/** Validate the QR part of a request: {t: type, f: form fields (static only), d: design}. Returns the JSON text to store. */
+function lnkQrData(q, kind) {
+  q = (q && typeof q === 'object') ? q : {};
+  var t = String(q.t || 'url');
+  if (LNK_QR_TYPES.indexOf(t) < 0) throw httpError('BAD_REQUEST', 'ชนิด QR ไม่ถูกต้อง');
+  var out = { t: t }, d = (q.d && typeof q.d === 'object') ? q.d : {};
+  var color = function (v, dflt) { return /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? String(v).toLowerCase() : dflt; };
+  out.d = { fg: color(d.fg, '#000000'), bg: color(d.bg, '#ffffff'), style: LNK_QR_STYLES.indexOf(d.style) >= 0 ? d.style : 'square',
+    ec: ['L', 'M', 'Q', 'H'].indexOf(d.ec) >= 0 ? d.ec : 'M', margin: Math.min(16, Math.max(0, parseInt(d.margin, 10) || 0)), size: Math.min(2048, Math.max(128, parseInt(d.size, 10) || 512)),
+    cat: String(d.cat || 'general').replace(/[^a-z]/g, '').slice(0, 12) || 'general', cap: String(d.cap || '').replace(/[\u0000-\u001f]/g, ' ').slice(0, 40) };
+  if (kind === 'qrs') {
+    var f = (q.f && typeof q.f === 'object') ? q.f : {}, keys = Object.keys(f).slice(0, 14), o = {};
+    if (t === 'wifi' && String(f.password || '')) throw httpError('NO_SECRET', 'ไม่บันทึกรหัสผ่าน Wi-Fi ลงในประวัติ — เว้นช่องรหัสผ่านก่อนบันทึก');
+    keys.forEach(function (k) { if (/^[a-zA-Z]{1,20}$/.test(k) && k !== 'password') o[k] = String(f[k] == null ? '' : f[k]).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ' ').slice(0, 600); });
+    out.f = o;
+  }
+  var json = JSON.stringify(out);
+  if (json.length > 3000) throw httpError('BAD_REQUEST', 'ข้อมูล QR ยาวเกินไปสำหรับบันทึกในประวัติ');
+  return json;
 }
 /** '' clears the project; otherwise it must be a project the user may use. */
 function lnkProject(sc, v) {
@@ -141,7 +179,7 @@ function lnkGo(p) {
   if (!rec) {
     rateLimit('lnkgo', intProp('LINK_MISS_LIMIT_PER_MIN', 120));
     var l = lnkFind(code);
-    rec = l ? { u: l.url, x: lnkParse(l.expires), s: l.status } : { n: 1 };
+    rec = l && l.kind !== 'qrs' ? { u: l.url, x: lnkParse(l.expires), s: l.status } : { n: 1 };
     cache.put('lk:' + code, JSON.stringify(rec), rec.n ? 300 : LNK_CACHE_S);
   }
   if (rec.n || rec.s === 'deleted') return { reason: 'notfound' };
@@ -224,6 +262,7 @@ function links(b) {
   rateLimit('links', intProp('LINK_LIMIT_PER_MIN', 60) * (op === 'list' || op === 'stats' || op === 'export' ? 5 : 1));
   switch (op) {
     case 'list':   return lnkList(sc);
+    case 'get':    return { link: lnkPublic(lnkOwned(sc, b.code), null), base: lnkBase() };   // one row without scanning the clicks (used to re-open a saved QR)
     case 'create': return lnkCreate(sc, u, b);
     case 'update': return lnkUpdate(sc, u, b);
     case 'delete': return lnkDelete(sc, u, b);
@@ -254,33 +293,45 @@ function lnkList(sc) {
   return { admin: sc.admin, base: lnkBase(), items: items, scanned: rows.length >= LNK_SCAN_ROWS };
 }
 
-function lnkCreate(sc, u, b) {
+function lnkCreate(sc, u, b) { return lnkLocked(function () { return lnkCreateLocked(sc, u, b); }); }
+function lnkCreateLocked(sc, u, b) {
   var all = lnkAll(), mine = all.filter(function (l) { return l.owner === sc.email && l.status !== 'deleted'; });
-  var ref = '', refKind = '', url;
-  if (b.ref) {
+  var kind = LNK_KINDS.indexOf(b.kind) >= 0 ? b.kind : 'link';
+  var ref = '', refKind = '', url = '', data = '';
+  if (kind === 'qrs') {
+    data = lnkQrData(b.qr, 'qrs');
+    if (!String(b.title || '').trim()) throw httpError('BAD_REQUEST', 'กรุณาตั้งชื่อ QR');
+  } else if (b.ref && kind === 'link') {
     ref = libId(b.ref);
     if (b.refKind === 'folder') { libFolderChain(sc, ref); refKind = 'folder'; url = 'https://drive.google.com/drive/folders/' + ref; }
     else { url = libFile(sc, ref).file.getUrl(); refKind = 'file'; }
     var dup = mine.filter(function (l) { return l.ref === ref && l.refKind === refKind; })[0];
     if (dup) {
-      if (b.project !== undefined && lnkProject(sc, b.project) !== dup.project) { dup.project = lnkProject(sc, b.project); sheetTab('Links', LNK_LINK_HEADERS).getRange(dup.row, 1, 1, 12).setValues([lnkRowOf(dup)]); }
+      if (b.project !== undefined && lnkProject(sc, b.project) !== dup.project) { dup.project = lnkProject(sc, b.project); sheetTab('Links', LNK_LINK_HEADERS).getRange(dup.row, 1, 1, LNK_COLS).setValues([lnkRowOf(dup)]); }
       return { link: lnkPublic(dup, null), existing: true, base: lnkBase() };
     }
-  } else url = lnkCheckUrl(b.url);
-  if (mine.length >= intProp('LINK_MAX_PER_USER', 500)) throw httpError('LIMIT', 'สร้างลิงก์ครบจำนวนที่กำหนดแล้ว กรุณาลบลิงก์ที่ไม่ใช้');
+  } else {
+    url = lnkCheckUrl(b.url);
+    if (kind === 'qr') { b.qr = b.qr || {}; b.qr.t = 'url'; data = lnkQrData(b.qr, 'qr'); if (!String(b.title || '').trim()) throw httpError('BAD_REQUEST', 'กรุณาตั้งชื่อ QR'); }
+  }
+  if (kind === 'link') {
+    if (mine.filter(function (l) { return l.kind === 'link'; }).length >= intProp('LINK_MAX_PER_USER', 500)) throw httpError('LIMIT', 'สร้างลิงก์ครบจำนวนที่กำหนดแล้ว กรุณาลบรายการที่ไม่ใช้');
+  } else if (mine.filter(function (l) { return l.kind !== 'link'; }).length >= intProp('QR_MAX_PER_USER', 1000)) throw httpError('LIMIT', 'บันทึก QR ครบจำนวนที่กำหนดแล้ว กรุณาลบรายการที่ไม่ใช้');
   var taken = Object.create(null); all.forEach(function (l) { taken[l.code] = true; });
-  var l = { code: lnkCodeFor(b.alias, taken), url: url, title: String(b.title || '').trim().slice(0, 120), owner: sc.email, created: lnkStamp(Date.now()), expires: lnkExpiry(b.expires),
-    status: 'active', note: String(b.note || '').slice(0, 300), tags: libTags(b.tags), ref: ref, refKind: refKind, project: lnkProject(sc, b.project) };
+  var l = { code: lnkCodeFor(kind === 'qrs' ? '' : b.alias, taken), url: url, title: String(b.title || '').trim().slice(0, 120), owner: sc.email, created: lnkStamp(Date.now()), expires: kind === 'qrs' ? '' : lnkExpiry(b.expires),
+    status: 'active', note: String(b.note || '').slice(0, 300), tags: libTags(b.tags), ref: ref, refKind: refKind, project: lnkProject(sc, b.project), kind: kind, data: data };
   sheetTab('Links', LNK_LINK_HEADERS).appendRow(lnkRowOf(l));
   lnkUncache(l.code);
-  lnkLog(u, 'create', l.code, { host: (/^https?:\/\/([^\/?#]*)/i.exec(url) || [])[1] || '', ref: ref });
+  lnkLog(u, 'create', l.code, { kind: kind, host: (/^https?:\/\/([^\/?#]*)/i.exec(url) || [])[1] || '', ref: ref }, kind === 'link' ? 'links' : 'qr');
   return { link: lnkPublic(l, null), existing: false, base: lnkBase() };
 }
 
-function lnkUpdate(sc, u, b) {
+function lnkUpdate(sc, u, b) { return lnkLocked(function () { return lnkUpdateLocked(sc, u, b); }); }
+function lnkUpdateLocked(sc, u, b) {
   var l = lnkOwned(sc, b.code);
-  if (b.url !== undefined && !l.ref) l.url = lnkCheckUrl(b.url);
-  if (b.title !== undefined) l.title = String(b.title).trim().slice(0, 120);
+  if (b.url !== undefined && !l.ref && l.kind !== 'qrs') l.url = lnkCheckUrl(b.url);
+  if (b.qr !== undefined && l.kind !== 'link') { var cur = lnkQrParse(l.data) || {}; b.qr = b.qr || {}; if (l.kind === 'qr') b.qr.t = 'url'; else if (!b.qr.t) b.qr.t = cur.t; l.data = lnkQrData(b.qr, l.kind); }
+  if (b.title !== undefined) { l.title = String(b.title).trim().slice(0, 120); if (!l.title && l.kind !== 'link') throw httpError('BAD_REQUEST', 'กรุณาตั้งชื่อ QR'); }
   if (b.note !== undefined) l.note = String(b.note).slice(0, 300);
   if (b.tags !== undefined) l.tags = libTags(b.tags);
   if (b.project !== undefined) l.project = lnkProject(sc, b.project);
@@ -290,19 +341,20 @@ function lnkUpdate(sc, u, b) {
     l.status = b.status;
   }
   var sh = sheetTab('Links', LNK_LINK_HEADERS);
-  sh.getRange(l.row, 1, 1, 12).setValues([lnkRowOf(l)]);
+  sh.getRange(l.row, 1, 1, LNK_COLS).setValues([lnkRowOf(l)]);
   lnkUncache(l.code);
-  lnkLog(u, 'update', l.code, { status: l.status });
+  lnkLog(u, 'update', l.code, { status: l.status, kind: l.kind }, l.kind === 'link' ? 'links' : 'qr');
   return { link: lnkPublic(l, null) };
 }
 
 /** Soft delete: the row stays (stats are kept and the code can never be re-used for a different target). */
-function lnkDelete(sc, u, b) {
+function lnkDelete(sc, u, b) { return lnkLocked(function () { return lnkDeleteLocked(sc, u, b); }); }
+function lnkDeleteLocked(sc, u, b) {
   var l = lnkOwned(sc, b.code);
   l.status = 'deleted';
-  sheetTab('Links', LNK_LINK_HEADERS).getRange(l.row, 1, 1, 12).setValues([lnkRowOf(l)]);
+  sheetTab('Links', LNK_LINK_HEADERS).getRange(l.row, 1, 1, LNK_COLS).setValues([lnkRowOf(l)]);
   lnkUncache(l.code);
-  lnkLog(u, 'delete', l.code, {});
+  lnkLog(u, 'delete', l.code, { kind: l.kind }, l.kind === 'link' ? 'links' : 'qr');
   return { code: l.code };
 }
 
@@ -319,13 +371,13 @@ function setupLinks() {
   var P = PropertiesService.getScriptProperties();
   if (!P.getProperty('EDGE_SECRET')) P.setProperty('EDGE_SECRET', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, ''));
   var links = sheetTab('Links', LNK_LINK_HEADERS), clicks = sheetTab('Clicks', LNK_CLICK_HEADERS);
-  [[links, LNK_LINK_HEADERS, [110, 380, 200, 200, 150, 150, 80, 220, 160, 220, 90, 110], '#0b7a7c'], [clicks, LNK_CLICK_HEADERS, [150, 110, 70, 90, 110, 120, 200, 130, 50], '#7e22ce']].forEach(function (t) {
+  [[links, LNK_LINK_HEADERS, [110, 380, 200, 200, 150, 150, 80, 220, 160, 220, 90, 110, 70, 360], '#0b7a7c'], [clicks, LNK_CLICK_HEADERS, [150, 110, 70, 90, 110, 120, 200, 130, 50], '#7e22ce']].forEach(function (t) {
     var sh = t[0];
     sh.getRange(1, 1, 1, t[1].length).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e');
     sh.setFrozenRows(1); t[2].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); }); sh.setTabColor(t[3]);
   });
   links.getRange(2, 1, Math.max(links.getMaxRows() - 1, 1), 3).setNumberFormat('@');
   clicks.getRange(2, 1, Math.max(clicks.getMaxRows() - 1, 1), 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
-  links.getRange(1, 12).setValue('โครงการ');
+  links.getRange(1, 12, 1, 3).setValues([['โครงการ', 'ชนิด', 'ข้อมูล QR']]);
   console.log('พร้อมใช้งาน — ตั้งค่าใน Vercel (Settings → Environment Variables):\n  SAND_EDGE_SECRET = ' + P.getProperty('EDGE_SECRET') + '\n  SAND_GAS_URL ต้องตั้งไว้แล้ว (URL ของ Web app /exec)\nจากนั้น Redeploy บน Vercel');
 }

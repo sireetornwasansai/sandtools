@@ -119,33 +119,32 @@ function anaHit(b) {
   return { ok: true };
 }
 
-/** Rows wait in the cache (under a lock) and are written to the sheet in one batch. */
+/** Rows wait in the cache (under a lock) and are written to the sheet in one batch. A failed write puts the rows back instead of losing them. */
 function anaBuffer(row) {
-  var lock = LockService.getScriptLock(), cache = CacheService.getScriptCache(), flushNow = false;
+  var lock = LockService.getScriptLock(), cache = CacheService.getScriptCache(), held = false;
+  try { lock.waitLock(4000); held = true; } catch (e) { held = false; }
+  if (!held) { try { anaWrite([row]); } catch (e2) { console.error('anaBuffer ' + e2); } return; }   // lock timeout: write directly
   try {
-    lock.waitLock(4000);
     var buf = []; try { buf = JSON.parse(cache.get(ANA_BUF_KEY) || '[]'); } catch (x) { buf = []; }
     buf.push(row);
-    if (buf.length >= ANA_BUF_MAX) flushNow = true; else cache.put(ANA_BUF_KEY, JSON.stringify(buf), 21600);
-    if (flushNow) { cache.remove(ANA_BUF_KEY); anaWrite(buf); }
-  } catch (e) {
-    try { anaWrite([row]); } catch (e2) { console.error('anaBuffer ' + e2); }   // lock timeout: write directly
+    if (buf.length >= ANA_BUF_MAX) {
+      try { anaWrite(buf); cache.remove(ANA_BUF_KEY); } catch (we) { console.error('anaBuffer write ' + we); cache.put(ANA_BUF_KEY, JSON.stringify(buf.slice(-400)), 21600); }
+    } else cache.put(ANA_BUF_KEY, JSON.stringify(buf), 21600);
   } finally { try { lock.releaseLock(); } catch (x) { /* not held */ } }
 }
 function anaWrite(rows) {
   if (!rows.length) return;
   var sh = sheetTab('Hits', ANA_HIT_HEADERS), at = sh.getLastRow() + 1;
-  var rg = sh.getRange(at, 1, rows.length, ANA_HIT_HEADERS.length);
-  rg.setValues(rows);
+  sh.getRange(at, 1, rows.length, ANA_HIT_HEADERS.length).setValues(rows);
 }
-/** Write whatever is waiting in the buffer (called before every statistics read and by the 1-minute trigger). */
+/** Write whatever is waiting in the buffer (called before every statistics read and by the 1-minute trigger). Never throws for a busy lock. */
 function anaFlush() {
   var lock = LockService.getScriptLock(), cache = CacheService.getScriptCache();
+  try { lock.waitLock(8000); } catch (e) { return 0; }
   try {
-    lock.waitLock(8000);
     var raw = cache.get(ANA_BUF_KEY); if (!raw) return 0;
     var buf = []; try { buf = JSON.parse(raw); } catch (x) { buf = []; }
-    cache.remove(ANA_BUF_KEY); anaWrite(buf);
+    anaWrite(buf); cache.remove(ANA_BUF_KEY);
     return buf.length;
   } finally { try { lock.releaseLock(); } catch (x) { /* not held */ } }
 }
@@ -186,7 +185,7 @@ function anaStats(s, daysIn) {
   var days = [7, 30, 90, 365].indexOf(Number(daysIn)) >= 0 ? Number(daysIn) : 30;
   anaFlush();
   var rows = anaRead(s.key), now = Date.now(), cutoff = now - days * 86400000, five = now - 5 * 60000;
-  var pv = 0, evN = 0, bots = 0, first = 0, last = 0, lastAny = 0, real = {}, perDay = Object.create(null), dayVid = Object.create(null);
+  var pv = 0, bots = 0, first = 0, last = 0, lastAny = 0, real = {}, perDay = Object.create(null), dayVid = Object.create(null);
   var pages = Object.create(null), pageVid = Object.create(null), ref = Object.create(null), co = Object.create(null), dev = Object.create(null), br = Object.create(null), os = Object.create(null),
     utm = Object.create(null), lang = Object.create(null), evs = Object.create(null);
   var hours = []; for (var h = 0; h < 24; h++) hours.push(0);
@@ -212,7 +211,7 @@ function anaStats(s, daysIn) {
     uv += u; byDay.push({ d: dd, pv: perDay[dd] ? perDay[dd].pv : 0, uv: u });
   }
   var topPages = lnkTop(pages, 12).map(function (p) { return { name: p.name, n: p.n, u: Object.keys(pageVid[p.name] || {}).length }; });
-  return { site: anaPublic(s), days: days, pv: pv, uv: uv, events: evN || Object.keys(evs).reduce(function (a, k) { return a + evs[k]; }, 0), bots: bots, avgPages: uv ? Math.round((pv / uv) * 10) / 10 : 0,
+  return { site: anaPublic(s), days: days, pv: pv, uv: uv, events: Object.keys(evs).reduce(function (a, k) { return a + evs[k]; }, 0), bots: bots, avgPages: uv ? Math.round((pv / uv) * 10) / 10 : 0,
     realtime: Object.keys(real).length, first: first ? new Date(first).toISOString() : '', last: last ? new Date(last).toISOString() : '', lastAny: lastAny ? new Date(lastAny).toISOString() : '',
     byDay: byDay, byHour: hours, pages: topPages, referrers: lnkTop(ref, 8), countries: lnkTop(co, 8), devices: lnkTop(dev, 5), browsers: lnkTop(br, 6), systems: lnkTop(os, 6), utms: lnkTop(utm, 6),
     languages: lnkTop(lang, 4), eventNames: lnkTop(evs, 10), scanned: rows.length >= ANA_SCAN_ROWS };
@@ -251,7 +250,8 @@ function anaList(sc) {
     .sort(function (x, y) { return x.created < y.created ? 1 : -1; }) };
 }
 
-function anaCreate(sc, u, b) {
+function anaCreate(sc, u, b) { return lnkLocked(function () { return anaCreateLocked(sc, u, b); }); }
+function anaCreateLocked(sc, u, b) {
   var all = anaAll(), mine = all.filter(function (s) { return s.owner === sc.email && s.status !== 'deleted'; });
   if (mine.length >= intProp('ANA_MAX_PER_USER', 50)) throw httpError('LIMIT', 'สร้างโครงการครบจำนวนที่กำหนดแล้ว');
   var name = String(b.name || '').trim().slice(0, 120);
@@ -295,7 +295,7 @@ function anaDelete(sc, u, b) {
   sheetTab('Sites', ANA_SITE_HEADERS).getRange(s.row, 1, 1, 10).setValues([anaRowOf(s)]);
   anaUncache(s.key);
   var sh = sheetTab('Links', LNK_LINK_HEADERS);
-  lnkAll().forEach(function (l) { if (l.project === s.key) { l.project = ''; sh.getRange(l.row, 1, 1, 12).setValues([lnkRowOf(l)]); lnkUncache(l.code); } });
+  lnkAll().forEach(function (l) { if (l.project === s.key) { l.project = ''; sh.getRange(l.row, 1, 1, LNK_COLS).setValues([lnkRowOf(l)]); lnkUncache(l.code); } });
   anaLog(u, 'delete', s.key, {});
   return { key: s.key };
 }
@@ -313,7 +313,7 @@ function setupAnalytics() {
   sites.getRange(2, 1, Math.max(sites.getMaxRows() - 1, 1), 4).setNumberFormat('@');
   hits.getRange(2, 1, Math.max(hits.getMaxRows() - 1, 1), 1).setNumberFormat('0');
   var links = sheetTab('Links', LNK_LINK_HEADERS);
-  links.getRange(1, 12).setValue('โครงการ').setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e'); links.setColumnWidth(12, 110);
+  links.getRange(1, 12, 1, 3).setValues([['โครงการ', 'ชนิด', 'ข้อมูล QR']]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e'); links.setColumnWidth(12, 110);
   ScriptApp.getProjectTriggers().forEach(function (t) { var f = t.getHandlerFunction(); if (f === 'anaFlushJob' || f === 'anaPruneJob') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('anaFlushJob').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('anaPruneJob').timeBased().everyDays(1).atHour(3).create();

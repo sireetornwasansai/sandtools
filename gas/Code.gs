@@ -1,10 +1,10 @@
 /**
- * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.3.0)
+ * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.5.0 — adds username/password sign-in)
  *
  * This project has FOUR script files — keep them together:
  *   Code.gs     (this file)  entry points, login/session, usage log, file archive, history
  *   Library.gs               คลังข้อมูล: browse/manage the Drive archive, tags, search index   (action "library")
- *   Links.gs                 ลิงก์ย่อและสถิติ                                                  (actions "links", "go", "click")
+ *   Links.gs                 ลิงก์ย่อ + ประวัติ QR Code + สถิติการคลิก/สแกน                    (actions "links", "go", "click")
  *   Analytics.gs             โครงการและสถิติเว็บไซต์ (แนบเว็บ/โครงการเพื่อนับผู้เข้าชม)         (actions "projects", "hit")
  *
  * Responsibilities (kept deliberately small — everything else runs in the browser):
@@ -36,7 +36,9 @@
  * One-time setup (run from the editor):  setup → setupSheet → setupSearchIndex → setupLinks → setupAnalytics
  */
 
-var APP_VERSION = '1.3.0';
+var APP_VERSION = '1.5.0';
+/** Reported by ?action=health so the frontend can detect an out-of-date deployment (e.g. Code.gs without Analytics.gs wiring). */
+var APP_FEATURES = ['login', 'log', 'archive', 'history', 'library', 'links', 'qr', 'projects', 'passlogin'];
 var TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo?id_token=';
 var VALID_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
 var MAX_BODY_CHARS = 8192;
@@ -52,7 +54,7 @@ function doGet(e) {
   var ctx = newCtx('get');
   try {
     var action = (e && e.parameter && e.parameter.action) || 'health';
-    if (action === 'health') return respond(ctx, { status: 'ok', version: APP_VERSION, time: new Date().toISOString(), configured: isConfigured() });
+    if (action === 'health') return respond(ctx, { status: 'ok', version: APP_VERSION, time: new Date().toISOString(), configured: isConfigured(), features: APP_FEATURES });
     if (action === 'version') return respond(ctx, { version: APP_VERSION });
     if (action === 'go') { ctx.op = 'go'; return respond(ctx, lnkGo(e.parameter)); }   // Links.gs — public short-link lookup
     throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');
@@ -70,8 +72,9 @@ function doPost(e) {
     ctx.op = String(body.action || '');
     if (body.action !== 'archive' && raw.length > MAX_BODY_CHARS) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
     switch (body.action) {
-      case 'health': return respond(ctx, { status: 'ok', version: APP_VERSION, time: new Date().toISOString(), configured: isConfigured() });
+      case 'health': return respond(ctx, { status: 'ok', version: APP_VERSION, time: new Date().toISOString(), configured: isConfigured(), features: APP_FEATURES });
       case 'login': return respond(ctx, login(body.idToken));
+      case 'passlogin': return respond(ctx, passLogin(body.username, body.password));
       case 'me': return respond(ctx, me(body.session));
       case 'log': return respond(ctx, logUse(body));
       case 'archive': return respond(ctx, archive(body));
@@ -99,6 +102,33 @@ function login(idToken) {
   var exp = Math.floor(Date.now() / 1000) + ttl;
   var user = { email: email, name: String(claims.name || ''), picture: String(claims.picture || '') };
   return { session: signSession({ sub: String(claims.sub), email: email, exp: exp }), exp: exp, user: user };
+}
+
+/* ---------------------- username / password sign-in ----------------------- *
+ * One internal account whose credentials live ONLY in Script properties (never in Git or Vercel):
+ *   LOCAL_USER  username (lower-case)         LOCAL_SALT  random salt
+ *   LOCAL_HASH  iterated HMAC-SHA256 hash     LOCAL_ITER  iterations (optional, default 200)
+ * Generate the three values with:  node scripts/make-local-account.mjs <username> <password>
+ * Remove LOCAL_HASH (or LOCAL_USER) to disable this sign-in; existing sessions stop working immediately.
+ */
+function localEmail() { var u = prop('LOCAL_USER').toLowerCase().replace(/[^a-z0-9._-]/g, ''); return u ? u + '@local.sand' : ''; }
+function localEnabled() { return !!(prop('LOCAL_USER') && prop('LOCAL_SALT') && prop('LOCAL_HASH')); }
+function hexOf(bytes) { return bytes.map(function (b) { var v = b < 0 ? b + 256 : b; return (v < 16 ? '0' : '') + v.toString(16); }).join(''); }
+function hashPassword(password, salt, iter) {
+  var h = hexOf(Utilities.computeHmacSha256Signature(password, salt));
+  for (var i = 0; i < iter; i++) h = hexOf(Utilities.computeHmacSha256Signature(h + ':' + password, salt));
+  return h;
+}
+function passLogin(username, password) {
+  rateLimit('passlogin', intProp('PASSLOGIN_LIMIT_PER_MIN', 10));
+  if (!localEnabled()) throw httpError('LOCAL_DISABLED', 'ยังไม่เปิดใช้การเข้าสู่ระบบด้วยรหัสผ่าน');
+  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password || username.length > 64 || password.length > 128) throw httpError('BAD_CREDENTIALS', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+  var userOk = safeEqual(username.trim().toLowerCase(), prop('LOCAL_USER').toLowerCase());
+  var hashOk = safeEqual(hashPassword(password, prop('LOCAL_SALT'), intProp('LOCAL_ITER', 200)), prop('LOCAL_HASH'));
+  if (!(userOk && hashOk)) { Utilities.sleep(500); throw httpError('BAD_CREDENTIALS', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
+  var email = localEmail();
+  var exp = Math.floor(Date.now() / 1000) + intProp('SESSION_TTL_MIN', 480) * 60;
+  return { session: signSession({ sub: 'local:' + prop('LOCAL_USER'), email: email, exp: exp }), exp: exp, user: { email: email, name: prop('LOCAL_NAME') || prop('LOCAL_USER'), picture: '' } };
 }
 
 function me(session) {
@@ -221,6 +251,7 @@ function verifyIdToken(idToken) {
 /** Domain policy. `hd` (hosted domain claim) is cross-checked when present. Never trusts the browser. */
 function isEmailAllowed(email, hd) {
   email = String(email || '').toLowerCase();
+  if (email && email === localEmail()) return localEnabled();   // the internal password account (not subject to the Google domain list)
   var at = email.lastIndexOf('@');
   if (at < 1) return false;
   var domain = email.slice(at + 1);
