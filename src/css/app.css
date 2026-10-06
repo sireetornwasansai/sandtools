@@ -327,3 +327,11 @@ textarea[readonly] { background: var(--surface-2); }
 @media (max-width: 480px) { .search-btn { flex: 0 0 auto; width: 40px; height: 40px; padding: 0; justify-content: center; border-color: transparent; background: transparent; } .search-btn .search-text { display: none; } .bn-link .nav-label { font-size: .62rem; } .hero h1 { font-size: 1.45rem; } h1 { font-size: 1.4rem; } .tabs { width: 100%; } .tool-grid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @media print { .topbar, .sidebar, .bottomnav, .toast-region { display: none !important; } .main { overflow: visible; padding: 0; } .card { box-shadow: none; } }
+
+/* QR generator: "save to history" card */
+.qr-save .notice { margin-bottom: .75rem; } .qr-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .6rem; margin: .25rem 0 .5rem; }
+.qr-mode { display: flex; align-items: flex-start; gap: .6rem; padding: .65rem .8rem; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color .15s, background-color .15s; }
+.qr-mode:hover { border-color: var(--primary); } .qr-mode:has(input:checked) { border-color: var(--primary); background: var(--primary-soft); } .qr-mode:has(input:disabled) { opacity: .55; cursor: not-allowed; }
+.qr-mode input { margin-top: .25rem; flex: none; } .qr-mode span { display: flex; flex-direction: column; min-width: 0; } .qr-mode small { color: var(--muted); font-size: .78rem; }
+.qr-save .btn-row { margin-top: .75rem; } .qr-saved { margin-top: .85rem; padding: .8rem 1rem; border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border)); border-radius: 12px; background: var(--success-bg); }
+.qr-saved p { margin: .25rem 0 .6rem; overflow-wrap: anywhere; } .qr-saved code { font-family: var(--mono); }
