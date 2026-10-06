@@ -224,6 +224,11 @@ body.dragging::after { content: "ปล่อยไฟล์เพื่อเ�
 .login-card { width: min(430px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 2.4rem 2rem; box-shadow: var(--shadow-lg); text-align: center; animation: page-in .35s var(--ease) both; }
 .login-card .wordmark { justify-content: center; margin-bottom: 1.1rem; }
 .wordmark-lg .wm-sand { font-size: 1.7rem; } .wordmark-lg::before { width: 40px; height: 40px; border-radius: 12px; }
+.login-form { display: grid; gap: .7rem; margin: 1.2rem 0 .4rem; text-align: left; } .login-form input { width: 100%; min-height: 44px; }
+.login-submit { min-height: 44px; width: 100%; }
+.login-or { display: flex; align-items: center; gap: .8rem; color: var(--muted); font-size: .85rem; margin: 1rem 0 .6rem; } .login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.login-lead { margin: 0 0 .2rem; font-size: .92rem; color: var(--text-2); }
+.login-card .hint a { color: var(--primary); }
 .login-btn { display: flex; justify-content: center; margin: 1.2rem 0; min-height: 44px; } .login-status.error { color: var(--error); }
 
 /* ============================== 7. TOOLS =============================== */
