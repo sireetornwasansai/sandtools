@@ -39,17 +39,17 @@ const ROUTES = ['/', '/qr', '/converter', '/settings'];
 
 console.log('\nSAND Office Tools — E2E');
 console.log('\nShell & navigation');
-await test('dashboard shows 2 tools, tagline, mandatory privacy warning', async (page) => {
+await test('dashboard shows all 6 tools, tagline, mandatory privacy warning', async (page) => {
   await go(page);
-  eq(await page.locator('.tool-card').count(), 2); ok((await page.textContent('.hero')).includes('เครื่องมือดิจิทัลสำหรับงานสำนักงาน ในที่เดียว'));
+  eq(await page.locator('.tool-card').count(), 6); ok((await page.textContent('.hero')).includes('เครื่องมือดิจิทัลสำหรับงานสำนักงาน ในที่เดียว'));
   ok((await page.textContent('main')).includes('หลีกเลี่ยงการอัปโหลดข้อมูลผู้ป่วยหรือข้อมูลสุขภาพที่สามารถระบุตัวบุคคลได้ หากระบบไม่ได้รับการอนุมัติให้ใช้กับข้อมูลดังกล่าว'));
 });
-await test('command palette (Ctrl+K): search "pdf" opens File Converter; Esc closes; arrows work', async (page) => {
+await test('command palette (Ctrl+K): search "converter" opens File Converter; Esc closes; arrows work', async (page) => {
   await go(page); await page.keyboard.press('Control+k'); await page.waitForSelector('.palette');
-  await page.keyboard.type('pdf'); eq(await page.locator('.palette-item').first().textContent().then((t) => t.includes('File Converter')), true); await page.keyboard.press('Enter');
+  await page.keyboard.type('converter'); eq(await page.locator('.palette-item').first().textContent().then((t) => t.includes('File Converter')), true); await page.keyboard.press('Enter');
   await page.waitForFunction(() => location.hash === '#/converter'); eq(await page.locator('.palette').count(), 0);
   await page.keyboard.press('Control+k'); await page.keyboard.type('QR'); ok((await page.locator('.palette-item').first().textContent()).includes('QR')); await page.keyboard.press('Escape'); eq(await page.locator('.palette').count(), 0);
-  await page.fill('.palette-input', 'zzzzqq'); ok((await page.textContent('.palette-list')).includes('ไม่พบ'));
+  await page.keyboard.press('Control+k'); await page.waitForSelector('.palette-input'); await page.fill('.palette-input', 'zzzzqq'); ok((await page.textContent('.palette-list')).includes('ไม่พบ'));
 });
 await test('theme toggle persists across reload; reduced theme tokens apply', async (page) => {
   await go(page); const before = await page.getAttribute('html', 'data-theme'); await page.click('button[aria-label="สลับโหมดมืด/สว่าง"]');
@@ -86,7 +86,7 @@ await test('Wi-Fi, vCard, SMS, email, phone, text payloads produce QR; too-long 
   await page.click('[role=tab]:has-text("ข้อความ")'); await page.fill('textarea', 'x'.repeat(3000)); await page.waitForSelector('.notice-error'); ok((await page.textContent('.notice-error')).includes('ยาวเกินไป') || (await page.textContent('.notice-error')).includes('ยาวเกิน'));
 });
 await test('customisation: size/colour/style/logo; low-contrast warning', async (page) => {
-  await go(page, '/qr'); await page.fill('input[inputmode=url]', 'https://example.com'); await page.fill('input[type=number] >> nth=0', '256'); await page.selectOption('select >> nth=1', 'rounded');
+  await go(page, '/qr'); await page.fill('input[inputmode=url]', 'https://example.com'); await page.fill('input[type=number] >> nth=0', '256'); await page.selectOption('.card:has(h2:has-text("ปรับแต่ง")) select >> nth=1', 'rounded');
   await page.waitForSelector('.qr-canvas-wrap:not([hidden])'); const w = await page.evaluate(() => document.querySelector('.qr-canvas-wrap canvas').width); ok(w >= 200 && w <= 256, `canvas ${w}`);
   await page.evaluate(() => { const i = document.querySelectorAll('input[type=color]'); i[0].value = '#dddddd'; i[0].dispatchEvent(new Event('input', { bubbles: true })); });
   await page.waitForSelector('.notice-warn');
@@ -120,12 +120,12 @@ await test('path-traversal zip entry is neutralised (no crash, nothing read from
   const t = await page.textContent('#main'); ok(!/root:|passwd|evil/.test(t));
 });
 await test('rejects oversized file (> limit) and unsupported extension', async (page) => {
-  await go(page, '/converter'); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(26 * 1024 * 1024)], 'big.pdf', { type: 'application/pdf' })); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); });
+  await go(page, '/converter'); await page.waitForSelector('input[type=file]', { state: 'attached' }); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(26 * 1024 * 1024)], 'big.pdf', { type: 'application/pdf' })); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); });
   await page.waitForSelector('.notice-error'); ok((await page.textContent('.notice-error')).includes('ใหญ่เกินไป'));
   await page.click('button:has-text("ลองไฟล์อื่น")'); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File(['x'], 'run.exe')); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); }); await page.waitForSelector('.toast-error'); ok((await page.textContent('.toast-error')).includes('ไม่รองรับ'));
 });
 await test('MIME/extension mismatch is rejected (image/png declared for .pdf)', async (page) => {
-  await go(page, '/converter'); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(1000)], 'x.pdf', { type: 'image/png' })); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); });
+  await go(page, '/converter'); await page.waitForSelector('input[type=file]', { state: 'attached' }); await page.evaluate(() => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(1000)], 'x.pdf', { type: 'image/png' })); const i = document.querySelector('input[type=file]'); i.files = dt.files; i.dispatchEvent(new Event('change')); });
   await page.waitForSelector('.notice-error'); ok((await page.textContent('.notice-error')).includes('ไม่ตรงกับ'));
 });
 
@@ -175,6 +175,78 @@ await test('backend unreachable at login → friendly Thai error, app stays lock
 await test('backend health check in Settings (no login mode)', async (page, ctx) => {
   await authSetup(ctx, { requireLogin: false, loginResponse: () => ({}) }); await go(page, '/settings'); await page.click('button:has-text("ตรวจสอบ Backend")'); await page.waitForFunction(() => document.body.textContent.includes('พร้อมใช้งาน · เวอร์ชัน 1.0.0'));
 });
+
+console.log('\nQR history (mocked backend)');
+/** In-memory stand-in for Links.gs: create / list / get / update / delete for kinds qr and qrs. */
+async function qrBackend(ctx) {
+  const items = []; const calls = [];
+  await ctx.route((u) => u.pathname === '/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.SAND_CONFIG=${JSON.stringify({ gasUrl: GAS, googleClientId: 'test-client', requireLogin: true, maxFileSizeMB: 25, conversionTimeoutSec: 60, version: 'dev' })};` }));
+  await ctx.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.google={accounts:{id:{initialize:function(o){window.__cb=o.callback},renderButton:function(el){var b=document.createElement('button');b.textContent='Sign in with Google';b.id='fake-google';b.onclick=function(){window.__cb({credential:'FAKE.ID.TOKEN'})};el.appendChild(b)},disableAutoSelect:function(){}}}};` }));
+  await ctx.route(`${GAS}**`, async (r) => {
+    const req = r.request(); const b = req.method() === 'POST' ? JSON.parse(req.postData() || '{}') : { action: new URL(req.url()).searchParams.get('action') }; calls.push(b);
+    const res = (data) => r.fulfill({ headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ success: true, data }) });
+    const err = (code, message) => r.fulfill({ headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ success: false, error: { code, message } }) });
+    const base = 'https://sand.example.go.th';
+    if (b.action === 'health') return res({ status: 'ok', version: '1.4.0' });
+    if (b.action === 'login') return res({ session: 'SESSION-OK', exp: Math.floor(Date.now() / 1000) + 3600, user: { email: 'a@example.go.th', name: 'สมชาย ใจดี' } });
+    if (b.action === 'me') return res({ email: 'a@example.go.th' });
+    if (b.action === 'projects') return res({ items: [] });
+    if (b.action === 'log') return res({ logId: 'x' });
+    if (b.action !== 'links') return err('UNKNOWN_ACTION', 'x');
+    const find = () => items.find((i) => i.code === b.code);
+    if (b.op === 'list') return res({ admin: false, base, items: items.map((i) => ({ ...i })), scanned: false });
+    if (b.op === 'get') return find() ? res({ link: find(), base }) : err('NOT_FOUND', 'ไม่พบ');
+    if (b.op === 'create') {
+      if (b.kind === 'qrs' && b.qr && b.qr.f && b.qr.f.password) return err('NO_SECRET', 'ไม่บันทึกรหัสผ่าน');
+      const l = { code: `q${String(items.length + 1).padStart(6, 'a')}`, url: b.kind === 'qr' ? b.url : '', title: b.title, owner: 'a@example.go.th', created: '2026-10-06 13:45:00', expires: '', status: 'active', note: b.note || '', tags: [], ref: '', refKind: '', project: '', kind: b.kind, qr: b.qr, clicks: b.kind === 'qr' ? 7 : 0, week: b.kind === 'qr' ? 3 : 0, last: 0 };
+      items.push(l); return res({ link: l, existing: false, base });
+    }
+    if (b.op === 'update') { const l = find(); if (!l) return err('NOT_FOUND', 'x'); for (const k of ['title', 'note', 'url', 'qr', 'status']) if (b[k] !== undefined) l[k] = b[k]; return res({ link: l }); }
+    if (b.op === 'delete') { const i = items.findIndex((x) => x.code === b.code); if (i >= 0) items.splice(i, 1); return res({ code: b.code }); }
+    return err('UNKNOWN_ACTION', 'x');
+  });
+  return { items, calls };
+}
+const signIn = async (page) => { await page.goto(`${base}/index.html#/qr`); await page.click('#fake-google'); await page.waitForSelector('.sidebar'); await page.waitForSelector('.qr-save input[type=text]'); };
+await test('save a static QR (what it is for + category) → appears in QR history; Wi-Fi password is refused; edit and delete work', async (page, ctx) => {
+  const be = await qrBackend(ctx); await signIn(page);
+  await page.selectOption('select[aria-label="หมวดงาน"]', 'vaccine');
+  await page.fill('input[inputmode=url]', 'example.com/flu'); await page.waitForSelector('.qr-canvas-wrap:not([hidden])');
+  await page.click('.qr-save .btn-primary'); await page.waitForSelector('.toast:has-text("ตั้งชื่อ QR")');
+  await page.fill('.qr-save input[placeholder^="เช่น QR"]', 'QR ลงทะเบียนวัคซีนไข้หวัดใหญ่'); await page.click('.qr-save .btn-primary'); await page.waitForSelector('.qr-saved');
+  const c = be.calls.find((x) => x.op === 'create'); eq(c.kind, 'qrs'); eq(c.title, 'QR ลงทะเบียนวัคซีนไข้หวัดใหญ่'); eq(c.qr.t, 'url'); eq(c.qr.d.cat, 'vaccine'); eq(c.qr.f.url, 'example.com/flu');
+  await go(page, '/qrs'); await page.waitForSelector('.qrh-card'); eq(await page.locator('.qrh-card').count(), 1);
+  ok((await page.textContent('.qrh-card')).includes('งานวัคซีน') && (await page.textContent('.qrh-card')).includes('เก็บประวัติ'));
+  eq(await page.locator('.qrh-thumb canvas').count(), 1, 'thumbnail rendered from the saved data');
+  const png = await dl(page, () => page.click('.qrh-card button:has-text("PNG")')); ok(png.name.endsWith('.png') && png.buf.length > 200);
+  await page.click('.qrh-card a:has-text("เปิดแก้ไข")'); await page.waitForSelector('.qr-save .notice-info:not([hidden])'); eq(await page.inputValue('input[inputmode=url]'), 'example.com/flu'); eq(await page.inputValue('select[aria-label="หมวดงาน"]'), 'vaccine');
+  await page.fill('.qr-save input[placeholder^="เช่น QR"]', 'QR วัคซีน (แก้ชื่อ)'); await page.click('.qr-save .btn-primary:has-text("อัปเดต")'); await page.waitForSelector('.qr-saved:not([hidden])');
+  eq(be.items.length, 1, 'updated in place'); eq(be.items[0].title, 'QR วัคซีน (แก้ชื่อ)');
+  await go(page, '/qrs'); await page.waitForSelector('.qrh-card'); await page.fill('input[type=search]', 'ไม่มีอยู่จริง'); await page.waitForSelector('.qrh-empty'); await page.fill('input[type=search]', 'แก้ชื่อ'); await page.waitForSelector('.qrh-card');
+  await page.click('.qrh-del'); await page.click('.modal .btn-danger'); await page.waitForSelector('.qrh-empty'); eq(be.items.length, 0);
+});
+await test('tracked QR: saving switches the picture to the short link and the history shows scan numbers; Wi-Fi password is never sent', async (page, ctx) => {
+  const be = await qrBackend(ctx); await signIn(page);
+  await page.fill('input[inputmode=url]', 'https://example.com/survey'); await page.waitForSelector('.qr-canvas-wrap:not([hidden])');
+  await page.fill('.qr-save input[placeholder^="เช่น QR"]', 'QR แบบประเมิน'); await page.check('#qr-mode-tracked'); await page.click('.qr-save .btn-primary'); await page.waitForSelector('.qr-saved:not([hidden])');
+  const c = be.calls.find((x) => x.op === 'create'); eq(c.kind, 'qr'); eq(c.url, 'https://example.com/survey'); eq(c.qr.f, undefined, 'a tracked QR stores no form data');
+  ok((await page.textContent('.qr-info')).includes('ติดตามสถิติ'), 'picture now encodes the short link');
+  await page.fill('input[inputmode=url]', 'https://example.com/other'); await page.waitForFunction(() => !document.querySelector('.qr-info').textContent.includes('ติดตามสถิติ'));
+  await page.click('button[role=tab]:has-text("Wi-Fi")'); ok(await page.locator('#qr-mode-tracked').isDisabled(), 'tracking is only for links');
+  await go(page, '/qrs'); await page.waitForSelector('.qrh-card'); const card = await page.textContent('.qrh-card'); ok(card.includes('ติดตามสถิติ') && card.includes('7') && card.includes('ดูสถิติ'));
+  eq(await page.locator('.lnk-kpi').count(), 4);
+});
+await test('static Wi-Fi QR with a password is not saved (client check)', async (page, ctx) => {
+  const be = await qrBackend(ctx); await signIn(page);
+  await page.click('button[role=tab]:has-text("Wi-Fi")'); const inputs = page.locator('#main .card').first().locator('input[type=text]'); await inputs.nth(0).fill('HOSP'); await inputs.nth(1).fill('p@ssw0rd');
+  await page.waitForSelector('.qr-canvas-wrap:not([hidden])'); await page.fill('.qr-save input[placeholder^="เช่น QR"]', 'Wi-Fi ผู้ป่วย'); await page.click('.qr-save .btn-primary'); await page.waitForSelector('.toast:has-text("ไม่บันทึกรหัสผ่าน")');
+  ok(!be.calls.some((x) => x.op === 'create'), 'nothing was sent');
+});
+await test('mobile 390px: QR history page has no horizontal overflow', async (page, ctx) => {
+  const be = await qrBackend(ctx); be.items.push({ code: 'abcdefg', url: 'https://example.com/a-very-long-destination/path/that/keeps/going/and/going', title: 'QR ชื่อยาวมาก ๆ สำหรับทดสอบการตัดบรรทัดในหน้าจอมือถือขนาดเล็ก', owner: 'a@example.go.th', created: '2026-10-01 10:00:00', expires: '', status: 'active', note: 'หมายเหตุ', tags: [], ref: '', refKind: '', project: '', kind: 'qr', qr: { t: 'url', d: { cat: 'queue' } }, clicks: 1234, week: 56, last: Date.now() });
+  await page.goto(`${base}/index.html#/qrs`); await page.click('#fake-google'); await page.waitForSelector('.qrh-card');
+  const o = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]); ok(o[0] <= o[1] + 1, `scrollWidth ${o[0]} > ${o[1]}`);
+}, { viewport: { width: 390, height: 800 } });
 
 console.log('\nResponsive & offline');
 for (const r of ROUTES) {
