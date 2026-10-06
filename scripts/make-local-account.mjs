@@ -3,7 +3,7 @@
 // Paste the printed values into Apps Script → Project Settings → Script properties. Never commit the password.
 import crypto from 'node:crypto';
 
-export const ITER = 200;
+export const ITER = 5; // Apps Script computes HMAC slowly; keep this small (rate limiting protects against guessing)
 const hex = (buf) => buf.toString('hex');
 /** Must stay identical to hashPassword() in gas/Code.gs. */
 export function hashPassword(password, salt, iter = ITER) {
