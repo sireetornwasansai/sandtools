@@ -15,7 +15,7 @@ test('config: only public keys, defaults, booleans and numbers parsed', () => {
   const js = configJs({ GOOGLE_CLIENT_SECRET: 'topsecret', SESSION_SECRET: 'x', ALLOWED_EMAIL_DOMAIN: 'secret.go.th' }, 'v'); assert.ok(!js.includes('topsecret') && !js.includes('secret.go.th'));
 });
 test('tool search: Thai + English keywords per the spec', () => {
-  assert.equal(searchTools('PDF')[0].id, 'converter'); assert.equal(searchTools('QR')[0].id, 'qr'); 
+  assert.equal(searchTools('PDF')[0].id, 'pdf'); assert.ok(searchTools('PDF').some((t) => t.id === 'converter')); assert.equal(searchTools('QR')[0].id, 'qr'); 
   assert.deepEqual(searchTools('zzzzqq'), []); assert.ok(searchTools('').length >= TOOLS.length);
 });
 test('routing helpers', () => {
