@@ -282,6 +282,11 @@ textarea[readonly] { background: var(--surface-2); }
 .sk-score { display: flex; align-items: center; gap: 1rem; } .sk-score > div:last-child { flex: 1; } .sk-num { font-size: 2.5rem; font-weight: 700; line-height: 1; min-width: 3.2rem; font-variant-numeric: tabular-nums; }
 .sk-issues { list-style: none; margin: .5rem 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; font-size: .92rem; }
 
+/* modal dialogs (js/core/layers.js) */
+.modal-wrap { position: fixed; inset: 0; z-index: 700; display: grid; place-items: center; padding: 1rem; background: rgb(10 15 28 / .55); backdrop-filter: blur(3px); animation: fade .15s ease-out both; }
+.modal { width: min(440px, 100%); max-height: 90vh; overflow: auto; padding: 1.4rem; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg); animation: page-in .2s var(--ease) both; }
+.modal-wide { width: min(560px, 100%); } .modal h2 { font-size: 1.15rem; } .modal-actions { justify-content: flex-end; margin-top: 1rem; }
+
 /* ====================== 8. HISTORY / LIBRARY SHARED ===================== */
 .hist-tools { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .85rem; } .hist-tools input { flex: 1 1 260px; }
 .hist-list { display: flex; flex-direction: column; gap: .45rem; }

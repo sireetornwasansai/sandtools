@@ -17,10 +17,6 @@
 .lib-hr { border: 0; border-top: 1px solid var(--border); margin: 1.1rem 0; }
 
 .lib-drawer-wrap { z-index: 260; }
-.lib-modal-wrap { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 1rem; background: rgb(10 15 28 / .55); backdrop-filter: blur(3px); animation: fade .15s ease-out both; }
-.lib-modal { width: min(440px, 100%); max-height: 90vh; overflow: auto; padding: 1.4rem; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-lg); animation: page-in .2s var(--ease) both; }
-.lib-modal-wide { width: min(560px, 100%); }
-.lib-modal-actions { justify-content: flex-end; margin-top: 1rem; }
 .lib-pick-list { display: flex; flex-direction: column; gap: .25rem; margin-top: .75rem; min-height: 6rem; max-height: 45vh; overflow: auto; padding: .25rem; border: 1px solid var(--border); border-radius: 10px; }
 .lib-pick-row { display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .lib-pick-row:hover { background: var(--surface-2); } .lib-pick-row .icon { color: #b45309; }

@@ -1,0 +1,26 @@
+/* SAND Office Tools — projects & website statistics. Loaded on demand together with css/links.css (shared chart/table styles). */
+.prj-tools { margin-top: .25rem; }
+.prj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+.prj-card { display: flex; flex-direction: column; gap: .85rem; padding: 1.1rem 1.2rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; box-shadow: var(--shadow); transition: border-color .18s, box-shadow .18s, transform .18s var(--ease); }
+.prj-card:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.prj-head { display: flex; align-items: center; gap: .75rem; min-width: 0; } .prj-head .hist-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prj-state { flex: none; font-size: .74rem; } .prj-on { background: var(--success-bg); color: var(--success); } .prj-wait { background: var(--warning-bg); color: var(--warning); } .prj-off { background: var(--surface-2); color: var(--muted); }
+.prj-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; padding: .7rem .8rem; border-radius: 12px; background: var(--surface-2); }
+.prj-nums span { display: flex; flex-direction: column; min-width: 0; } .prj-nums b { font-size: 1.35rem; font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1.3; } .prj-nums small { color: var(--muted); font-size: .72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prj-foot { font-size: .8rem; }
+.prj-empty { grid-column: 1 / -1; padding: 3rem 1rem; }
+.prj-tabs { margin-bottom: 1rem; }
+.prj-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: .6rem; } .prj-meta a { color: var(--primary); overflow-wrap: anywhere; font-size: .92rem; }
+.prj-live { display: inline-flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--text-2); } .prj-live i { width: 9px; height: 9px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 50%, transparent); animation: prj-pulse 1.8s infinite; }
+@keyframes prj-pulse { 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.prj-legends { display: flex; gap: .2rem; margin: -.2rem 0 .4rem; }
+.prj-legend { display: inline-flex; align-items: center; gap: .35rem; margin-right: .7rem; font-weight: 500; font-size: .8rem; color: var(--muted); } .prj-legend::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--primary); } .prj-legend.b::before { background: var(--accent-teal); }
+.prj-path { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: .82rem; }
+.prj-code { position: relative; margin: .6rem 0 1rem; } .prj-code pre { margin: 0; padding: .9rem 6.2rem .9rem 1rem; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); overflow-x: auto; font-size: .82rem; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.prj-code .btn { position: absolute; top: .55rem; right: .55rem; }
+.prj-verify { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin-bottom: 1rem; } .prj-verify-state { font-size: .9rem; flex: 1; min-width: 12rem; }
+.prj-det { margin-bottom: .75rem; border: 1px solid var(--border); border-radius: 12px; padding: .6rem .9rem; background: var(--surface); } .prj-det summary { cursor: pointer; font-weight: 600; } .prj-det[open] summary { margin-bottom: .6rem; } .prj-det ul { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: .35rem; font-size: .9rem; }
+.prj-privacy { margin-top: 1.25rem; padding: 1rem 1.1rem; border-radius: 12px; background: var(--primary-soft); } .prj-privacy h3 { font-size: .95rem; } .prj-privacy ul { margin: 0; padding-left: 1.2rem; font-size: .88rem; display: flex; flex-direction: column; gap: .25rem; }
+.prj-switch { padding: .8rem 1rem; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 1rem; }
+.prj-links { margin-top: .8rem; }
+@media (max-width: 640px) { .prj-grid { grid-template-columns: 1fr; } .prj-path { max-width: 11rem; } .prj-code pre { padding-right: 1rem; padding-bottom: 3rem; } .prj-code .btn { top: auto; bottom: .55rem; } }
