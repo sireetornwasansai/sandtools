@@ -21,6 +21,7 @@ function makeEnv(props = {}, tokeninfo = () => ({ code: 404, body: '{}' })) {
     UrlFetchApp: { fetch: (url) => { const r = tokeninfo(decodeURIComponent(url.split('id_token=')[1])); return { getResponseCode: () => r.code, getContentText: () => r.body }; } },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (t) => ({ text: t, setMimeType() { return this; } }) },
     Utilities: {
+      sleep: () => {},
       getUuid: () => crypto.randomUUID(),
       base64EncodeWebSafe: (x) => (typeof x === 'string' ? Buffer.from(x, 'utf8') : unsigned(x)).toString('base64url') + '==',
       base64DecodeWebSafe: (s) => toSigned(Buffer.from(s, 'base64url')),
@@ -117,4 +118,34 @@ test('log/archive require a valid session and neutralise formula injection', () 
 test('history requires a valid session', () => {
   const env = makeEnv({ ...base, LOG_SHEET_ID: 'sheet' });
   assert.equal(env.post({ action: 'history', session: 'bad' }).error.code, 'INVALID_SESSION');
+});
+
+/* ---------------- username / password account (passlogin) ---------------- */
+import { hashPassword } from '../scripts/make-local-account.mjs';
+const localProps = (pw = 'correct horse 42') => ({ ...base, LOCAL_USER: 'hrdsansai', LOCAL_SALT: 'abc123salt', LOCAL_ITER: '200', LOCAL_HASH: hashPassword(pw, 'abc123salt', 200) });
+
+test('passlogin: correct credentials issue a session that works for me/history', () => {
+  const e = makeEnv(localProps());
+  const r = e.post({ action: 'passlogin', username: 'HRDSansai', password: 'correct horse 42' });
+  assert.equal(r.success, true); assert.equal(r.data.user.email, 'hrdsansai@local.sand');
+  assert.equal(e.post({ action: 'me', session: r.data.session }).success, true);
+});
+test('passlogin: wrong password / wrong user / missing fields are rejected with one generic error', () => {
+  const e = makeEnv(localProps());
+  for (const b of [{ username: 'hrdsansai', password: 'nope' }, { username: 'other', password: 'correct horse 42' }, { username: 'hrdsansai' }, { password: 'x' }, { username: 1, password: 2 }])
+    assert.equal(e.post({ action: 'passlogin', ...b }).error.code, 'BAD_CREDENTIALS');
+});
+test('passlogin: disabled until LOCAL_* properties exist, and removing LOCAL_HASH revokes live sessions', () => {
+  assert.equal(makeEnv(base).post({ action: 'passlogin', username: 'a', password: 'b' }).error.code, 'LOCAL_DISABLED');
+  const e = makeEnv(localProps());
+  const s = e.post({ action: 'passlogin', username: 'hrdsansai', password: 'correct horse 42' }).data.session;
+  delete e.store.LOCAL_HASH;
+  assert.equal(e.post({ action: 'me', session: s }).success, false);
+});
+test('passlogin: rate limited, and the local account is not accepted via the Google domain list', () => {
+  const e = makeEnv({ ...localProps(), PASSLOGIN_LIMIT_PER_MIN: '3' });
+  let last; for (let i = 0; i < 5; i++) last = e.post({ action: 'passlogin', username: 'hrdsansai', password: 'bad' });
+  assert.equal(last.error.code, 'RATE_LIMITED');
+  const e2 = makeEnv(base); // a forged session for the local e-mail is useless without LOCAL_HASH
+  assert.equal(e2.post({ action: 'me', session: 'x.y' }).success, false);
 });
