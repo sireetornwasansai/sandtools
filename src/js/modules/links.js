@@ -31,7 +31,7 @@ async function copy(text, msg = 'คัดลอกลิงก์แล้ว')
 
 /* ---------------------------------- page ---------------------------------- */
 
-export async function mount(root) {
+export async function mount(root, ctx) {
   await loadCss('links');
   const s = getSession();
   const host = h('div');
@@ -85,7 +85,7 @@ export async function mount(root) {
   const search = h('input', { type: 'search', placeholder: 'ค้นหาชื่อ ลิงก์ย่อ หรือปลายทาง…', 'aria-label': 'ค้นหาลิงก์' });
   search.addEventListener('input', debounce(() => { st.q = search.value.trim().toLowerCase(); draw(); }, 150));
   const filterSel = h('select', { 'aria-label': 'กรองสถานะ', onchange: () => { st.filter = filterSel.value; draw(); } },
-    h('option', { value: 'all' }, 'ทั้งหมด'), h('option', { value: 'active' }, 'ใช้งานอยู่'), h('option', { value: 'off' }, 'ปิด/หมดอายุ'), h('option', { value: 'mine' }, 'ของฉัน'), h('option', { value: 'drive' }, 'จากคลังข้อมูล (Drive)'));
+    h('option', { value: 'all' }, 'ทั้งหมด'), h('option', { value: 'active' }, 'ใช้งานอยู่'), h('option', { value: 'off' }, 'ปิด/หมดอายุ'), h('option', { value: 'mine' }, 'ของฉัน'), h('option', { value: 'drive' }, 'จากคลังข้อมูล (Drive)'), h('option', { value: 'qr' }, 'QR ที่ติดตามสถิติ'), h('option', { value: 'plain' }, 'ลิงก์ย่อทั่วไป'));
   const projSel = h('select', { 'aria-label': 'กรองตามโครงการ', hidden: true, onchange: () => { st.project = projSel.value; draw(); } });
   const sortSel = h('select', { 'aria-label': 'เรียงลำดับ', onchange: () => { st.sort = sortSel.value; draw(); } },
     h('option', { value: 'new' }, 'ใหม่สุดก่อน'), h('option', { value: 'clicks' }, 'คลิกมากสุด'), h('option', { value: 'week' }, 'คลิก 7 วันมากสุด'), h('option', { value: 'name' }, 'ชื่อ ก–ฮ'));
@@ -100,9 +100,11 @@ export async function mount(root) {
     const my = ++seq; if (showSkeleton) skeleton();
     try {
       const d = await call('list'); if (my !== seq) return;
-      st.items = d.items; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; st.scanned = d.scanned;
+      st.items = d.items.filter((l) => l.kind !== 'qrs'); st.savedQr = d.items.length - st.items.length; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; st.scanned = d.scanned;
       if (!st.projectsLoaded) { st.projectsLoaded = true; try { st.projects = (await gasCall('projects', { session: getSession().token, op: 'names' }, 30000)).data.items; fillProjects(projIn); } catch { st.projects = []; } }
       if (my !== seq) return; draw();
+      const want = !st.deepLinked && ctx && ctx.params && ctx.params.get('stats');
+      if (want) { st.deepLinked = true; const hit = st.items.find((x) => x.code === want); if (hit) openStats(hit); else toast('ไม่พบลิงก์/QR ที่ต้องการดูสถิติ หรือไม่มีสิทธิ์เข้าถึง', 'error'); }
     } catch (e) {
       if (my !== seq) return;
       list.replaceChildren(...[notice('error', 'โหลดลิงก์ไม่ได้', e.message), e.code === 'INVALID_SESSION' ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, 'เข้าสู่ระบบใหม่') : null].filter(Boolean));
@@ -113,7 +115,7 @@ export async function mount(root) {
     const act = st.items.filter((l) => statusOf(l) === 'active').length; const total = st.items.reduce((a, l) => a + l.clicks, 0); const week = st.items.reduce((a, l) => a + l.week, 0);
     const top = [...st.items].sort((a, b) => b.clicks - a.clicks)[0];
     const card = (label, value, sub, icon) => h('div', { class: 'lnk-kpi' }, h('span', { class: 'lnk-kpi-ico' }, svgIcon(icon, 20)), h('div', null, h('small', null, label), h('b', null, value), sub ? h('span', { class: 'muted' }, sub) : null));
-    kpi.replaceChildren(card('ลิงก์ที่ใช้งานอยู่', fmt(act), `จากทั้งหมด ${fmt(st.items.length)} ลิงก์`, I.link), card('คลิกทั้งหมด', fmt(total), 'ไม่นับบอทและตัวอย่างลิงก์ในแชต', I.chart),
+    kpi.replaceChildren(card('ลิงก์ที่ใช้งานอยู่', fmt(act), `จากทั้งหมด ${fmt(st.items.length)} ลิงก์`, I.link), card('คลิก/สแกนทั้งหมด', fmt(total), 'ไม่นับบอทและตัวอย่างลิงก์ในแชต', I.chart),
       card('คลิก 7 วันล่าสุด', fmt(week), null, ICONS.clock || I.chart), card('ลิงก์ยอดนิยม', top && top.clicks ? fmt(top.clicks) : '-', top && top.clicks ? top.title || `/${top.code}` : 'ยังไม่มีคนเข้า', I.qr));
   }
 
@@ -122,7 +124,7 @@ export async function mount(root) {
     const items = st.items.filter((l) => {
       const s2 = statusOf(l);
       if (st.filter === 'active' && s2 !== 'active') return false; if (st.filter === 'off' && s2 === 'active') return false;
-      if (st.filter === 'mine' && l.owner !== me) return false; if (st.filter === 'drive' && !l.ref) return false; if (st.project && l.project !== st.project) return false;
+      if (st.filter === 'mine' && l.owner !== me) return false; if (st.filter === 'drive' && !l.ref) return false; if (st.filter === 'qr' && l.kind !== 'qr') return false; if (st.filter === 'plain' && l.kind === 'qr') return false; if (st.project && l.project !== st.project) return false;
       return !q || `${l.title} ${l.code} ${l.url} ${l.note} ${l.tags.join(' ')} ${l.owner} ${projName(l.project)}`.toLowerCase().includes(q);
     });
     const by = { new: (a, b) => (a.created < b.created ? 1 : -1), clicks: (a, b) => b.clicks - a.clicks, week: (a, b) => b.week - a.week, name: (a, b) => (a.title || a.code).localeCompare(b.title || b.code, 'th') }[st.sort];
@@ -138,16 +140,17 @@ export async function mount(root) {
     if (!shown.length) {
       list.replaceChildren(h('div', { class: 'empty' }, svgIcon(I.link, 28), h('p', null, st.items.length ? 'ไม่พบลิงก์ที่ตรงกับเงื่อนไข' : 'ยังไม่มีลิงก์ — วางลิงก์ด้านบนแล้วกด "ย่อลิงก์" ได้เลย')));
     } else list.replaceChildren(...shown.map(row));
-    foot.textContent = st.scanned ? 'สถิติคำนวณจากการคลิกล่าสุด 60,000 รายการ' : st.admin ? 'ผู้ดูแลระบบเห็นลิงก์ของทุกคน' : '';
+    foot.textContent = st.scanned ? 'สถิติคำนวณจากการคลิกล่าสุด 60,000 รายการ' : st.admin ? 'ผู้ดูแลระบบเห็นลิงก์ของทุกคน' : st.savedQr ? `มี QR ที่เก็บประวัติอย่างเดียว ${fmt(st.savedQr)} รายการ — ดูได้ที่หน้า ประวัติ QR` : '';
   }
 
   function row(l) {
     const stt = statusOf(l); const full = shortUrl(st.base, l.code);
     return h('div', { class: `lnk-row${stt === 'active' ? '' : ' is-off'}` },
       h('button', { class: 'lnk-main', type: 'button', onclick: () => openStats(l) },
-        h('span', { class: 'hist-ico' }, svgIcon(l.ref ? ICONS.folder : I.link, 20)),
+        h('span', { class: 'hist-ico' }, svgIcon(l.kind === 'qr' ? I.qr : l.ref ? ICONS.folder : I.link, 20)),
         h('span', { class: 'hist-main' }, h('b', { title: l.title || hostOf(l.url) }, l.title || hostOf(l.url)),
           h('small', { class: 'lnk-short' }, full.replace(/^https?:\/\//, '')), h('small', { class: 'muted lnk-target', title: l.url }, `→ ${l.url}`))),
+      l.kind === 'qr' ? h('span', { class: 'pill', title: 'QR Code ที่นับผู้สแกน' }, 'QR') : null,
       l.project && projName(l.project) ? h('span', { class: 'pill lnk-proj', title: 'โครงการ' }, projName(l.project)) : null,
       ...l.tags.slice(0, 2).map((t) => h('span', { class: 'pill lib-tag' }, `#${t}`)),
       st.admin && l.owner !== me ? h('span', { class: 'pill', title: l.owner }, l.owner.split('@')[0]) : null,
@@ -171,7 +174,7 @@ export async function mount(root) {
       try { const data = await call('stats', { code: link.code, days: d }); if (my === seq || true) render(data); } catch (e) { body.replaceChildren(notice('error', 'โหลดสถิติไม่ได้', e.message)); }
     }
     function render(d) {
-      const l = d.link; const full = shortUrl(st.base, l.code); const stt = statusOf(l);
+      const l = d.link; const full = shortUrl(st.base, l.code); const stt = statusOf(l); const unit = l.kind === 'qr' ? 'สแกน' : 'คลิก';
       title.textContent = l.title || hostOf(l.url);
       const range = h('div', { class: 'tabs lnk-range', role: 'tablist', 'aria-label': 'ช่วงเวลา' }, [[7, '7 วัน'], [30, '30 วัน'], [90, '90 วัน'], [365, '1 ปี']].map(([n, label]) =>
         h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(d.days === n), onclick: () => fetchStats(n) }, label)));
@@ -182,23 +185,24 @@ export async function mount(root) {
         h('p', { class: 'lnk-dest muted' }, '→ ', h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.url)),
         h('div', { class: 'btn-row lnk-actions' },
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => showQr(full, l.title || 'QR Code') }, svgIcon(I.qr, 16), 'QR Code'),
+          l.kind === 'qr' ? h('a', { class: 'btn btn-sm', href: `#/qr?load=${encodeURIComponent(l.code)}`, onclick: () => closeDrawer && closeDrawer() }, svgIcon(ICONS.edit, 16), 'เปิดใน QR Generator') : null,
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => exportCsv(l) }, svgIcon(ICONS.download, 16), 'ส่งออก CSV'),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => editLink(l, () => fetchStats(d.days)) }, svgIcon(ICONS.edit, 16), 'แก้ไข'),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => toggle(l, () => fetchStats(d.days)) }, l.status === 'disabled' ? 'เปิดใช้งาน' : 'ปิดชั่วคราว'),
           h('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: () => remove(l) }, svgIcon(ICONS.trash, 16), 'ลบ')),
         stt !== 'active' ? notice('warn', stt === 'expired' ? 'ลิงก์นี้หมดอายุแล้ว' : 'ลิงก์นี้ปิดใช้งานอยู่', 'ผู้ที่เปิดลิงก์จะเห็นหน้าแจ้งว่าใช้งานไม่ได้') : null,
-        h('div', { class: 'lnk-stats' }, stat('คลิกทั้งหมด', d.total, `ล่าสุด ${ago(d.last)}`), stat('ผู้เข้าชมไม่ซ้ำ', d.unique, 'นับจากอุปกรณ์/เครือข่าย'), stat(`ใน ${d.days} วัน`, d.inRange, `${fmt(d.uniqueInRange)} คนไม่ซ้ำ`), stat('บอทที่ไม่นับ', d.bots, 'ตัวอย่างลิงก์ในแชต ฯลฯ')),
+        h('div', { class: 'lnk-stats' }, stat(`${unit}ทั้งหมด`, d.total, `ล่าสุด ${ago(d.last)}`), stat('ผู้เข้าชมไม่ซ้ำ', d.unique, 'นับจากอุปกรณ์/เครือข่าย'), stat(`ใน ${d.days} วัน`, d.inRange, `${fmt(d.uniqueInRange)} คนไม่ซ้ำ`), stat('บอทที่ไม่นับ', d.bots, 'ตัวอย่างลิงก์ในแชต ฯลฯ')),
         range,
-        h('section', { class: 'lnk-sec' }, h('h3', null, 'คลิกต่อวัน'), barChart(d.byDay.map((p) => ({ n: p.n, label: dayLabel(p.d) })), 'คลิกต่อวัน')),
-        h('section', { class: 'lnk-sec' }, h('h3', null, 'ช่วงเวลาที่คนเข้า (ชั่วโมงของวัน)'), barChart(hours, 'คลิกตามชั่วโมง')),
+        h('section', { class: 'lnk-sec' }, h('h3', null, `${unit}ต่อวัน`), barChart(d.byDay.map((p) => ({ n: p.n, label: dayLabel(p.d) })), `${unit}ต่อวัน`)),
+        h('section', { class: 'lnk-sec' }, h('h3', null, 'ช่วงเวลาที่คนเข้า (ชั่วโมงของวัน)'), barChart(hours, `${unit}ตามชั่วโมง`)),
         h('div', { class: 'lnk-breaks' }, hBars('อุปกรณ์', d.devices, (n) => DEVICE[n] || n), hBars('ประเทศ', d.countries, countryName), hBars('เบราว์เซอร์/แอป', d.browsers, (n) => n || 'ไม่ทราบ'),
           hBars('ระบบปฏิบัติการ', d.systems, (n) => n || 'ไม่ทราบ'), hBars('มาจาก', d.referrers, (n) => n || 'เข้าโดยตรง / แอปแชต')),
         h('section', { class: 'lnk-sec' }, h('h3', null, 'การเข้าชมล่าสุด'), d.recent.length
           ? h('div', { class: 'lnk-table-wrap' }, h('table', { class: 'lnk-table' }, h('thead', null, h('tr', null, ['เวลา', 'อุปกรณ์', 'เบราว์เซอร์', 'ประเทศ', 'มาจาก'].map((x) => h('th', null, x)))),
             h('tbody', null, d.recent.map((r) => h('tr', null, h('td', null, when(r.t)), h('td', null, `${DEVICE[r.device] || r.device} · ${r.os}`), h('td', null, r.browser), h('td', null, countryName(r.country)), h('td', null, r.ref || 'โดยตรง'))))))
-          : h('p', { class: 'muted' }, 'ยังไม่มีคนเข้าลิงก์นี้')),
+          : h('p', { class: 'muted' }, l.kind === 'qr' ? 'ยังไม่มีคนสแกน QR นี้' : 'ยังไม่มีคนเข้าลิงก์นี้')),
         h('dl', { class: 'meta' }, h('dt', null, 'สร้างเมื่อ'), h('dd', null, when(bkk(l.created))), h('dt', null, 'หมดอายุ'), h('dd', null, l.expires ? when(bkk(l.expires)) : 'ไม่หมดอายุ'),
-          h('dt', null, 'คลิกแรก'), h('dd', null, d.first ? when(d.first) : '-'), l.project && projName(l.project) ? h('dt', null, 'โครงการ') : null, l.project && projName(l.project) ? h('dd', null, projName(l.project)) : null, l.ref ? h('dt', null, 'ที่มา') : null, l.ref ? h('dd', null, `ไฟล์/โฟลเดอร์ในคลังข้อมูล`) : null, st.admin ? h('dt', null, 'เจ้าของ') : null, st.admin ? h('dd', null, l.owner) : null),
+          h('dt', null, `${unit}แรก`), h('dd', null, d.first ? when(d.first) : '-'), l.project && projName(l.project) ? h('dt', null, 'โครงการ') : null, l.project && projName(l.project) ? h('dd', null, projName(l.project)) : null, l.ref ? h('dt', null, 'ที่มา') : null, l.ref ? h('dd', null, `ไฟล์/โฟลเดอร์ในคลังข้อมูล`) : null, st.admin ? h('dt', null, 'เจ้าของ') : null, st.admin ? h('dd', null, l.owner) : null),
         d.scanned ? h('p', { class: 'hint' }, 'สถิติคำนวณจากการคลิกล่าสุด 60,000 รายการ') : null].filter(Boolean));
     }
     fetchStats(days);
