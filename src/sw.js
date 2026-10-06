@@ -15,6 +15,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // never touch cross-origin traffic
+  if (url.pathname.startsWith('/s/') || url.pathname.startsWith('/api/')) return; // short-link redirects and edge functions always go to the network
   if (url.pathname.endsWith('/config.js')) { // runtime config: network first so changes apply, cache as offline fallback
     e.respondWith(fetch(req).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return r; }).catch(() => caches.match(req)));
     return;
