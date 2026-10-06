@@ -107,7 +107,7 @@ function login(idToken) {
 /* ---------------------- username / password sign-in ----------------------- *
  * One internal account whose credentials live ONLY in Script properties (never in Git or Vercel):
  *   LOCAL_USER  username (lower-case)         LOCAL_SALT  random salt
- *   LOCAL_HASH  iterated HMAC-SHA256 hash     LOCAL_ITER  iterations (optional, default 200)
+ *   LOCAL_HASH  iterated HMAC-SHA256 hash     LOCAL_ITER  iterations (optional, default 5)
  * Generate the three values with:  node scripts/make-local-account.mjs <username> <password>
  * Remove LOCAL_HASH (or LOCAL_USER) to disable this sign-in; existing sessions stop working immediately.
  */
@@ -124,7 +124,7 @@ function passLogin(username, password) {
   if (!localEnabled()) throw httpError('LOCAL_DISABLED', 'ยังไม่เปิดใช้การเข้าสู่ระบบด้วยรหัสผ่าน');
   if (typeof username !== 'string' || typeof password !== 'string' || !username || !password || username.length > 64 || password.length > 128) throw httpError('BAD_CREDENTIALS', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
   var userOk = safeEqual(username.trim().toLowerCase(), prop('LOCAL_USER').toLowerCase());
-  var hashOk = safeEqual(hashPassword(password, prop('LOCAL_SALT'), intProp('LOCAL_ITER', 200)), prop('LOCAL_HASH'));
+  var hashOk = safeEqual(hashPassword(password, prop('LOCAL_SALT'), intProp('LOCAL_ITER', 5)), prop('LOCAL_HASH'));
   if (!(userOk && hashOk)) { Utilities.sleep(500); throw httpError('BAD_CREDENTIALS', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
   var email = localEmail();
   var exp = Math.floor(Date.now() / 1000) + intProp('SESSION_TTL_MIN', 480) * 60;
