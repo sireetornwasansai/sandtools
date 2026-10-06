@@ -8,7 +8,7 @@ import { recording } from './core/logger.js';
 import { TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
 import { openPalette } from './core/palette.js';
 import { backendConfigured } from './core/api.js';
-import { loginRequired, validateSession, renderLogin, currentUser, signOut } from './core/auth.js';
+import { loginRequired, validateSession, renderLogin, renderSplash, getSession, currentUser, signOut } from './core/auth.js';
 import { setPendingFile, routeForFile } from './core/handoff.js';
 import { toast } from './core/toast.js';
 
@@ -138,6 +138,7 @@ function installGlobalHandlers() {
 async function boot() {
   initTheme();
   if (loginRequired()) {
+    if (getSession()) renderSplash(app);
     const ok = await validateSession();
     if (!ok) await renderLogin(app);
   }
