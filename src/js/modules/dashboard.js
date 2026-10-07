@@ -181,27 +181,49 @@ export async function mount(root) {
         h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => load(true) }, svgIcon(ICONS.rotate, 16), 'ลองใหม่'),
           S.err.code === 'INVALID_SESSION' ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => location.reload() }, 'เข้าสู่ระบบใหม่') : null))));
     }
-    if (S.ov && !S.legacy && S.ov.projects.total > 0 && !S.ov.last) notes.append(notice('info', 'ยังไม่มีข้อมูลเข้ามา', 'วางโค้ดติดตามจากหน้ารายละเอียดโครงการ (แท็บ “ติดตั้ง”) ในเว็บไซต์ แล้วเปิดเว็บนั้นสักครั้ง'));
+    if (S.ov && !S.legacy && S.ov.projects && S.ov.projects.total > 0 && !S.ov.last) notes.append(notice('info', 'ยังไม่มีข้อมูลเข้ามา', 'วางโค้ดติดตามจากหน้ารายละเอียดโครงการ (แท็บ “ติดตั้ง”) ในเว็บไซต์ แล้วเปิดเว็บนั้นสักครั้ง'));
   }
-  function drawAll() { drawRange(); drawStatus(); drawNotes(); drawKpi(); drawCards(); exportBtn.disabled = !S.ov || S.legacy; }
+  function drawAll() {
+    for (const [name, fn] of [['range', drawRange], ['status', drawStatus], ['notes', drawNotes], ['kpi', drawKpi], ['cards', drawCards]]) {
+      try { fn(); } catch (e) { console.error(`dashboard: ${name} failed`, e); if (name === 'cards' || name === 'kpi') { S.ov = null; try { localStorage.removeItem(`sand:c:${ckey(S.days)}`); } catch { /* ignore */ } } }   // bad data → drop the cached copy so the next refresh starts clean
+    }
+    exportBtn.disabled = !S.ov || S.legacy;
+  }
 
   /* -------------------------------------------- data -------------------------------------------- */
+  /** Makes any overview safe to draw: returns null when the shape is not an overview at all (old cache / old backend), otherwise fills every missing field. */
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  function normalizeOv(d) {
+    if (!d || typeof d !== 'object' || !d.projects || typeof d.projects !== 'object') return null;
+    const L = d.links && typeof d.links === 'object' ? d.links : {};
+    return { ...d, days: num(d.days) || 7, pv: num(d.pv), uv: num(d.uv), avgPages: num(d.avgPages), bots: num(d.bots), last: d.last || '',
+      realtime: d.realtime === null || d.realtime === undefined ? null : num(d.realtime),
+      projects: { total: num(d.projects.total), tracking: num(d.projects.tracking) },
+      byDay: arr(d.byDay), byHour: arr(d.byHour).length === 24 ? d.byHour.map(num) : Array(24).fill(0),
+      topProjects: arr(d.topProjects), pages: arr(d.pages), referrers: arr(d.referrers), countries: arr(d.countries), devices: arr(d.devices), browsers: arr(d.browsers),
+      links: { ...L, links: num(L.links), qr: num(L.qr), qrs: num(L.qrs), qrx: num(L.qrx), scans: num(L.scans), top: arr(L.top) } };
+  }
   /** Overview built from the old per-project list (backends without the `overview` op). */
   function fromList(d) {
-    const a = d.items; const sum = (k) => a.reduce((x, p) => x + (p[k] || 0), 0);
+    const a = arr(d && d.items); const sum = (k) => a.reduce((x, p) => x + (p[k] || 0), 0);
     return { days: 7, legacy: true, generated: Date.now(), projects: { total: a.length, tracking: a.filter((p) => p.status !== 'paused' && p.track).length }, pv: sum('pv7'), uv: sum('uv7'), prevPv: undefined, prevUv: undefined, avgPages: 0, realtime: null, bots: 0, last: a.some((p) => p.last) ? 'x' : '',
       byDay: [], byHour: Array(24).fill(0), topProjects: a.slice().sort((x, y) => y.pv7 - x.pv7).slice(0, 8).map((p) => ({ key: p.key, name: p.name, pv: p.pv7, prev: undefined, uv: p.uv7 })), pages: [], referrers: [], countries: [], devices: [], browsers: [],
       links: { links: sum('links'), qr: 0, qrs: 0, scans: sum('linkClicks'), prevScans: undefined, top: [] } };
   }
   async function load(force = false) {
     const my = ++seq; const days = S.days;
-    if (!S.ov) { const c = cacheGet(ckey(days)); if (c) { S.ov = c.d; S.at = c.t; S.fromCache = true; S.legacy = !!c.d.legacy; } }
+    if (!S.ov) { const c = cacheGet(ckey(days)); const cd = c && normalizeOv(c.d); if (cd) { S.ov = cd; S.at = c.t; S.fromCache = true; S.legacy = !!cd.legacy; } }
     S.busy = true; S.err = null; drawAll();
     try {
       let d;
-      try { d = await sessionCall('projects', 'overview', { days }); S.legacy = false; } catch (e) {
+      try {
+        d = normalizeOv(await sessionCall('projects', 'overview', { days }));
+        if (!d) { const bad = new Error('รูปแบบข้อมูลจาก Apps Script ไม่ตรงกับเวอร์ชันล่าสุด'); /** @type {any} */ (bad).code = 'UNKNOWN_ACTION'; throw bad; }   // → fall back to the per-project list
+        S.legacy = false;
+      } catch (e) {
         if (!e || e.code !== 'UNKNOWN_ACTION') throw e;
-        d = fromList(await sessionCall('projects', 'list')); S.legacy = true;
+        d = normalizeOv(fromList(await sessionCall('projects', 'list'))); S.legacy = true;
       }
       if (my !== seq) return;
       S.ov = d; S.at = Date.now(); S.fromCache = false; if (!S.legacy) cacheSet(ckey(days), d);
@@ -214,7 +236,7 @@ export async function mount(root) {
   function setDays(n) {
     if (n === S.days) return;
     S.days = n; try { localStorage.setItem(RANGE_KEY, String(n)); } catch { /* ignore */ }
-    const c = cacheGet(ckey(n)); S.ov = c ? c.d : null; S.shown = {}; if (c) { S.at = c.t; S.fromCache = true; }
+    const c = cacheGet(ckey(n)); const cd = c && normalizeOv(c.d); S.ov = cd || null; S.shown = {}; if (cd) { S.at = c.t; S.fromCache = true; }
     load();
   }
 
