@@ -7,8 +7,8 @@ import { getSettings, setSettings, addRecent } from './core/store.js';
 import { recording } from './core/logger.js';
 import { TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
 import { openPalette } from './core/palette.js';
-import { backendConfigured } from './core/api.js';
-import { loginRequired, validateSession, renderLogin, renderSplash, getSession, currentUser, signOut } from './core/auth.js';
+import { backendConfigured, warmBackend } from './core/api.js';
+import { loginRequired, getSession, revalidateInBackground, preloadLogin, renderLogin, currentUser, signOut } from './core/auth.js';
 import { setPendingFile, routeForFile } from './core/handoff.js';
 import { toast } from './core/toast.js';
 
@@ -137,10 +137,10 @@ function installGlobalHandlers() {
 
 async function boot() {
   initTheme();
+  warmBackend();                                  // wake the Apps Script container while the page loads (cold start is the slowest part)
   if (loginRequired()) {
-    if (getSession()) renderSplash(app);
-    const ok = await validateSession();
-    if (!ok) await renderLogin(app);
+    if (getSession()) revalidateInBackground();   // open the app straight away from the stored session; verify later without blocking
+    else { preloadLogin(); await renderLogin(app); }
   }
   buildShell();
   installGlobalHandlers();
