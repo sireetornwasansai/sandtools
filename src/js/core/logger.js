@@ -28,9 +28,9 @@ export async function record(tool, op, d = {}) {
   const files = [];
   for (const f of d.inputs || []) files.push({ role: 'input', blob: f, name: f.name });
   (d.outputs || []).forEach((b, i) => files.push({ role: 'output', blob: b, name: (b instanceof File && b.name) || d.outputName || `output-${i + 1}` }));
-  for (const { role, blob, name } of files) {
-    if (!blob || blob.size > MAX_ARCHIVE_BYTES) continue;
+  // Upload all copies at the same time (they were sent one after another before).
+  await Promise.all(files.filter((f) => f.blob && f.blob.size <= MAX_ARCHIVE_BYTES).map(async ({ role, blob, name }) => {
     try { await gasCall('archive', { session: token, tool, logId, role, name, mime: blob.type || 'application/octet-stream', data: await toBase64(blob) }, 120000); } catch { /* ignore */ }
-  }
+  }));
   return true;
 }

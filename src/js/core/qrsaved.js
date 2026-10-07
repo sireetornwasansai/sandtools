@@ -27,6 +27,21 @@ export async function linksCall(op, params = {}, timeout = 60000) {
   }
 }
 
+const LIST_KEY = 'sand:links:list';
+/** The last "list" answer kept in this browser, so pages can paint instantly and refresh behind the scenes. null when none / another user's. */
+export function cachedLinksList() {
+  try {
+    const s = getSession(); const c = JSON.parse(localStorage.getItem(LIST_KEY) || 'null');
+    return c && s && s.user && c.u === s.user.email ? c.d : null;
+  } catch { return null; }
+}
+/** Fresh "list" from the backend (also stored for the next visit). */
+export async function fetchLinksList() {
+  const d = await linksCall('list');
+  try { const s = getSession(); const t = JSON.stringify({ u: s && s.user && s.user.email, d }); if (t.length < 1_500_000) localStorage.setItem(LIST_KEY, t); } catch { /* quota */ }
+  return d;
+}
+
 /** The saved form fields with the types the generator expects (the backend stores every value as text). */
 export function savedForm(item) {
   const f = { ...((item && item.qr && item.qr.f) || {}) };

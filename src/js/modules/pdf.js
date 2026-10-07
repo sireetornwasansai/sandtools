@@ -51,13 +51,14 @@ function results() {
   const el = h('div', { class: 'pdf-results' });
   return {
     el,
-    async add(blob, name, { op, inputs = [], sizeIn, auto = true }) {
+    add(blob, name, { op, inputs = [], sizeIn, auto = true }) {
       const dl = () => downloadBlob(blob, name);
       el.prepend(h('div', { class: 'result-row' }, h('b', null, name), h('span', { class: 'muted' }, formatBytes(blob.size)),
         h('button', { class: 'btn btn-sm', type: 'button', onclick: dl }, svgIcon(ICONS.download, 16), 'ดาวน์โหลดอีกครั้ง')));
       if (auto) dl();
-      const ok = await record('pdf', op, { fileName: name, sizeIn: sizeIn ?? inputs.reduce((a, f) => a + (f.size || 0), 0), sizeOut: blob.size, inputs: inputs.slice(0, 5), outputs: [blob], outputName: name });
-      if (ok) toast('บันทึกประวัติและสำเนาไว้ในคลังข้อมูลแล้ว', 'info');
+      // not awaited: the result is ready immediately; the history/copy is uploaded in the background
+      record('pdf', op, { fileName: name, sizeIn: sizeIn ?? inputs.reduce((a, f) => a + (f.size || 0), 0), sizeOut: blob.size, inputs: inputs.slice(0, 5), outputs: [blob], outputName: name })
+        .then((ok) => { if (ok) toast('บันทึกประวัติและสำเนาไว้ในคลังข้อมูลแล้ว', 'info'); }).catch(() => {});
     }
   };
 }

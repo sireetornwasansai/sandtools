@@ -6,8 +6,8 @@ import { config } from './config.js';
  * (Apps Script web apps do not answer preflight OPTIONS requests).
  */
 export class ApiError extends Error {
-  /** @param {string} code @param {string} message @param {number} [status] HTTP status of the backend response, when known */
-  constructor(code, message, status) { super(message); this.code = code; this.status = status; }
+  /** @param {string} code @param {string} message */
+  constructor(code, message) { super(message); this.code = code; }
 }
 
 export function backendConfigured() { return Boolean(config.gasUrl); }
@@ -24,17 +24,11 @@ export async function gasCall(action, payload = {}, timeoutMs = 20000) {
       body: JSON.stringify({ action, ...payload }),
       redirect: 'follow', credentials: 'omit', signal: ctrl.signal, referrerPolicy: 'no-referrer'
     });
-    let json; let text = '';
-    try { text = await res.text(); json = JSON.parse(text); } catch {
-      // Not JSON: usually an HTML page from Google (sign-in wall, error page) or an expired /macros/echo redirect (404).
-      const html = /^\s*</.test(text);
-      console.warn('[SAND] unexpected backend response', { action, status: res.status, html, snippet: text.slice(0, 120) });
-      if (html && /accounts\.google\.com|ServiceLogin|Sign in/i.test(text)) throw new ApiError('NOT_PUBLIC', 'Apps Script ไม่ได้เปิดให้ทุกคนเข้าถึง (Who has access ต้องเป็น Anyone)', res.status);
-      throw new ApiError('BAD_RESPONSE', 'Backend ตอบกลับในรูปแบบที่ไม่ถูกต้อง', res.status);
-    }
+    let json;
+    try { json = await res.json(); } catch { throw new ApiError('BAD_RESPONSE', 'Backend ตอบกลับในรูปแบบที่ไม่ถูกต้อง'); }
     if (!json || json.success !== true) {
       const err = (json && json.error) || {};
-      throw new ApiError(err.code || 'UNKNOWN', err.message || 'เกิดข้อผิดพลาดจาก Backend', res.status);
+      throw new ApiError(err.code || 'UNKNOWN', err.message || 'เกิดข้อผิดพลาดจาก Backend');
     }
     return json;
   } catch (e) {
@@ -44,21 +38,11 @@ export async function gasCall(action, payload = {}, timeoutMs = 20000) {
   } finally { clearTimeout(timer); }
 }
 
-/**
- * gasCall with automatic retries for transient failures (timeout, network, bad/expired redirect response).
- * Only use for idempotent actions such as sign-in.
- * @param {string} action @param {Record<string, any>} [payload] @param {{timeoutMs?:number,retries?:number,onRetry?:(n:number,e:ApiError)=>void}} [opts]
- */
-export async function gasCallRetry(action, payload = {}, opts = {}) {
-  const { timeoutMs = 30000, retries = 2, onRetry } = opts;
-  for (let attempt = 0; ; attempt++) {
-    try { return await gasCall(action, payload, timeoutMs); } catch (e) {
-      const transient = e instanceof ApiError && ['TIMEOUT', 'NETWORK', 'BAD_RESPONSE'].includes(e.code);
-      if (!transient || attempt >= retries) throw e;
-      if (onRetry) onRetry(attempt + 1, e);
-      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
-    }
-  }
+let warmed = false;
+/** Fire-and-forget request that wakes the (sleeping) Apps Script web app so the first real call is fast. Safe to call many times. */
+export function warmBackend() {
+  if (warmed || !config.gasUrl) return; warmed = true;
+  try { fetch(`${config.gasUrl}${config.gasUrl.includes('?') ? '&' : '?'}action=version`, { redirect: 'follow', credentials: 'omit', referrerPolicy: 'no-referrer', keepalive: true }).catch(() => {}); } catch { /* ignore */ }
 }
 
 /** Public health check (GET). Returns {ok, version, ms} or throws. */

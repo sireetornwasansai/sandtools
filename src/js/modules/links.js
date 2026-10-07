@@ -7,6 +7,7 @@ import { toast } from '../core/toast.js';
 import { copyText, downloadBlob } from '../core/download.js';
 import { addLayer, modal, confirmBox, closeAllLayers } from '../core/layers.js';
 import { showQr } from '../core/qrdialog.js';
+import { cachedLinksList, fetchLinksList } from '../core/qrsaved.js';
 import { loadCss } from '../core/css.js';
 import { fmt, DEVICE, countryName, hostOf, bkk, when, ago, barChart, hBars, dayLabel } from '../core/charts.js';
 
@@ -97,11 +98,16 @@ export async function mount(root, ctx) {
 
   const skeleton = () => list.replaceChildren(...[1, 2, 3].map(() => h('div', { class: 'skeleton', style: 'height:68px;margin-bottom:.5rem' })));
   async function load(showSkeleton = true) {
-    const my = ++seq; if (showSkeleton) skeleton();
+    const my = ++seq;
+    const apply = (d) => { st.items = d.items.filter((l) => l.kind !== 'qrs'); st.savedQr = d.items.length - st.items.length; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; st.scanned = d.scanned; };
+    const cached = showSkeleton && !st.loaded ? cachedLinksList() : null;
+    if (cached) { apply(cached); draw(); } else if (showSkeleton) skeleton();   // show the last known list at once, then refresh
     try {
-      const d = await call('list'); if (my !== seq) return;
-      st.items = d.items.filter((l) => l.kind !== 'qrs'); st.savedQr = d.items.length - st.items.length; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; st.scanned = d.scanned;
-      if (!st.projectsLoaded) { st.projectsLoaded = true; try { st.projects = (await gasCall('projects', { session: getSession().token, op: 'names' }, 30000)).data.items; fillProjects(projIn); } catch { st.projects = []; } }
+      // the list and the project names are independent: ask for both at the same time
+      const namesP = st.projectsLoaded ? null : (st.projectsLoaded = true, gasCall('projects', { session: getSession().token, op: 'names' }, 30000).then((r) => r.data.items).catch(() => []));
+      const d = await fetchLinksList(); if (my !== seq) return;
+      apply(d);
+      if (namesP) { st.projects = await namesP; fillProjects(projIn); }
       if (my !== seq) return; draw();
       const want = !st.deepLinked && ctx && ctx.params && ctx.params.get('stats');
       if (want) { st.deepLinked = true; const hit = st.items.find((x) => x.code === want); if (hit) openStats(hit); else toast('ไม่พบลิงก์/QR ที่ต้องการดูสถิติ หรือไม่มีสิทธิ์เข้าถึง', 'error'); }

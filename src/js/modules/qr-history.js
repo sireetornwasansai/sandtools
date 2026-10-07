@@ -8,7 +8,7 @@ import { copyText, downloadBlob, safeFileName } from '../core/download.js';
 import { modal, confirmBox, closeAllLayers } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
 import { fmt, ago, bkk } from '../core/charts.js';
-import { QR_CATS, QR_TYPES, KIND_LABEL, catLabel, typeLabel, linksCall, shortUrl, savedPayload, savedDesign } from '../core/qrsaved.js';
+import { QR_CATS, QR_TYPES, KIND_LABEL, catLabel, typeLabel, linksCall, shortUrl, savedPayload, savedDesign, cachedLinksList, fetchLinksList } from '../core/qrsaved.js';
 import { buildMatrix, drawToCanvas, toSvg } from './qr-engine.js';
 
 /** QR history: every QR the user saved (static copies and tracked QR), with what it is for, its category and — for tracked QR — how many people scanned it. */
@@ -60,10 +60,13 @@ export async function mount(root) {
 
   async function load(skeleton = true) {
     const my = ++seq;
-    if (skeleton) grid.replaceChildren(...[1, 2, 3, 4].map(() => h('div', { class: 'skeleton', style: 'height:170px' })));
+    const apply = (d) => { st.others = d.others || 0; st.email = d.email || ''; st.items = d.items.filter((l) => l.kind === 'qr' || l.kind === 'qrs'); st.base = d.base || ''; st.admin = !!d.admin; st.scanned = !!d.scanned; st.loaded = true; draw(); };
+    const cached = skeleton && !st.loaded ? cachedLinksList() : null;
+    if (cached) apply(cached);   // last known list first, refreshed below
+    else if (skeleton) grid.replaceChildren(...[1, 2, 3, 4].map(() => h('div', { class: 'skeleton', style: 'height:170px' })));
     try {
-      const d = await linksCall('list'); if (my !== seq) return;
-      st.items = d.items.filter((l) => l.kind === 'qr' || l.kind === 'qrs'); st.base = d.base || ''; st.admin = !!d.admin; st.scanned = !!d.scanned; st.loaded = true; draw();
+      const d = await fetchLinksList(); if (my !== seq) return;
+      apply(d);
     } catch (e) {
       if (my !== seq) return;
       grid.replaceChildren(notice('error', 'โหลดประวัติ QR ไม่ได้', e.message));
@@ -95,7 +98,7 @@ export async function mount(root) {
     drawKpi();
     const all = filtered(); const shown = all.slice(0, st.limit);
     if (!shown.length) {
-      grid.replaceChildren(h('div', { class: 'empty qrh-empty' }, svgIcon(ICONS.qr, 28), h('p', null, st.items.length ? 'ไม่พบ QR ที่ตรงกับเงื่อนไข' : 'ยังไม่มี QR ที่บันทึกไว้ — สร้าง QR แล้วกด “บันทึกลงประวัติ QR” ได้ที่หน้า QR Code'),
+      grid.replaceChildren(h('div', { class: 'empty qrh-empty' }, svgIcon(ICONS.qr, 28), h('p', null, st.items.length ? 'ไม่พบ QR ที่ตรงกับเงื่อนไข' : st.others ? `ยังไม่มี QR ของบัญชี ${st.email} (ในระบบมีรายการของบัญชีอื่น ${st.others} รายการ ซึ่งผู้ดูแลระบบเท่านั้นที่เห็น) — ตรวจว่าล็อกอินด้วยบัญชีเดียวกับตอนบันทึก` : 'ยังไม่มี QR ที่บันทึกไว้ — สร้าง QR แล้วกด “บันทึกลงประวัติ QR” ได้ที่หน้า QR Code'),
         st.items.length ? null : h('a', { class: 'btn btn-primary', href: '#/qr' }, 'ไปสร้าง QR')));
     } else grid.replaceChildren(...shown.map(card));
     moreBtn.hidden = all.length <= st.limit;
