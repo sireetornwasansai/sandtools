@@ -65,31 +65,37 @@ const LOGIN_ERRORS = {
 export function renderLogin(root) {
   return new Promise((resolve) => {
     const status = h('p', { class: 'login-status', role: 'status', 'aria-live': 'polite' });
-    const btnHost = h('div', { class: 'login-btn' });
+    let card = null;
+    const btnHost = h('div', { class: 'login-btn' }, h('span', { class: 'skeleton login-skel', 'aria-hidden': 'true' }));
+    const spin = () => h('span', { class: 'spinner', 'aria-hidden': 'true' });
+    status.className = 'login-status busy'; status.replaceChildren(spin(), 'กำลังเตรียมระบบเข้าสู่ระบบ…');
+    let slowTimer = 0;
+    const busy = (msg) => { clearTimeout(slowTimer); btnHost.classList.add('is-off'); card.setAttribute('aria-busy', 'true'); status.className = 'login-status busy'; status.replaceChildren(spin(), msg); };
     root.replaceChildren(h('main', { class: 'login', id: 'main' },
-      h('div', { class: 'login-card' },
+      (card = h('div', { class: 'login-card' },
         h('div', { class: 'wordmark wordmark-lg' }, h('span', { class: 'wm-sand' }, 'SAND'), h('span', { class: 'wm-sub' }, 'Office Tools')),
         h('h1', null, 'เข้าสู่ระบบ'),
         h('p', null, 'ใช้บัญชี Google ของหน่วยงานเพื่อเข้าใช้งาน ระบบจะขอเฉพาะชื่อและอีเมลเพื่อยืนยันตัวตนเท่านั้น'),
         btnHost, status,
-        h('p', { class: 'hint' }, `${APP_NAME} ไม่เก็บไฟล์หรือเนื้อหาที่คุณใช้งาน เครื่องมือส่วนใหญ่ประมวลผลในเบราว์เซอร์ของคุณ`))));
+        h('p', { class: 'hint' }, `${APP_NAME} ไม่เก็บไฟล์หรือเนื้อหาที่คุณใช้งาน เครื่องมือส่วนใหญ่ประมวลผลในเบราว์เซอร์ของคุณ`)))));
 
-    const fail = (msg) => { status.textContent = msg; status.className = 'login-status error'; };
+    const fail = (msg) => { clearTimeout(slowTimer); btnHost.classList.remove('is-off'); if (card) card.removeAttribute('aria-busy'); const sk = btnHost.querySelector('.login-skel'); if (sk) sk.remove(); status.className = 'login-status error'; status.replaceChildren(msg); };
     if (!config.googleClientId) { fail('ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID ของระบบ'); return; }
 
     loadScript('https://accounts.google.com/gsi/client').then(() => {
       window.google.accounts.id.initialize({
         client_id: config.googleClientId,
         callback: async (resp) => {
-          status.className = 'login-status'; status.textContent = 'กำลังเข้าสู่ระบบ…';
+          busy('กำลังตรวจสอบบัญชีกับระบบ…'); slowTimer = window.setTimeout(() => busy('ระบบกำลังเริ่มทำงาน อาจใช้เวลาสักครู่ กรุณาอย่าปิดหน้านี้…'), 4000);
           try {
             const r = await gasCall('login', { idToken: resp.credential }, 30000);
-            setSession({ token: r.data.session, exp: r.data.exp, user: r.data.user });
+            busy('เข้าสู่ระบบสำเร็จ กำลังเปิดหน้าแรก…'); setSession({ token: r.data.session, exp: r.data.exp, user: r.data.user });
             resolve(undefined);
           } catch (e) { fail(LOGIN_ERRORS[e.code] || e.message || 'เข้าสู่ระบบไม่สำเร็จ'); }
         },
         auto_select: true, ux_mode: 'popup', cancel_on_tap_outside: false
       });
+      btnHost.replaceChildren(); status.className = 'login-status'; status.replaceChildren();
       window.google.accounts.id.renderButton(btnHost, { theme: 'outline', size: 'large', text: 'signin_with', locale: 'th', width: 280 });
       try { window.google.accounts.id.prompt(); } catch { /* One Tap is optional */ }   // one-tap: returning users sign in with a single click
     }).catch(() => fail('โหลดระบบเข้าสู่ระบบของ Google ไม่สำเร็จ'));
