@@ -21,6 +21,15 @@
  *   QR_MAX_PER_USER        (optional)  saved QR codes (history) per user, default 1000
  *   LINK_LIMIT_PER_MIN     (optional)  create/update calls per minute (all users), default 60
  * A link can be attached to a project (Analytics.gs) through the 12th column "โครงการ".
+ *
+ * v1.6.0 — every row records WHERE it came from and WHICH URLs belong to it (columns 15–18):
+ *   15 ที่มา            'app' = created in this web app · 'import' = an existing (old) QR that was attached
+ *   16 ลิงก์ย่อ (URL)   the full short URL the QR / link uses (empty for 'qrs' / 'qrx', which have no short link)
+ *   17 รูป QR (Drive id) / 18 รูป QR (URL)   the PNG of the QR kept in Drive at <DRIVE_FOLDER_ID>/<yyyy-MM>/<email>/QR/  (op "saveimg")
+ *   and column 2 "ปลายทาง" also holds the web address of a static URL-QR ('qrs') and of an attached old QR ('qrx').
+ * Kind 'qrx' = an OLD QR printed elsewhere. A printed code goes straight to its target, so it cannot be counted by scanning; its statistics are the
+ * page views of its destination page that the project's tracking script (t.js) already counts — see anaQrxStats() in Analytics.gs.
+ * New ops on action "links":  saveimg {code, data(base64 PNG), origin?} · getimg {code} (returns a data: URL, to preview an attached old QR).
  * The same table also stores QR Codes (column 13 "ชนิด"): kind 'link' = plain short link, 'qr' = tracked QR (a QR that encodes the short URL, so scans
  * are counted and the destination can be edited later), 'qrs' = static QR saved in the history (no short link, no statistics). Column 14 holds the QR
  * design / form data as JSON (never a Wi-Fi password).
@@ -29,9 +38,10 @@
  * Uses helpers from Code.gs (requireUser, sheetTab, cell, rateLimit, httpError, prop, intProp, listProp, safeEqual) and Library.gs.
  */
 
-var LNK_LINK_HEADERS = ['รหัสลิงก์', 'ปลายทาง', 'ชื่อเรียก', 'เจ้าของ', 'สร้างเมื่อ', 'หมดอายุ', 'สถานะ', 'หมายเหตุ', 'แท็ก', 'อ้างอิง (Drive id)', 'ชนิดอ้างอิง', 'โครงการ', 'ชนิด', 'ข้อมูล QR'];
-var LNK_COLS = 14;
-var LNK_KINDS = ['link', 'qr', 'qrs'];
+var LNK_LINK_HEADERS = ['รหัสลิงก์', 'ปลายทาง', 'ชื่อเรียก', 'เจ้าของ', 'สร้างเมื่อ', 'หมดอายุ', 'สถานะ', 'หมายเหตุ', 'แท็ก', 'อ้างอิง (Drive id)', 'ชนิดอ้างอิง', 'โครงการ', 'ชนิด', 'ข้อมูล QR', 'ที่มา', 'ลิงก์ย่อ (URL)', 'รูป QR (Drive id)', 'รูป QR (URL)'];
+var LNK_COLS = 18;
+var LNK_KINDS = ['link', 'qr', 'qrs', 'qrx'];
+var LNK_IMG_MAX = 1536 * 1024;   // largest QR picture kept in Drive
 var LNK_QR_TYPES = ['url', 'text', 'wifi', 'email', 'phone', 'sms', 'vcard'];
 var LNK_QR_STYLES = ['square', 'rounded', 'dots'];
 var LNK_CLICK_HEADERS = ['เวลา', 'รหัสลิงก์', 'ประเทศ', 'อุปกรณ์', 'เบราว์เซอร์', 'ระบบปฏิบัติการ', 'มาจาก', 'ผู้เข้าชม (hash)', 'บอท'];
@@ -46,6 +56,9 @@ var LNK_DEVICES = ['mobile', 'desktop', 'tablet', 'bot', 'other'];
 
 /* --------------------------------- helpers -------------------------------- */
 
+/** Calendar day / hour in Bangkok (UTC+7, no DST). Plain arithmetic: Utilities.formatDate costs ~1 ms per call, which made statistics over tens of thousands of rows slow. */
+function lnkDayOf(t) { return new Date(t + 25200000).toISOString().slice(0, 10); }
+function lnkHourOf(t) { return new Date(t + 25200000).getUTCHours(); }
 function lnkStamp(ms) { return ms ? Utilities.formatDate(new Date(ms), LNK_TZ, 'yyyy-MM-dd HH:mm:ss') : ''; }
 function lnkParse(s) {
   s = String(s || '').trim();
@@ -72,10 +85,11 @@ function lnkLog(u, op, code, extra, tool) {
 }
 function lnkObj(r, row) {
   return { row: row, code: String(r[0]), url: String(r[1]), title: String(r[2] || ''), owner: String(r[3] || '').toLowerCase(), created: String(r[4] || ''), expires: String(r[5] || ''),
-    status: String(r[6] || 'active'), note: String(r[7] || ''), tags: libTags(String(r[8] || '')), ref: String(r[9] || ''), refKind: String(r[10] || ''), project: String(r[11] || ''), kind: LNK_KINDS.indexOf(String(r[12])) >= 0 ? String(r[12]) : 'link', data: String(r[13] || '') };
+    status: String(r[6] || 'active'), note: String(r[7] || ''), tags: libTags(String(r[8] || '')), ref: String(r[9] || ''), refKind: String(r[10] || ''), project: String(r[11] || ''), kind: LNK_KINDS.indexOf(String(r[12])) >= 0 ? String(r[12]) : 'link', data: String(r[13] || ''),
+    origin: String(r[14] || '') === 'import' ? 'import' : 'app', short: String(r[15] || ''), img: String(r[16] || ''), imgUrl: String(r[17] || '') };
 }
 function lnkRowOf(l) {
-  return [l.code, l.url, lnkText(l.title, 120), l.owner, l.created, l.expires, l.status, lnkText(l.note, 300), l.tags.join(', '), l.ref, l.refKind, l.project || '', l.kind || 'link', l.data || ''];
+  return [l.code, l.url, lnkText(l.title, 120), l.owner, l.created, l.expires, l.status, lnkText(l.note, 300), l.tags.join(', '), l.ref, l.refKind, l.project || '', l.kind || 'link', l.data || '', l.origin === 'import' ? 'import' : 'app', l.short || '', l.img || '', l.imgUrl || ''];
 }
 function lnkAll() {
   var sh = sheetTab('Links', LNK_LINK_HEADERS), last = sh.getLastRow();
@@ -90,9 +104,16 @@ function lnkFind(code) {
 function lnkPublic(l, c) {
   c = c || {};
   return { code: l.code, url: l.url, title: l.title, owner: l.owner, created: l.created, expires: l.expires, status: l.status, note: l.note, tags: l.tags, ref: l.ref, refKind: l.refKind, project: l.project || '', kind: l.kind || 'link', qr: lnkQrParse(l.data),
+    origin: l.origin || 'app', short: l.short || '', hasImg: !!l.img, imgUrl: l.imgUrl || '',
     clicks: c.total || 0, week: c.week || 0, last: c.last || 0 };
 }
 function lnkBase() { return prop('SHORT_BASE').replace(/\/+$/, ''); }
+/** The address people scan/click: SHORT_BASE (or, when unset, the origin of the web app that sent the request) + /s/<code>. '' for rows without a short link. */
+function lnkShortFor(kind, code, origin) {
+  if (kind !== 'link' && kind !== 'qr') return '';
+  var base = lnkBase() || (/^https?:\/\/[a-z0-9.\-]+(:\d{1,5})?$/i.test(String(origin || '')) ? String(origin).toLowerCase() : '');
+  return base ? base + '/s/' + code : '';
+}
 function lnkUncache(code) { try { CacheService.getScriptCache().remove('lk:' + code); } catch (x) { /* ignore */ } }
 
 /** Validate and normalise a target URL. Only http(s); no embedded credentials; no loops; optional domain block list. */
@@ -179,7 +200,7 @@ function lnkGo(p) {
   if (!rec) {
     rateLimit('lnkgo', intProp('LINK_MISS_LIMIT_PER_MIN', 120));
     var l = lnkFind(code);
-    rec = l && l.kind !== 'qrs' ? { u: l.url, x: lnkParse(l.expires), s: l.status } : { n: 1 };
+    rec = l && (l.kind === 'link' || l.kind === 'qr') ? { u: l.url, x: lnkParse(l.expires), s: l.status } : { n: 1 };
     cache.put('lk:' + code, JSON.stringify(rec), rec.n ? 300 : LNK_CACHE_S);
   }
   if (rec.n || rec.s === 'deleted') return { reason: 'notfound' };
@@ -227,6 +248,7 @@ function lnkTop(map, n) {
 function lnkBump(map, k) { k = k || ''; map[k] = (map[k] || 0) + 1; }
 
 function lnkStats(l, daysIn) {
+  if (l.kind === 'qrx') return anaQrxStats(l, daysIn);   // Analytics.gs — page views of the destination page
   var days = [7, 30, 90, 365].indexOf(Number(daysIn)) >= 0 ? Number(daysIn) : 30;
   var only = {}; only[l.code] = true;
   var rows = lnkClicks(only), now = Date.now(), cutoff = now - days * 86400000, wk = now - 7 * 86400000;
@@ -242,11 +264,11 @@ function lnkStats(l, daysIn) {
     if (r.t < cutoff) return;
     inRange++; if (r.vid) uniqRange[r.vid] = 1;
     lnkBump(dev, r.device); lnkBump(br, r.browser); lnkBump(os, r.os); lnkBump(co, r.country); lnkBump(rf, r.ref);
-    lnkBump(perDay, Utilities.formatDate(new Date(r.t), LNK_TZ, 'yyyy-MM-dd'));
-    hours[Number(Utilities.formatDate(new Date(r.t), LNK_TZ, 'H'))]++;
+    lnkBump(perDay, lnkDayOf(r.t));
+    hours[lnkHourOf(r.t)]++;
   });
   var byDay = [];
-  for (var i = days - 1; i >= 0; i--) { var d = Utilities.formatDate(new Date(now - i * 86400000), LNK_TZ, 'yyyy-MM-dd'); byDay.push({ d: d, n: perDay[d] || 0 }); }
+  for (var i = days - 1; i >= 0; i--) { var d = lnkDayOf(now - i * 86400000); byDay.push({ d: d, n: perDay[d] || 0 }); }
   var recent = rows.filter(function (r) { return !r.bot; }).slice(-20).reverse().map(function (r) { return { t: new Date(r.t).toISOString(), country: r.country, device: r.device, browser: r.browser, os: r.os, ref: r.ref }; });
   return {
     link: lnkPublic(l, { total: total, week: week, last: last }), days: days, total: total, unique: Object.keys(uniq).length, bots: bots, inRange: inRange, uniqueInRange: Object.keys(uniqRange).length, week: week,
@@ -268,6 +290,8 @@ function links(b) {
     case 'delete': return lnkDelete(sc, u, b);
     case 'stats':  return lnkStats(lnkOwned(sc, b.code), b.days);
     case 'export': return lnkExport(lnkOwned(sc, b.code), b.bots === true);
+    case 'saveimg': return lnkSaveImg(sc, u, b);   // keep the QR picture in Drive and record its URL in the Links sheet
+    case 'getimg': return lnkGetImg(sc, b);        // the picture as a data: URL (preview of an attached old QR)
     default: throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');
   }
 }
@@ -280,17 +304,27 @@ function lnkOwned(sc, code) {
   return l;
 }
 
-function lnkList(sc) {
-  var mine = lnkAll().filter(function (l) { return l.status !== 'deleted' && (sc.admin || l.owner === sc.email); });
-  var only = {}; mine.forEach(function (l) { only[l.code] = true; });
-  var rows = lnkClicks(only), now = Date.now(), wk = now - 7 * 86400000, agg = Object.create(null);
+/** Click totals per code for ALL links, computed from the Clicks sheet at most once a minute (the big sheet read was the slowest part of every list). */
+function lnkAggAll() {
+  var cache = CacheService.getScriptCache(), hit = cache.get('lca');
+  if (hit) { try { return JSON.parse(hit); } catch (x) { /* recompute */ } }
+  var rows = lnkClicks(null), wk = Date.now() - 7 * 86400000, agg = {};
   rows.forEach(function (r) {
     if (r.bot) return;
     var a = agg[r.code] = agg[r.code] || { total: 0, week: 0, last: 0 };
     a.total++; if (r.t >= wk) a.week++; if (r.t > a.last) a.last = r.t;
   });
-  var items = mine.map(function (l) { return lnkPublic(l, agg[l.code]); }).sort(function (a, c) { return a.created < c.created ? 1 : -1; });
-  return { admin: sc.admin, base: lnkBase(), items: items, scanned: rows.length >= LNK_SCAN_ROWS };
+  var out = { agg: agg, scanned: rows.length >= LNK_SCAN_ROWS };
+  try { cache.put('lca', JSON.stringify(out), 60); } catch (x) { /* too big for the cache: just recompute next time */ }
+  return out;
+}
+function lnkList(sc) {
+  var all = lnkAll().filter(function (l) { return l.status !== 'deleted'; });
+  var mine = all.filter(function (l) { return sc.admin || l.owner === sc.email; });
+  var tot = mine.length ? lnkAggAll() : { agg: {}, scanned: false };
+  var items = mine.map(function (l) { return lnkPublic(l, tot.agg[l.code]); }).sort(function (a, c) { return a.created < c.created ? 1 : -1; });
+  var others = all.length - mine.length;   // lets the page explain an empty list
+  return { admin: sc.admin, email: sc.email, base: lnkBase(), items: items, scanned: tot.scanned, others: others };
 }
 
 function lnkCreate(sc, u, b) { return lnkLocked(function () { return lnkCreateLocked(sc, u, b); }); }
@@ -301,6 +335,11 @@ function lnkCreateLocked(sc, u, b) {
   if (kind === 'qrs') {
     data = lnkQrData(b.qr, 'qrs');
     if (!String(b.title || '').trim()) throw httpError('BAD_REQUEST', 'กรุณาตั้งชื่อ QR');
+    url = lnkStaticUrl(data);   // a static URL-QR keeps its web address in the "ปลายทาง" column too
+  } else if (kind === 'qrx') {
+    if (!String(b.title || '').trim()) throw httpError('BAD_REQUEST', 'กรุณาตั้งชื่อ QR');
+    data = lnkQrData(b.qr, 'qrx');
+    url = String(b.url == null ? '' : b.url).trim() ? lnkCheckUrl(b.url) : '';   // where the old QR points (empty when it is not a web address)
   } else if (b.ref && kind === 'link') {
     ref = libId(b.ref);
     if (b.refKind === 'folder') { libFolderChain(sc, ref); refKind = 'folder'; url = 'https://drive.google.com/drive/folders/' + ref; }
@@ -318,8 +357,10 @@ function lnkCreateLocked(sc, u, b) {
     if (mine.filter(function (l) { return l.kind === 'link'; }).length >= intProp('LINK_MAX_PER_USER', 500)) throw httpError('LIMIT', 'สร้างลิงก์ครบจำนวนที่กำหนดแล้ว กรุณาลบรายการที่ไม่ใช้');
   } else if (mine.filter(function (l) { return l.kind !== 'link'; }).length >= intProp('QR_MAX_PER_USER', 1000)) throw httpError('LIMIT', 'บันทึก QR ครบจำนวนที่กำหนดแล้ว กรุณาลบรายการที่ไม่ใช้');
   var taken = Object.create(null); all.forEach(function (l) { taken[l.code] = true; });
-  var l = { code: lnkCodeFor(kind === 'qrs' ? '' : b.alias, taken), url: url, title: String(b.title || '').trim().slice(0, 120), owner: sc.email, created: lnkStamp(Date.now()), expires: kind === 'qrs' ? '' : lnkExpiry(b.expires),
-    status: 'active', note: String(b.note || '').slice(0, 300), tags: libTags(b.tags), ref: ref, refKind: refKind, project: lnkProject(sc, b.project), kind: kind, data: data };
+  var l = { code: lnkCodeFor(kind === 'qrs' || kind === 'qrx' ? '' : b.alias, taken), url: url, title: String(b.title || '').trim().slice(0, 120), owner: sc.email, created: lnkStamp(Date.now()), expires: kind === 'qrs' || kind === 'qrx' ? '' : lnkExpiry(b.expires),
+    status: 'active', note: String(b.note || '').slice(0, 300), tags: libTags(b.tags), ref: ref, refKind: refKind, project: lnkProject(sc, b.project), kind: kind, data: data,
+    origin: kind === 'qrx' ? 'import' : 'app', short: '', img: '', imgUrl: '' };
+  l.short = lnkShortFor(kind, l.code, b.origin);
   sheetTab('Links', LNK_LINK_HEADERS).appendRow(lnkRowOf(l));
   lnkUncache(l.code);
   lnkLog(u, 'create', l.code, { kind: kind, host: (/^https?:\/\/([^\/?#]*)/i.exec(url) || [])[1] || '', ref: ref }, kind === 'link' ? 'links' : 'qr');
@@ -329,7 +370,8 @@ function lnkCreateLocked(sc, u, b) {
 function lnkUpdate(sc, u, b) { return lnkLocked(function () { return lnkUpdateLocked(sc, u, b); }); }
 function lnkUpdateLocked(sc, u, b) {
   var l = lnkOwned(sc, b.code);
-  if (b.url !== undefined && !l.ref && l.kind !== 'qrs') l.url = lnkCheckUrl(b.url);
+  if (b.url !== undefined && !l.ref && l.kind !== 'qrs') l.url = (l.kind === 'qrx' && !String(b.url == null ? '' : b.url).trim()) ? '' : lnkCheckUrl(b.url);
+  if (!l.short && (l.kind === 'link' || l.kind === 'qr')) l.short = lnkShortFor(l.kind, l.code, b.origin);   // rows made before v1.6.0
   if (b.qr !== undefined && l.kind !== 'link') { var cur = lnkQrParse(l.data) || {}; b.qr = b.qr || {}; if (l.kind === 'qr') b.qr.t = 'url'; else if (!b.qr.t) b.qr.t = cur.t; l.data = lnkQrData(b.qr, l.kind); }
   if (b.title !== undefined) { l.title = String(b.title).trim().slice(0, 120); if (!l.title && l.kind !== 'link') throw httpError('BAD_REQUEST', 'กรุณาตั้งชื่อ QR'); }
   if (b.note !== undefined) l.note = String(b.note).slice(0, 300);
@@ -364,6 +406,56 @@ function lnkExport(l, withBots) {
   return { link: lnkPublic(l, null), rows: rows.map(function (r) { return { t: new Date(r.t).toISOString(), country: r.country, device: r.device, browser: r.browser, os: r.os, ref: r.ref, bot: r.bot }; }) };
 }
 
+/** Web address of a static URL-QR (type url), from the validated QR JSON; '' when it is not a valid http(s) address. */
+function lnkStaticUrl(dataJson) {
+  try { var o = JSON.parse(dataJson); return o.t === 'url' && o.f && o.f.url ? lnkCheckUrl(o.f.url) : ''; } catch (x) { return ''; }
+}
+
+/* ------------------------------ QR pictures in Drive ------------------------------ */
+
+/** <DRIVE_FOLDER_ID>/<yyyy-MM>/<owner e-mail>/QR — same layout as archive(), so คลังข้อมูล shows the picture to its owner and admins only. */
+function lnkImgFolder(email) {
+  var root = prop('DRIVE_FOLDER_ID');
+  if (!root) throw httpError('NOT_CONFIGURED', 'ยังไม่ได้ตั้งค่า DRIVE_FOLDER_ID');
+  var stamp = Utilities.formatDate(new Date(), LNK_TZ, 'yyyy-MM');
+  return subFolder(subFolder(subFolder(DriveApp.getFolderById(root), stamp), email), 'QR');
+}
+function lnkImgName(l) {
+  var t = String(l.title || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return 'qr_' + l.code + (t ? '_' + t : '') + '.png';
+}
+/** Stores (or replaces) the QR picture of one row. The browser draws the PNG; the server checks it really is a PNG of a sane size. */
+function lnkSaveImg(sc, u, b) {
+  return lnkLocked(function () {
+    var l = lnkOwned(sc, b.code);
+    if (typeof b.data !== 'string' || !b.data || b.data.length > 2200000) throw httpError('BAD_REQUEST', 'ไม่พบข้อมูลรูป QR หรือรูปใหญ่เกินไป');
+    var bytes;
+    try { bytes = Utilities.base64Decode(b.data); } catch (e) { throw httpError('BAD_REQUEST', 'ข้อมูลรูป QR ไม่ถูกต้อง'); }
+    if (bytes.length > LNK_IMG_MAX) throw httpError('FILE_TOO_LARGE', 'รูป QR ใหญ่เกิน 1.5 MB');
+    if (bytes.length < 8 || (bytes[0] & 255) !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) throw httpError('BAD_REQUEST', 'รองรับเฉพาะรูป PNG');
+    var old = null;
+    if (l.img) { try { old = DriveApp.getFileById(l.img); } catch (x) { old = null; } }
+    var file = lnkImgFolder(l.owner).createFile(Utilities.newBlob(bytes, 'image/png', lnkImgName(l)));
+    if (old) { try { old.setTrashed(true); } catch (y) { /* already gone */ } }
+    try { file.addViewer(l.owner); } catch (z) { /* owner/admin already has access */ }
+    libIndexFile(file, l.owner);
+    l.img = file.getId(); l.imgUrl = file.getUrl();
+    if (!l.short) l.short = lnkShortFor(l.kind, l.code, b.origin);
+    sheetTab('Links', LNK_LINK_HEADERS).getRange(l.row, 1, 1, LNK_COLS).setValues([lnkRowOf(l)]);
+    lnkLog(u, 'saveimg', l.code, { kind: l.kind, bytes: bytes.length }, l.kind === 'link' ? 'links' : 'qr');
+    return { link: lnkPublic(l, null), imgUrl: l.imgUrl };
+  });
+}
+function lnkGetImg(sc, b) {
+  var l = lnkOwned(sc, b.code);
+  if (!l.img) throw httpError('NOT_FOUND', 'รายการนี้ยังไม่มีรูป QR ที่เก็บไว้');
+  var file;
+  try { file = DriveApp.getFileById(l.img); if (file.isTrashed()) throw new Error('trashed'); } catch (x) { throw httpError('NOT_FOUND', 'ไม่พบไฟล์รูป QR ใน Google Drive (อาจถูกลบ)'); }
+  var bytes = file.getBlob().getBytes();
+  if (bytes.length > LNK_IMG_MAX) throw httpError('FILE_TOO_LARGE', 'รูป QR ใหญ่เกินกว่าจะแสดงตัวอย่าง');
+  return { dataUrl: 'data:image/png;base64,' + Utilities.base64Encode(bytes), name: file.getName() };
+}
+
 /* -------------------------------------- setup -------------------------------------- */
 
 /** Run ONCE from the editor: creates the tabs and EDGE_SECRET, and prints what to put in Vercel. Safe to run again. */
@@ -371,13 +463,14 @@ function setupLinks() {
   var P = PropertiesService.getScriptProperties();
   if (!P.getProperty('EDGE_SECRET')) P.setProperty('EDGE_SECRET', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, ''));
   var links = sheetTab('Links', LNK_LINK_HEADERS), clicks = sheetTab('Clicks', LNK_CLICK_HEADERS);
-  [[links, LNK_LINK_HEADERS, [110, 380, 200, 200, 150, 150, 80, 220, 160, 220, 90, 110, 70, 360], '#0b7a7c'], [clicks, LNK_CLICK_HEADERS, [150, 110, 70, 90, 110, 120, 200, 130, 50], '#7e22ce']].forEach(function (t) {
+  [[links, LNK_LINK_HEADERS, [110, 380, 200, 200, 150, 150, 80, 220, 160, 220, 90, 110, 70, 360, 80, 300, 200, 360], '#0b7a7c'], [clicks, LNK_CLICK_HEADERS, [150, 110, 70, 90, 110, 120, 200, 130, 50], '#7e22ce']].forEach(function (t) {
     var sh = t[0];
     sh.getRange(1, 1, 1, t[1].length).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e');
     sh.setFrozenRows(1); t[2].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); }); sh.setTabColor(t[3]);
   });
   links.getRange(2, 1, Math.max(links.getMaxRows() - 1, 1), 3).setNumberFormat('@');
   clicks.getRange(2, 1, Math.max(clicks.getMaxRows() - 1, 1), 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
-  links.getRange(1, 12, 1, 3).setValues([['โครงการ', 'ชนิด', 'ข้อมูล QR']]);
+  links.getRange(1, 12, 1, 7).setValues([['โครงการ', 'ชนิด', 'ข้อมูล QR', 'ที่มา', 'ลิงก์ย่อ (URL)', 'รูป QR (Drive id)', 'รูป QR (URL)']]);
+  links.getRange(2, 15, Math.max(links.getMaxRows() - 1, 1), 4).setNumberFormat('@');
   console.log('พร้อมใช้งาน — ตั้งค่าใน Vercel (Settings → Environment Variables):\n  SAND_EDGE_SECRET = ' + P.getProperty('EDGE_SECRET') + '\n  SAND_GAS_URL ต้องตั้งไว้แล้ว (URL ของ Web app /exec)\nจากนั้น Redeploy บน Vercel');
 }

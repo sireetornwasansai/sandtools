@@ -7,6 +7,7 @@ import { toast } from '../core/toast.js';
 import { copyText, downloadBlob } from '../core/download.js';
 import { addLayer, modal, confirmBox, closeAllLayers } from '../core/layers.js';
 import { showQr } from '../core/qrdialog.js';
+import { showSavedQr } from '../core/qrold.js';
 import { cachedLinksList, fetchLinksList } from '../core/qrsaved.js';
 import { loadCss } from '../core/css.js';
 import { fmt, DEVICE, countryName, hostOf, bkk, when, ago, barChart, hBars, dayLabel } from '../core/charts.js';
@@ -23,6 +24,7 @@ const statusOf = (l) => (l.status === 'disabled' ? 'off' : l.expires && bkk(l.ex
 const STATUS_LABEL = { active: 'ใช้งานอยู่', off: 'ปิดอยู่', expired: 'หมดอายุ' };
 
 async function call(op, params = {}, timeout = 60000) {
+  if (op === 'create' || op === 'update') params = { origin: location.origin, ...params };   // backend records the short URL when SHORT_BASE is not set
   const s = getSession();
   if (!s) { const e = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); e.code = 'INVALID_SESSION'; throw e; }
   try { return (await gasCall('links', { session: s.token, op, ...params }, timeout)).data; } catch (e) { if (e && (e.code === 'INVALID_SESSION' || e.code === 'DOMAIN_NOT_ALLOWED')) signOut(); throw e; }
@@ -74,7 +76,7 @@ export async function mount(root, ctx) {
       result.hidden = false;
       result.replaceChildren(h('div', { class: 'lnk-result-main' }, h('span', { class: 'lnk-result-label' }, 'ลิงก์ย่อของคุณ'), h('a', { class: 'lnk-result-url', href: full, target: '_blank', rel: 'noopener noreferrer' }, full)),
         h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => copy(full) }, svgIcon(I.copy, 16), 'คัดลอก'),
-          h('button', { class: 'btn', type: 'button', onclick: () => showQr(full, l.title || 'QR Code') }, svgIcon(I.qr, 16), 'QR Code'),
+          h('button', { class: 'btn', type: 'button', onclick: () => showQr(full, l.title || 'QR Code', { code: l.code, hasImg: l.hasImg, imgUrl: l.imgUrl }) }, svgIcon(I.qr, 16), 'QR Code'),
           h('button', { class: 'btn', type: 'button', onclick: () => openStats(l) }, svgIcon(I.chart, 16), 'ดูสถิติ')));
       copy(full, 'ย่อลิงก์แล้ว และคัดลอกไว้ในคลิปบอร์ด');
       await load(false);
@@ -99,7 +101,7 @@ export async function mount(root, ctx) {
   const skeleton = () => list.replaceChildren(...[1, 2, 3].map(() => h('div', { class: 'skeleton', style: 'height:68px;margin-bottom:.5rem' })));
   async function load(showSkeleton = true) {
     const my = ++seq;
-    const apply = (d) => { st.items = d.items.filter((l) => l.kind !== 'qrs'); st.savedQr = d.items.length - st.items.length; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; st.scanned = d.scanned; };
+    const apply = (d) => { st.all = d.items; st.items = d.items.filter((l) => l.kind === 'link' || l.kind === 'qr'); st.savedQr = d.items.length - st.items.length; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; st.scanned = d.scanned; };
     const cached = showSkeleton && !st.loaded ? cachedLinksList() : null;
     if (cached) { apply(cached); draw(); } else if (showSkeleton) skeleton();   // show the last known list at once, then refresh
     try {
@@ -110,7 +112,7 @@ export async function mount(root, ctx) {
       if (namesP) { st.projects = await namesP; fillProjects(projIn); }
       if (my !== seq) return; draw();
       const want = !st.deepLinked && ctx && ctx.params && ctx.params.get('stats');
-      if (want) { st.deepLinked = true; const hit = st.items.find((x) => x.code === want); if (hit) openStats(hit); else toast('ไม่พบลิงก์/QR ที่ต้องการดูสถิติ หรือไม่มีสิทธิ์เข้าถึง', 'error'); }
+      if (want) { st.deepLinked = true; const hit = (st.all || st.items).find((x) => x.code === want && x.kind !== 'qrs'); if (hit) openStats(hit); else toast('ไม่พบลิงก์/QR ที่ต้องการดูสถิติ หรือไม่มีสิทธิ์เข้าถึง', 'error'); }
     } catch (e) {
       if (my !== seq) return;
       list.replaceChildren(...[notice('error', 'โหลดลิงก์ไม่ได้', e.message), e.code === 'INVALID_SESSION' ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, 'เข้าสู่ระบบใหม่') : null].filter(Boolean));
@@ -163,7 +165,7 @@ export async function mount(root, ctx) {
       stt !== 'active' ? h('span', { class: 'pill pill-err' }, STATUS_LABEL[stt]) : null,
       h('div', { class: 'lnk-num', title: `คลิกล่าสุด: ${ago(l.last)}` }, h('b', null, fmt(l.clicks)), h('small', null, `7 วัน ${fmt(l.week)}`)),
       h('button', { class: 'icon-btn lnk-act', type: 'button', 'aria-label': `คัดลอกลิงก์ ${l.title || l.code}`, title: 'คัดลอก', onclick: () => copy(full) }, svgIcon(I.copy, 18)),
-      h('button', { class: 'icon-btn lnk-act', type: 'button', 'aria-label': `QR Code ของ ${l.title || l.code}`, title: 'QR Code', onclick: () => showQr(full, l.title || 'QR Code') }, svgIcon(I.qr, 18)));
+      h('button', { class: 'icon-btn lnk-act', type: 'button', 'aria-label': `QR Code ของ ${l.title || l.code}`, title: 'QR Code', onclick: () => showQr(full, l.title || 'QR Code', { code: l.code, hasImg: l.hasImg, imgUrl: l.imgUrl }) }, svgIcon(I.qr, 18)));
   }
 
   /* ---- stats drawer ---- */
@@ -180,19 +182,22 @@ export async function mount(root, ctx) {
       try { const data = await call('stats', { code: link.code, days: d }); if (my === seq || true) render(data); } catch (e) { body.replaceChildren(notice('error', 'โหลดสถิติไม่ได้', e.message)); }
     }
     function render(d) {
-      const l = d.link; const full = shortUrl(st.base, l.code); const stt = statusOf(l); const unit = l.kind === 'qr' ? 'สแกน' : 'คลิก';
+      const l = d.link; const full = shortUrl(st.base, l.code); const stt = statusOf(l); const isX = l.kind === 'qrx'; const unit = isX ? 'เปิดหน้า' : l.kind === 'qr' ? 'สแกน' : 'คลิก';
+      const xNote = !isX ? null : d.linked ? notice('info', 'สถิติของ QR เดิม = จำนวนการเปิดหน้าปลายทาง', `นับจากตัวนับสถิติของโครงการ เฉพาะหน้า ${d.matched.path}${d.matched.utm ? ` ที่มี utm_source=${d.matched.utm}` : ' (รวมคนที่เข้าหน้านี้ทางอื่นด้วย ไม่ใช่เฉพาะคนสแกน)'} — ไม่นับบอท`)
+        : notice('warn', 'ยังนับสถิติให้ QR เดิมนี้ไม่ได้', { 'no-url': 'ยังไม่ได้ระบุที่อยู่ปลายทาง — กด “แก้ไข” แล้วใส่ที่อยู่ที่ QR นี้พาไป', 'no-project': 'ยังไม่ได้แนบกับโครงการ — กด “แก้ไข” แล้วเลือกโครงการที่เป็นเจ้าของหน้าปลายทาง', 'other-domain': 'ปลายทางไม่ใช่โดเมนของโครงการที่แนบ — ตรวจโดเมนในแท็บ ตั้งค่า ของโครงการ' }[d.reason] || 'ไม่พบข้อมูลที่จับคู่ได้');
       title.textContent = l.title || hostOf(l.url);
       const range = h('div', { class: 'tabs lnk-range', role: 'tablist', 'aria-label': 'ช่วงเวลา' }, [[7, '7 วัน'], [30, '30 วัน'], [90, '90 วัน'], [365, '1 ปี']].map(([n, label]) =>
         h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(d.days === n), onclick: () => fetchStats(n) }, label)));
       const stat = (label, value, sub) => h('div', { class: 'lnk-stat' }, h('small', null, label), h('b', null, fmt(value)), sub ? h('span', { class: 'muted' }, sub) : null);
       const hours = d.byHour.map((n, i) => ({ n, label: `${String(i).padStart(2, '0')}:00` }));
       body.replaceChildren(...[
-        h('div', { class: 'lnk-linkbox' }, h('a', { href: full, target: '_blank', rel: 'noopener noreferrer' }, full), h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'คัดลอก', onclick: () => copy(full) }, svgIcon(I.copy, 18))),
-        h('p', { class: 'lnk-dest muted' }, '→ ', h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.url)),
+        isX ? null : h('div', { class: 'lnk-linkbox' }, h('a', { href: full, target: '_blank', rel: 'noopener noreferrer' }, full), h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'คัดลอก', onclick: () => copy(full) }, svgIcon(I.copy, 18))),
+        l.url ? h('p', { class: 'lnk-dest muted' }, isX ? 'ปลายทางของ QR เดิม: ' : '→ ', h('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.url)) : null,
+        xNote,
         h('div', { class: 'btn-row lnk-actions' },
-          h('button', { class: 'btn btn-sm', type: 'button', onclick: () => showQr(full, l.title || 'QR Code') }, svgIcon(I.qr, 16), 'QR Code'),
+          h('button', { class: 'btn btn-sm', type: 'button', onclick: () => (isX ? showSavedQr(l, st.base) : showQr(full, l.title || 'QR Code', { code: l.code, hasImg: l.hasImg, imgUrl: l.imgUrl })) }, svgIcon(I.qr, 16), isX ? 'ดูรูป QR' : 'QR Code'),
           l.kind === 'qr' ? h('a', { class: 'btn btn-sm', href: `#/qr?load=${encodeURIComponent(l.code)}`, onclick: () => closeDrawer && closeDrawer() }, svgIcon(ICONS.edit, 16), 'เปิดใน QR Generator') : null,
-          h('button', { class: 'btn btn-sm', type: 'button', onclick: () => exportCsv(l) }, svgIcon(ICONS.download, 16), 'ส่งออก CSV'),
+          isX ? null : h('button', { class: 'btn btn-sm', type: 'button', onclick: () => exportCsv(l) }, svgIcon(ICONS.download, 16), 'ส่งออก CSV'),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => editLink(l, () => fetchStats(d.days)) }, svgIcon(ICONS.edit, 16), 'แก้ไข'),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => toggle(l, () => fetchStats(d.days)) }, l.status === 'disabled' ? 'เปิดใช้งาน' : 'ปิดชั่วคราว'),
           h('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: () => remove(l) }, svgIcon(ICONS.trash, 16), 'ลบ')),
@@ -206,7 +211,7 @@ export async function mount(root, ctx) {
         h('section', { class: 'lnk-sec' }, h('h3', null, 'การเข้าชมล่าสุด'), d.recent.length
           ? h('div', { class: 'lnk-table-wrap' }, h('table', { class: 'lnk-table' }, h('thead', null, h('tr', null, ['เวลา', 'อุปกรณ์', 'เบราว์เซอร์', 'ประเทศ', 'มาจาก'].map((x) => h('th', null, x)))),
             h('tbody', null, d.recent.map((r) => h('tr', null, h('td', null, when(r.t)), h('td', null, `${DEVICE[r.device] || r.device} · ${r.os}`), h('td', null, r.browser), h('td', null, countryName(r.country)), h('td', null, r.ref || 'โดยตรง'))))))
-          : h('p', { class: 'muted' }, l.kind === 'qr' ? 'ยังไม่มีคนสแกน QR นี้' : 'ยังไม่มีคนเข้าลิงก์นี้')),
+          : h('p', { class: 'muted' }, isX ? 'QR เดิมไม่มีรายการผู้สแกนรายคน — ดูจำนวนเปิดหน้ารายวันด้านบน' : l.kind === 'qr' ? 'ยังไม่มีคนสแกน QR นี้' : 'ยังไม่มีคนเข้าลิงก์นี้')),
         h('dl', { class: 'meta' }, h('dt', null, 'สร้างเมื่อ'), h('dd', null, when(bkk(l.created))), h('dt', null, 'หมดอายุ'), h('dd', null, l.expires ? when(bkk(l.expires)) : 'ไม่หมดอายุ'),
           h('dt', null, `${unit}แรก`), h('dd', null, d.first ? when(d.first) : '-'), l.project && projName(l.project) ? h('dt', null, 'โครงการ') : null, l.project && projName(l.project) ? h('dd', null, projName(l.project)) : null, l.ref ? h('dt', null, 'ที่มา') : null, l.ref ? h('dd', null, `ไฟล์/โฟลเดอร์ในคลังข้อมูล`) : null, st.admin ? h('dt', null, 'เจ้าของ') : null, st.admin ? h('dd', null, l.owner) : null),
         d.scanned ? h('p', { class: 'hint' }, 'สถิติคำนวณจากการคลิกล่าสุด 60,000 รายการ') : null].filter(Boolean));

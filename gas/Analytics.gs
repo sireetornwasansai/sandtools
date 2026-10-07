@@ -52,7 +52,7 @@ function anaFind(key) {
 function anaPublic(s, x) {
   x = x || {};
   return { key: s.key, name: s.name, url: s.url, domains: s.domains, owner: s.owner, created: s.created, status: s.status, note: s.note, tags: s.tags, track: s.track,
-    pv7: x.pv7 || 0, uv7: x.uv7 || 0, last: x.last || 0, links: x.links || 0, linkClicks: x.linkClicks || 0 };
+    pv7: x.pv7 || 0, uv7: x.uv7 || 0, last: x.last || 0, links: x.links || 0, linkClicks: x.linkClicks || 0, qrs: x.qrs || 0 };
 }
 function anaUncache(key) { try { CacheService.getScriptCache().remove('as:' + key); } catch (x) { /* ignore */ } }
 function anaLog(u, op, key, extra) {
@@ -179,7 +179,7 @@ function anaRead(onlyKey) {
   }
   return out;
 }
-function anaDay(t) { return Utilities.formatDate(new Date(t), LNK_TZ, 'yyyy-MM-dd'); }
+function anaDay(t) { return lnkDayOf(t); }   // arithmetic, not Utilities.formatDate (≈1 ms per call)
 
 function anaStats(s, daysIn) {
   var days = [7, 30, 90, 365].indexOf(Number(daysIn)) >= 0 ? Number(daysIn) : 30;
@@ -203,7 +203,7 @@ function anaStats(s, daysIn) {
     var pd = perDay[d] = perDay[d] || { pv: 0 }; pd.pv++;
     (dayVid[d] = dayVid[d] || Object.create(null))[r.vid || ('x' + pv)] = 1;
     (pageVid[r.name] = pageVid[r.name] || Object.create(null))[(r.vid || ('x' + pv)) + d] = 1;
-    hours[Number(Utilities.formatDate(new Date(r.t), LNK_TZ, 'H'))]++;
+    hours[lnkHourOf(r.t)]++;
   });
   var byDay = [], uv = 0;
   for (var i = days - 1; i >= 0; i--) {
@@ -215,6 +215,64 @@ function anaStats(s, daysIn) {
     realtime: Object.keys(real).length, first: first ? new Date(first).toISOString() : '', last: last ? new Date(last).toISOString() : '', lastAny: lastAny ? new Date(lastAny).toISOString() : '',
     byDay: byDay, byHour: hours, pages: topPages, referrers: lnkTop(ref, 8), countries: lnkTop(co, 8), devices: lnkTop(dev, 5), browsers: lnkTop(br, 6), systems: lnkTop(os, 6), utms: lnkTop(utm, 6),
     languages: lnkTop(lang, 4), eventNames: lnkTop(evs, 10), scanned: rows.length >= ANA_SCAN_ROWS };
+}
+
+/* ------------------- statistics of an attached OLD QR (kind 'qrx') ------------------- */
+/** Path (and SPA hash route) of a web address, normalised the way t.js reports pages: no query string, no trailing slash. */
+function anaPathOf(url) {
+  var m = /^https?:\/\/[^\/?#]*([^?#]*)(#[^?]*)?/i.exec(String(url || '')), p = m ? m[1] : '', hash = m && m[2] ? m[2] : '';
+  try { p = decodeURI(p); } catch (x) { /* keep encoded */ }
+  p = p || '/';
+  if (/^#!?\//.test(hash)) p += hash;
+  if (p.length > 1) p = p.replace(/\/+$/, '');
+  return p.slice(0, 200) || '/';
+}
+function anaUtmOf(url) {
+  var m = /[?&]utm_source=([^&#]*)/.exec(String(url || ''));
+  try { return m ? decodeURIComponent(m[1]).slice(0, 40) : ''; } catch (x) { return ''; }
+}
+/**
+ * An old QR goes straight to its target, so scans cannot be counted. What CAN be measured, when the target is a page of a project's website
+ * (the tracking script is installed there), is how often that page was opened, per day, robots excluded. If the old QR's address carries
+ * ?utm_source=… only visits with that utm_source count, which isolates the people who came through the QR.
+ * Same answer shape as lnkStats() so the page draws both alike; mode = 'pageviews'; `linked`/`reason` say whether matching was possible.
+ */
+function anaQrxStats(l, daysIn) {
+  var days = [7, 30, 90, 365].indexOf(Number(daysIn)) >= 0 ? Number(daysIn) : 30, now = Date.now();
+  var out = { link: lnkPublic(l, null), mode: 'pageviews', linked: false, reason: '', matched: { path: '', utm: '' }, days: days, total: 0, unique: 0, bots: 0, inRange: 0, uniqueInRange: 0, week: 0, first: '', last: '',
+    byDay: [], byHour: [], devices: [], browsers: [], systems: [], countries: [], referrers: [], recent: [], scanned: false };
+  var hours = []; for (var h = 0; h < 24; h++) hours.push(0);
+  for (var i = days - 1; i >= 0; i--) out.byDay.push({ d: lnkDayOf(now - i * 86400000), n: 0 });
+  out.byHour = hours;
+  if (!l.url) { out.reason = 'no-url'; return out; }
+  if (!l.project) { out.reason = 'no-project'; return out; }
+  var s = anaFind(l.project);
+  if (!s || s.status === 'deleted') { out.reason = 'no-project'; return out; }
+  if (!anaHostMatches(s.domains, anaHostOfUrl(l.url))) { out.reason = 'other-domain'; return out; }
+  anaFlush();
+  var path = anaPathOf(l.url), utm = anaUtmOf(l.url), rows = anaRead(s.key), cutoff = now - days * 86400000, wk = now - 7 * 86400000;
+  var idx = Object.create(null); out.byDay.forEach(function (x, n) { idx[x.d] = n; });
+  var uniq = {}, uniqRange = {}, dev = Object.create(null), co = Object.create(null), rf = Object.create(null), br = Object.create(null), os = Object.create(null), first = 0, last = 0;
+  rows.forEach(function (r) {
+    if (r.type !== 'pv') return;
+    var name = String(r.name || ''); if (name.length > 1) name = name.replace(/\/+$/, '');
+    if (name !== path || (utm && r.utm !== utm)) return;
+    if (r.bot) { out.bots++; return; }
+    out.total++; if (r.vid) uniq[r.vid + lnkDayOf(r.t)] = 1;
+    if (!first || r.t < first) first = r.t;
+    if (r.t > last) last = r.t;
+    if (r.t >= wk) out.week++;
+    if (r.t < cutoff) return;
+    out.inRange++; if (r.vid) uniqRange[r.vid + lnkDayOf(r.t)] = 1;
+    var d = lnkDayOf(r.t); if (idx[d] !== undefined) out.byDay[idx[d]].n++;
+    hours[lnkHourOf(r.t)]++;
+    lnkBump(dev, r.device); lnkBump(br, r.browser); lnkBump(os, r.os); lnkBump(co, r.country); lnkBump(rf, r.ref);
+  });
+  out.linked = true; out.matched = { path: path, utm: utm };
+  out.unique = Object.keys(uniq).length; out.uniqueInRange = Object.keys(uniqRange).length;
+  out.first = first ? new Date(first).toISOString() : ''; out.last = last ? new Date(last).toISOString() : '';
+  out.devices = lnkTop(dev, 5); out.browsers = lnkTop(br, 6); out.systems = lnkTop(os, 6); out.countries = lnkTop(co, 8); out.referrers = lnkTop(rf, 8); out.scanned = rows.length >= ANA_SCAN_ROWS;
+  return out;
 }
 
 /* ------------------------------ dashboard overview ----------------------------- */
@@ -246,10 +304,10 @@ function anaOverview(sc, daysIn) {
     var pd = perDay[d] = perDay[d] || { pv: 0 }; pd.pv++;
     lnkBump(ref, r.ref); lnkBump(co, r.country); lnkBump(dev, r.device); lnkBump(br, r.browser);
     var pk = r.key + '\u0001' + r.name, pg = pageAgg[pk] = pageAgg[pk] || { site: r.key, name: r.name, n: 0 }; pg.n++;
-    hours[Number(Utilities.formatDate(new Date(r.t), LNK_TZ, 'H'))]++;
+    hours[lnkHourOf(r.t)]++;
   });
   /* short links + QR scans of the same user scope */
-  var links = lnkAll().filter(function (l) { return l.status !== 'deleted' && (sc.admin || l.owner === sc.email); }), only = Object.create(null), meta = Object.create(null), kinds = { link: 0, qr: 0, qrs: 0 };
+  var links = lnkAll().filter(function (l) { return l.status !== 'deleted' && (sc.admin || l.owner === sc.email); }), only = Object.create(null), meta = Object.create(null), kinds = { link: 0, qr: 0, qrs: 0, qrx: 0 };
   links.forEach(function (l) { only[l.code] = 1; meta[l.code] = l; kinds[l.kind] = (kinds[l.kind] || 0) + 1; });
   var scanDay = Object.create(null), perCode = Object.create(null), scans = 0, prevScans = 0;
   (links.length ? lnkClicks(only) : []).forEach(function (c) {
@@ -264,7 +322,7 @@ function anaOverview(sc, daysIn) {
   var out = { days: days, generated: now, projects: { total: mine.length, tracking: mine.filter(function (s) { return s.track && s.status === 'active'; }).length },
     pv: pv, prevPv: prevPv, uv: uv, prevUv: prevUv, avgPages: uv ? Math.round((pv / uv) * 10) / 10 : 0, realtime: Object.keys(real).length, bots: bots, last: lastAny ? new Date(lastAny).toISOString() : '',
     byDay: byDay, byHour: hours, topProjects: topProjects, pages: pages, referrers: lnkTop(ref, 6), countries: lnkTop(co, 6), devices: lnkTop(dev, 5), browsers: lnkTop(br, 5),
-    links: { links: kinds.link || 0, qr: kinds.qr || 0, qrs: kinds.qrs || 0, scans: scans, prevScans: prevScans, top: lnkTop(perCode, 5).map(function (x) { var l = meta[x.name]; return { code: x.name, n: x.n, kind: l.kind, title: l.title || l.url }; }) } };
+    links: { links: kinds.link || 0, qr: kinds.qr || 0, qrs: kinds.qrs || 0, qrx: kinds.qrx || 0, scans: scans, prevScans: prevScans, top: lnkTop(perCode, 5).map(function (x) { var l = meta[x.name]; return { code: x.name, n: x.n, kind: l.kind, title: l.title || l.url }; }) } };
   try { cache.put(ck, JSON.stringify(out), 60); } catch (x) { /* too big for the cache: just recompute next time */ }
   return out;
 }
@@ -289,7 +347,7 @@ function projects(b) {
 function anaList(sc) {
   anaFlush();
   var mine = anaAll().filter(function (s) { return s.status !== 'deleted' && (sc.admin || s.owner === sc.email); }), keys = Object.create(null);
-  mine.forEach(function (s) { keys[s.key] = { pv7: 0, uvd: Object.create(null), last: 0, links: 0, linkClicks: 0 }; });
+  mine.forEach(function (s) { keys[s.key] = { pv7: 0, uvd: Object.create(null), last: 0, links: 0, linkClicks: 0, qrs: 0 }; });
   var wk = Date.now() - 7 * 86400000;
   anaRead(null).forEach(function (r) {
     var a = keys[r.key]; if (!a || r.bot) return;
@@ -297,9 +355,9 @@ function anaList(sc) {
     if (r.type === 'pv' && r.t >= wk) { a.pv7++; a.uvd[r.vid + anaDay(r.t)] = 1; }
   });
   var links = lnkAll().filter(function (l) { return l.project && keys[l.project] && l.status !== 'deleted'; }), only = {};
-  links.forEach(function (l) { only[l.code] = l.project; keys[l.project].links++; });
+  links.forEach(function (l) { only[l.code] = l.project; keys[l.project].links++; if (l.kind !== 'link') keys[l.project].qrs++; });
   if (links.length) lnkClicks(only).forEach(function (c) { if (!c.bot) keys[only[c.code]].linkClicks++; });
-  return { admin: sc.admin, base: lnkBase(), items: mine.map(function (s) { var a = keys[s.key]; return anaPublic(s, { pv7: a.pv7, uv7: Object.keys(a.uvd).length, last: a.last, links: a.links, linkClicks: a.linkClicks }); })
+  return { admin: sc.admin, base: lnkBase(), items: mine.map(function (s) { var a = keys[s.key]; return anaPublic(s, { pv7: a.pv7, uv7: Object.keys(a.uvd).length, last: a.last, links: a.links, linkClicks: a.linkClicks, qrs: a.qrs }); })
     .sort(function (x, y) { return x.created < y.created ? 1 : -1; }) };
 }
 
@@ -366,7 +424,7 @@ function setupAnalytics() {
   sites.getRange(2, 1, Math.max(sites.getMaxRows() - 1, 1), 4).setNumberFormat('@');
   hits.getRange(2, 1, Math.max(hits.getMaxRows() - 1, 1), 1).setNumberFormat('0');
   var links = sheetTab('Links', LNK_LINK_HEADERS);
-  links.getRange(1, 12, 1, 3).setValues([['โครงการ', 'ชนิด', 'ข้อมูล QR']]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e'); links.setColumnWidth(12, 110);
+  links.getRange(1, 12, 1, 7).setValues([['โครงการ', 'ชนิด', 'ข้อมูล QR', 'ที่มา', 'ลิงก์ย่อ (URL)', 'รูป QR (Drive id)', 'รูป QR (URL)']]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e'); links.setColumnWidth(12, 110);
   ScriptApp.getProjectTriggers().forEach(function (t) { var f = t.getHandlerFunction(); if (f === 'anaFlushJob' || f === 'anaPruneJob') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('anaFlushJob').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('anaPruneJob').timeBased().everyDays(1).atHour(3).create();

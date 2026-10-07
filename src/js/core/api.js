@@ -31,7 +31,10 @@ async function gasCallOnce(action, payload = {}, timeoutMs = 20000) {
       redirect: 'follow', credentials: 'omit', signal: ctrl.signal, referrerPolicy: 'no-referrer'
     });
     let json;
-    try { json = await res.json(); } catch { throw new ApiError('BAD_RESPONSE', 'Backend ตอบกลับในรูปแบบที่ไม่ถูกต้อง'); }
+    try { json = await res.json(); } catch {
+      // Apps Script answers with an HTML error page (HTTP 404 from script.googleusercontent.com/macros/echo) when the script crashed, timed out or the deployment is stale.
+      throw new ApiError('BAD_RESPONSE', res.ok ? 'Backend ตอบกลับในรูปแบบที่ไม่ถูกต้อง' : `Backend ตอบกลับผิดปกติ (HTTP ${res.status}) — ดู Executions ใน Apps Script หรือ Deploy เวอร์ชันใหม่แล้วลองอีกครั้ง`);
+    }
     if (!json || json.success !== true) {
       const err = (json && json.error) || {};
       throw new ApiError(err.code || 'UNKNOWN', err.message || 'เกิดข้อผิดพลาดจาก Backend');
@@ -45,7 +48,7 @@ async function gasCallOnce(action, payload = {}, timeoutMs = 20000) {
 }
 
 /** Read-only operations are safe to repeat; writes (create/update/delete…) are never retried so nothing is saved twice. */
-const READ_OPS = new Set(['list', 'get', 'stats', 'overview', 'names']);
+const READ_OPS = new Set(['list', 'get', 'stats', 'overview', 'names', 'getimg']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**

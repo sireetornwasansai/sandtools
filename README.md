@@ -50,3 +50,9 @@ DOCX/PPTX: no charts, text boxes (DOCX), SmartArt; images are referenced, not em
 * *Backend status red in Settings* → redeploy Apps Script as Web app, access "Anyone", use the `/exec` URL; run `setup` once.
 * *Thai file names missing in downloads on Linux CI* → run with `LANG=C.UTF-8`.
 * *Old version after deploy* → service worker cache; hard-reload once (cache key changes every build).
+
+## QR ที่แนบกับโครงการ (v1.6.0)
+* **QR ที่สร้างในระบบ** — ทุกรายการในชีต `Links` บันทึก `ที่มา`, `ลิงก์ย่อ (URL)`, `ปลายทาง`, `รูป QR (Drive id)`, `รูป QR (URL)` (คอลัมน์ 15–18) และรูป PNG ถูกเก็บใน `DRIVE_FOLDER_ID/<yyyy-MM>/<อีเมล>/QR/`
+* **QR เดิมจากที่อื่น** (`kind = qrx`) — หน้า ประวัติ QR / แท็บ QR ของโครงการ → “แนบ QR เดิม”: อัปโหลดรูป ระบบอ่านที่อยู่ใน QR ในเบราว์เซอร์ (jsQR) เก็บรูปลง Drive และบันทึกปลายทาง
+  * QR เดิมนับ “จำนวนสแกน” ไม่ได้ (ไม่ผ่านลิงก์ย่อ) จึงแสดง **จำนวนเปิดหน้าปลายทางรายวัน** จากตัวนับของโครงการ (`t.js`) — ถ้าที่อยู่ใน QR มี `?utm_source=…` จะนับเฉพาะผู้ที่เข้ามาทาง QR นั้น
+* หลังวางไฟล์ `gas/*.gs` ใหม่: **Deploy → จัดการการติดตั้ง → แก้ไข → เวอร์ชันใหม่**, รัน `setupLinks` และ `setupAnalytics` หนึ่งครั้ง (เพิ่มหัวคอลัมน์ 15–18)

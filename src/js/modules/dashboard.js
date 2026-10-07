@@ -29,7 +29,7 @@ const IC = {
   bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>'
 };
-const KIND = { qr: 'QR ติดตามสถิติ', qrs: 'QR เก็บประวัติ', link: 'ลิงก์ย่อ' };
+const KIND = { qr: 'QR ติดตามสถิติ', qrs: 'QR เก็บประวัติ', qrx: 'QR เดิม (แนบ)', link: 'ลิงก์ย่อ' };
 
 function greeting(user) {
   const hr = new Date().getHours(); const part = hr < 11 ? 'สวัสดีตอนเช้า' : hr < 13 ? 'สวัสดีตอนเที่ยง' : hr < 17 ? 'สวัสดีตอนบ่าย' : 'สวัสดีตอนเย็น';
@@ -126,7 +126,7 @@ export async function mount(root) {
       { id: 'sc', label: 'สแกน QR / คลิกลิงก์', val: o.links.scans, prev: o.links.prevScans, spark: sp('sc'), icon: ICONS.qr, sub: `${fmt((o.links.qr || 0) + (o.links.links || 0))} รายการที่นับสถิติ`, tone: 'c' },
       { id: 'rt', label: 'ออนไลน์ตอนนี้', val: o.realtime, live: true, icon: IC.bolt, sub: 'ผู้เข้าชมใน 5 นาทีล่าสุด', tone: 'd' },
       { id: 'pj', label: 'โครงการ', val: o.projects.total, icon: IC.site, sub: `${fmt(o.projects.tracking)} กำลังเก็บสถิติ`, tone: 'e' },
-      { id: 'ql', label: 'QR และลิงก์ที่บันทึก', val: (o.links.qr || 0) + (o.links.qrs || 0) + (o.links.links || 0), icon: IC.link, sub: `QR ${fmt((o.links.qr || 0) + (o.links.qrs || 0))} · ลิงก์ย่อ ${fmt(o.links.links || 0)}`, tone: 'f' }
+      { id: 'ql', label: 'QR และลิงก์ที่บันทึก', val: (o.links.qr || 0) + (o.links.qrs || 0) + (o.links.qrx || 0) + (o.links.links || 0), icon: IC.link, sub: `QR ${fmt((o.links.qr || 0) + (o.links.qrs || 0) + (o.links.qrx || 0))} · ลิงก์ย่อ ${fmt(o.links.links || 0)}`, tone: 'f' }
     ];
   }
   function drawKpi() {

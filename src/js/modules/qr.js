@@ -6,7 +6,7 @@ import { record } from '../core/logger.js';
 import { getSession } from '../core/auth.js';
 import { backendConfigured } from '../core/api.js';
 import { notice } from '../core/notices.js';
-import { QR_TYPES, QR_CATS, linksCall, shortUrl, savedForm, savedDesign, fetchSavedItem } from '../core/qrsaved.js';
+import { QR_TYPES, QR_CATS, linksCall, shortUrl, savedForm, savedDesign, fetchSavedItem, uploadQrImage } from '../core/qrsaved.js';
 import { buildMatrix, PAYLOADS, toSvg, drawToCanvas, byteLength, MAX_BYTES, contrastRatio } from './qr-engine.js';
 
 const TYPES = QR_TYPES;
@@ -138,11 +138,16 @@ export function mount(root, ctx) {
   }
 
   function fileBase() { return (catIn.value !== 'general' ? `${catIn.value}-` : '') + ({ url: 'qr-link', text: 'qr-text', wifi: 'qr-wifi', email: 'qr-email', phone: 'qr-phone', sms: 'qr-sms', vcard: 'qr-contact' })[type]; }
-  function downloadPng() {
-    if (!current) return;
+  /** The picture as downloaded: the QR, plus the caption bar when a caption is set. */
+  function captioned() {
     const cap = capIn.value.trim(); let src = canvas;
     if (cap) { const o = current.opts; const bar = Math.round(o.size * 0.11); src = document.createElement('canvas'); src.width = canvas.width; src.height = canvas.height + bar;
       const g = src.getContext('2d'); g.fillStyle = o.bg; g.fillRect(0, 0, src.width, src.height); g.drawImage(canvas, 0, 0); g.fillStyle = o.fg; g.font = `600 ${Math.round(bar * 0.5)}px "Noto Sans Thai", Tahoma, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(cap, src.width / 2, canvas.height + bar / 2, src.width * 0.92); }
+    return src;
+  }
+  function downloadPng() {
+    if (!current) return;
+    const cap = capIn.value.trim(); const src = captioned();
     record('qr', 'download_png', { fileName: `${fileBase()}.png`, extra: { type, category: catIn.value, caption: cap } });
     src.toBlob((b) => { if (b) downloadBlob(b, `${fileBase()}.png`); else toast('สร้างไฟล์ PNG ไม่สำเร็จ', 'error'); }, 'image/png');
   }
@@ -231,6 +236,11 @@ export function mount(root, ctx) {
         saveResult.replaceChildren(h('b', null, 'เก็บไว้ในประวัติแล้ว'), h('p', { class: 'muted' }, 'เปิดกลับมาแก้ไขหรือดาวน์โหลดใหม่ได้จากหน้า ประวัติ QR (ไม่เก็บโลโก้กลาง QR)'), h('a', { class: 'btn btn-sm', href: '#/qrs' }, 'ไปที่ประวัติ QR'));
       }
       toast(doneMsg, 'success');
+      // keep the picture in Google Drive (<DRIVE_FOLDER_ID>/<month>/<email>/QR) and record its URL in the Links sheet
+      try {
+        const up = await uploadQrImage(link.code, captioned());
+        saveResult.append(h('p', { class: 'hint' }, 'เก็บรูป QR ลง Google Drive แล้ว ', h('a', { href: up.imgUrl, target: '_blank', rel: 'noopener noreferrer' }, 'เปิดไฟล์')));
+      } catch (ue) { saveResult.append(h('p', { class: 'hint status-err' }, `บันทึกรายการแล้ว แต่เก็บรูปลง Drive ไม่สำเร็จ — ${ue.message}`)); }
       record('qr', update ? 'update_saved' : 'save', { fileName: title, extra: { type, tracked, category: catIn.value } });
     } catch (e) { toast(e.message || 'บันทึกไม่สำเร็จ', 'error', 7000); } finally { saveNewBtn.disabled = false; syncPanel(); }
   }

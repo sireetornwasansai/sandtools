@@ -51,3 +51,15 @@
 
 .lnk-proj { background: #eaf6ee; color: #15803d; } :root[data-theme="dark"] .lnk-proj { background: #0f2a1b; color: #86efac; }
 .lnk-bar.dual { gap: 1px; } .lnk-bar.dual i { width: auto; flex: 1; } .lnk-bar.dual i.b { background: var(--accent-teal); }
+
+/* ---- v1.6: attached old QR, QR pictures kept in Drive ---- */
+.qro-preview { display: flex; justify-content: center; margin: .25rem 0 .5rem; padding: .75rem; border: 1px dashed var(--border); border-radius: 12px; background: var(--surface-2); }
+.qro-img, .qro-big { display: block; max-width: 100%; max-height: 260px; width: auto; height: auto; border-radius: 8px; background: #fff; }
+.qro-big { max-height: 360px; }
+.qro-status { margin: 0 0 1rem; font-size: .9rem; overflow-wrap: anywhere; }
+.qro-decoded { display: block; margin-top: .3rem; padding: .4rem .6rem; border-radius: 8px; background: var(--surface-2); font-size: .8rem; word-break: break-all; }
+.qro-thumb { object-fit: contain; background: #fff; }
+.qro-rows { display: flex; flex-direction: column; gap: .35rem; margin-top: .75rem; }
+.qro-row { display: grid; grid-template-columns: 9rem 1fr; gap: .5rem; font-size: .88rem; align-items: baseline; } .qro-row small { color: var(--muted); } .qro-row a, .qro-row span { overflow-wrap: anywhere; }
+.qr-drive { margin-top: .5rem; text-align: center; }
+@media (max-width: 520px) { .qro-row { grid-template-columns: 1fr; gap: 0; } }

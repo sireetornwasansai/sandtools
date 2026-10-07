@@ -24,3 +24,8 @@
 .prj-switch { padding: .8rem 1rem; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 1rem; }
 .prj-links { margin-top: .8rem; }
 @media (max-width: 640px) { .prj-grid { grid-template-columns: 1fr; } .prj-path { max-width: 11rem; } .prj-code pre { padding-right: 1rem; padding-bottom: 3rem; } .prj-code .btn { top: auto; bottom: .55rem; } }
+
+/* QR tab */
+.prj-qrrow { align-items: center; }
+.prj-qrthumb { flex: none; width: 72px; height: 72px; display: grid; place-items: center; border-radius: 10px; background: #fff; border: 1px solid var(--border); overflow: hidden; }
+.prj-qrthumb canvas, .prj-qrthumb img { width: 100%; height: 100%; object-fit: contain; }

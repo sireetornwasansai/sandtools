@@ -7,6 +7,8 @@ import { toast } from '../core/toast.js';
 import { copyText, downloadBlob } from '../core/download.js';
 import { addLayer, modal, confirmBox, closeAllLayers } from '../core/layers.js';
 import { showQr } from '../core/qrdialog.js';
+import { attachOldQr, qrThumb, showSavedQr } from '../core/qrold.js';
+import { fetchLinksList, KIND_LABEL, catLabel, savedDesign } from '../core/qrsaved.js';
 import { loadCss } from '../core/css.js';
 import { fmt, hostOf, when, ago, barChart, areaChart, hBars, dayLabel, countryName, DEVICE } from '../core/charts.js';
 
@@ -88,7 +90,7 @@ export function mountProjectsPanel(host, opts = {}) {
     return h('button', { class: 'prj-card', type: 'button', onclick: () => openDrawer(p, 'overview') },
       h('span', { class: 'prj-head' }, h('span', { class: 'hist-ico' }, svgIcon(I.site, 20)), h('span', { class: 'hist-main' }, h('b', { title: p.name }, p.name), h('small', { class: 'muted' }, p.domains[0] || 'ยังไม่ระบุเว็บไซต์')),
         h('span', { class: `pill prj-state prj-${cls}` }, label)),
-      h('span', { class: 'prj-nums' }, h('span', null, h('b', null, fmt(p.uv7)), h('small', null, 'ผู้เข้าชม 7 วัน')), h('span', null, h('b', null, fmt(p.pv7)), h('small', null, 'เปิดหน้า')), h('span', null, h('b', null, fmt(p.linkClicks)), h('small', null, `คลิก ${fmt(p.links)} ลิงก์`))),
+      h('span', { class: 'prj-nums' }, h('span', null, h('b', null, fmt(p.uv7)), h('small', null, 'ผู้เข้าชม 7 วัน')), h('span', null, h('b', null, fmt(p.pv7)), h('small', null, 'เปิดหน้า')), h('span', null, h('b', null, fmt(p.linkClicks)), h('small', null, `คลิก ${fmt(p.links)} ลิงก์/QR`))),
       h('span', { class: 'prj-foot muted' }, p.last ? `ข้อมูลล่าสุด ${ago(p.last)}` : 'ยังไม่มีข้อมูล', st.admin && p.owner !== me ? ` · ${p.owner.split('@')[0]}` : ''));
   }
 
@@ -121,13 +123,13 @@ export function mountProjectsPanel(host, opts = {}) {
       h('div', { class: 'drawer-head' }, title, h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'ปิด', onclick: () => closeDrawer && closeDrawer() }, svgIcon(I.close))), tabsEl, body);
     closeDrawer = addLayer(h('div', { class: 'drawer-wrap' }, aside), { onClose: () => { closeDrawer = null; stopPoll(); } });
     const skel = () => body.replaceChildren(h('div', { class: 'skeleton', style: 'height:220px' }));
-    const TABS = [['overview', 'ภาพรวม'], ['install', 'ติดตั้ง'], ['links', 'ลิงก์ย่อ'], ['settings', 'ตั้งค่า']];
-    function setTab(t) { stopPoll(); S.tab = t; tabsEl.replaceChildren(...TABS.map(([k, label]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(k === t), onclick: () => setTab(k) }, label))); title.textContent = S.site.name; ({ overview, install: installTab, links: linksTab, settings: settingsTab })[t](); }
+    const TABS = [['overview', 'ภาพรวม'], ['install', 'ติดตั้ง'], ['qr', 'QR Code'], ['links', 'ลิงก์ย่อ'], ['settings', 'ตั้งค่า']];
+    function setTab(t) { stopPoll(); S.tab = t; tabsEl.replaceChildren(...TABS.map(([k, label]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(k === t), onclick: () => setTab(k) }, label))); title.textContent = S.site.name; ({ overview, install: installTab, qr: qrTab, links: linksTab, settings: settingsTab })[t](); }
 
     /* overview */
     async function overview(days = S.days) {
       S.days = days; skel();
-      try { S.stats = await call('projects', 'stats', { key: S.site.key, days }); } catch (e) { body.replaceChildren(notice('error', 'โหลดสถิติไม่ได้', e.message)); return; }
+      try { S.stats = await call('projects', 'stats', { key: S.site.key, days }); } catch (e) { body.replaceChildren(notice('error', 'โหลดสถิติไม่ได้', e.message), h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => overview(days) }, svgIcon(ICONS.rotate, 16), 'ลองใหม่'))); return; }
       if (S.tab !== 'overview') return;
       const d = S.stats; const empty = !d.lastAny;
       const range = h('div', { class: 'tabs lnk-range', role: 'tablist', 'aria-label': 'ช่วงเวลา' }, [[7, '7 วัน'], [30, '30 วัน'], [90, '90 วัน'], [365, '1 ปี']].map(([n, label]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(d.days === n), onclick: () => overview(n) }, label)));
@@ -194,12 +196,37 @@ export function mountProjectsPanel(host, opts = {}) {
             h('li', null, 'ไม่นับผู้ที่เปิด Do-Not-Track/Global Privacy Control และไม่นับบอท'), h('li', null, 'ข้อมูลเก่ากว่า 400 วันถูกลบอัตโนมัติ'), h('li', null, 'ควรระบุการเก็บสถิติไว้ในนโยบายความเป็นส่วนตัวของเว็บไซต์'))));
     }
 
+    /* qr — every QR attached to this project: made here (tracked / history only) or an old QR attached from elsewhere. Pictures are kept in Drive and previewed here. */
+    async function qrTab() {
+      skel();
+      let d; try { d = await fetchLinksList(); } catch (e) { body.replaceChildren(notice('error', 'โหลด QR ไม่ได้', e.message)); return; }
+      if (S.tab !== 'qr') return;
+      const base = d.base || st.base; const mine = d.items.filter((l) => l.project === S.site.key && (l.kind === 'qr' || l.kind === 'qrs' || l.kind === 'qrx'));
+      const scans = mine.filter((l) => l.kind === 'qr').reduce((a, l) => a + l.clicks, 0);
+      const row = (l) => {
+        const full = l.kind === 'qr' ? (l.short || shortUrl(base, l.code)) : '';
+        const open = () => { location.hash = `#/links?stats=${encodeURIComponent(l.code)}`; closeDrawer && closeDrawer(); };
+        return h('div', { class: 'lnk-row prj-qrrow' }, h('span', { class: 'prj-qrthumb' }, qrThumb(l, base, 72)),
+          h('span', { class: 'hist-main' }, h('b', null, l.title || l.code), h('small', { class: 'muted' }, `${KIND_LABEL[l.kind]} · ${catLabel(savedDesign(l).cat)}`),
+            full ? h('small', { class: 'lnk-short' }, full.replace(/^https?:\/\//, '')) : null, l.url ? h('small', { class: 'muted lnk-target' }, `→ ${l.url}`) : null,
+            l.imgUrl ? h('small', null, h('a', { href: l.imgUrl, target: '_blank', rel: 'noopener noreferrer' }, 'รูปใน Drive')) : null),
+          l.kind === 'qr' ? h('div', { class: 'lnk-num' }, h('b', null, fmt(l.clicks)), h('small', null, `สแกน · 7 วัน ${fmt(l.week)}`)) : h('div', { class: 'lnk-num muted' }, l.kind === 'qrx' ? h('small', null, 'ดูสถิติ = เปิดหน้า') : h('small', null, 'ไม่นับสถิติ')),
+          h('button', { class: 'icon-btn lnk-act', type: 'button', 'aria-label': 'ดูรูป QR', title: 'ดูรูป QR', onclick: () => showSavedQr(l, base) }, svgIcon(I.qr, 18)),
+          l.kind !== 'qrs' ? h('button', { class: 'icon-btn lnk-act', type: 'button', 'aria-label': 'ดูสถิติ', title: 'ดูสถิติ', onclick: open }, svgIcon(I.chart, 18)) : null);
+      };
+      body.replaceChildren(
+        h('p', { class: 'muted' }, 'QR ทั้งหมดที่แนบกับโครงการนี้ — QR ที่สร้างในระบบ (นับผู้สแกนได้ถ้าเลือก “ติดตามสถิติ”) และ QR เดิมที่สร้างจากที่อื่น (แนบรูปไว้ใน Google Drive และดูจำนวนเปิดหน้าปลายทาง)'),
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => attachOldQr({ project: S.site.key, onDone: () => qrTab() }) }, svgIcon(ICONS.upload, 18), 'แนบ QR เดิม'),
+          h('a', { class: 'btn', href: '#/qr', onclick: () => closeDrawer && closeDrawer() }, svgIcon(ICONS.plus, 18), 'สร้าง QR ใหม่'), h('span', { class: 'pill' }, `${fmt(mine.length)} QR · ${fmt(scans)} สแกน`)),
+        mine.length ? h('div', { class: 'hist-list prj-links' }, mine.map(row)) : h('div', { class: 'empty' }, svgIcon(I.qr, 28), h('p', null, 'ยังไม่มี QR ที่แนบกับโครงการนี้ — แนบ QR เดิม หรือสร้างใหม่ แล้วเลือกโครงการ')));
+    }
+
     /* links */
     async function linksTab() {
       skel();
       let d; try { d = await call('links', 'list'); } catch (e) { body.replaceChildren(notice('error', 'โหลดลิงก์ไม่ได้', e.message)); return; }
       if (S.tab !== 'links') return;
-      const mine = d.items.filter((l) => l.project === S.site.key); const base = d.base || st.base;
+      const mine = d.items.filter((l) => l.project === S.site.key && l.kind === 'link'); const base = d.base || st.base;
       const clicks = mine.reduce((a, l) => a + l.clicks, 0);
       const newBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => newLink(base) }, svgIcon(I.link, 18), 'สร้างลิงก์ย่อสำหรับโครงการนี้');
       body.replaceChildren(

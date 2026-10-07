@@ -1,5 +1,5 @@
 /**
- * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.5.0 — adds username/password sign-in)
+ * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.6.0 — QR attached to projects, QR pictures + URLs recorded in Links/Drive)
  *
  * This project has FOUR script files — keep them together:
  *   Code.gs     (this file)  entry points, login/session, usage log, file archive, history
@@ -22,7 +22,9 @@
  *   ALLOWED_EMAIL_DOMAIN  (optional)  e.g. "example.go.th" or "a.go.th,b.go.th". Empty = any verified Google account
  *   ALLOWED_EMAILS        (optional)  comma-separated exceptions that are allowed even outside the domain
  *   SESSION_SECRET        (required)  created by setup(); never share
- *   SESSION_TTL_MIN       (optional)  default 480
+ *   SESSION_TTL_MIN       (optional)  default 43200 (30 days — staff stay signed in; the browser re-checks the session in the background)
+ *   STRICT_LOGIN          (optional)  "true" = every login is verified with Google's tokeninfo endpoint (slower, ~0.5 s). Default: the ID token's claims
+ *                         (audience, issuer, expiry, verified e-mail, allowed domain) are checked locally, which is much faster — fine for an intranet tool.
  *   LOGIN_LIMIT_PER_MIN   (optional)  default 30 (global, protects the quota)
  *   LOG_SHEET_ID          (required for logs)   ID of the Google Sheet that receives usage logs (tabs Logs, Files, Index, Links, Clicks)
  *   DRIVE_FOLDER_ID       (required for archive) ID of the Drive folder that receives file copies (yyyy-MM/email/)
@@ -36,13 +38,14 @@
  * One-time setup (run from the editor):  setup → setupSheet → setupSearchIndex → setupLinks → setupAnalytics
  */
 
-var APP_VERSION = '1.5.0';
+var APP_VERSION = '1.6.0';
 /** Reported by ?action=health so the frontend can detect an out-of-date deployment (e.g. Code.gs without Analytics.gs wiring). */
-var APP_FEATURES = ['login', 'log', 'archive', 'history', 'library', 'links', 'qr', 'projects', 'passlogin'];
+var APP_FEATURES = ['login', 'log', 'archive', 'history', 'library', 'links', 'qr', 'projects', 'qrx', 'qrimg'];
 var TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo?id_token=';
 var VALID_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
 var MAX_BODY_CHARS = 8192;
 var MAX_ARCHIVE_CHARS = 14 * 1024 * 1024; // base64 of a ~10 MB file
+var MAX_QRIMG_CHARS = 2300000;           // base64 of a QR picture (links / saveimg): a PNG of up to 1.5 MB
 var LOG_HEADERS = ['เวลา', 'logId', 'อีเมล', 'เครื่องมือ', 'การทำงาน', 'สถานะ', 'ชื่อไฟล์', 'ขนาดก่อน', 'ขนาดหลัง', 'รายละเอียด', 'ลิงก์ไฟล์ต้นฉบับ', 'ลิงก์ไฟล์ผลลัพธ์'];
 var FILE_HEADERS = ['เวลา', 'logId', 'อีเมล', 'เครื่องมือ', 'ประเภท', 'ชื่อไฟล์', 'ขนาด (ไบต์)', 'ลิงก์ Drive'];
 var MAX_ARCHIVE_BYTES = 10 * 1024 * 1024;
@@ -51,6 +54,7 @@ var MAX_TOKEN_CHARS = 4096;
 /* ------------------------------ entry points ------------------------------ */
 
 function doGet(e) {
+  resetRequestCaches();
   var ctx = newCtx('get');
   try {
     var action = (e && e.parameter && e.parameter.action) || 'health';
@@ -62,19 +66,21 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  resetRequestCaches();
   var ctx = newCtx('post');
   try {
     var raw = (e && e.postData && e.postData.contents) || '';
-    if (raw.length > MAX_ARCHIVE_CHARS || (raw.length > MAX_BODY_CHARS && raw.indexOf('"archive"') < 0)) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
+    if (raw.length > MAX_ARCHIVE_CHARS || (raw.length > MAX_BODY_CHARS && raw.indexOf('"archive"') < 0 && raw.indexOf('"saveimg"') < 0)) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
     var body;
     try { body = JSON.parse(raw); } catch (x) { throw httpError('BAD_REQUEST', 'รูปแบบคำขอไม่ถูกต้อง'); }
     if (!body || typeof body !== 'object') throw httpError('BAD_REQUEST', 'รูปแบบคำขอไม่ถูกต้อง');
     ctx.op = String(body.action || '');
-    if (body.action !== 'archive' && raw.length > MAX_BODY_CHARS) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
+    var isImg = body.action === 'links' && body.op === 'saveimg';   // a QR picture is the only other request allowed to be large
+    if (body.action !== 'archive' && !isImg && raw.length > MAX_BODY_CHARS) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
+    if (isImg && raw.length > MAX_QRIMG_CHARS) throw httpError('REQUEST_TOO_LARGE', 'รูป QR ใหญ่เกินไป');
     switch (body.action) {
       case 'health': return respond(ctx, { status: 'ok', version: APP_VERSION, time: new Date().toISOString(), configured: isConfigured(), features: APP_FEATURES });
       case 'login': return respond(ctx, login(body.idToken));
-      case 'passlogin': return respond(ctx, passLogin(body.username, body.password));
       case 'me': return respond(ctx, me(body.session));
       case 'log': return respond(ctx, logUse(body));
       case 'archive': return respond(ctx, archive(body));
@@ -98,37 +104,10 @@ function login(idToken) {
   var email = String(claims.email || '').toLowerCase();
   if (claims.email_verified !== true && claims.email_verified !== 'true') throw httpError('EMAIL_NOT_VERIFIED', 'อีเมลยังไม่ได้รับการยืนยัน');
   if (!isEmailAllowed(email, claims.hd)) throw httpError('DOMAIN_NOT_ALLOWED', 'บัญชีนี้ไม่ได้อยู่ในโดเมนที่อนุญาต');
-  var ttl = intProp('SESSION_TTL_MIN', 480) * 60;
+  var ttl = intProp('SESSION_TTL_MIN', 43200) * 60;
   var exp = Math.floor(Date.now() / 1000) + ttl;
   var user = { email: email, name: String(claims.name || ''), picture: String(claims.picture || '') };
   return { session: signSession({ sub: String(claims.sub), email: email, exp: exp }), exp: exp, user: user };
-}
-
-/* ---------------------- username / password sign-in ----------------------- *
- * One internal account whose credentials live ONLY in Script properties (never in Git or Vercel):
- *   LOCAL_USER  username (lower-case)         LOCAL_SALT  random salt
- *   LOCAL_HASH  iterated HMAC-SHA256 hash     LOCAL_ITER  iterations (optional, default 5)
- * Generate the three values with:  node scripts/make-local-account.mjs <username> <password>
- * Remove LOCAL_HASH (or LOCAL_USER) to disable this sign-in; existing sessions stop working immediately.
- */
-function localEmail() { var u = prop('LOCAL_USER').toLowerCase().replace(/[^a-z0-9._-]/g, ''); return u ? u + '@local.sand' : ''; }
-function localEnabled() { return !!(prop('LOCAL_USER') && prop('LOCAL_SALT') && prop('LOCAL_HASH')); }
-function hexOf(bytes) { return bytes.map(function (b) { var v = b < 0 ? b + 256 : b; return (v < 16 ? '0' : '') + v.toString(16); }).join(''); }
-function hashPassword(password, salt, iter) {
-  var h = hexOf(Utilities.computeHmacSha256Signature(password, salt));
-  for (var i = 0; i < iter; i++) h = hexOf(Utilities.computeHmacSha256Signature(h + ':' + password, salt));
-  return h;
-}
-function passLogin(username, password) {
-  rateLimit('passlogin', intProp('PASSLOGIN_LIMIT_PER_MIN', 10));
-  if (!localEnabled()) throw httpError('LOCAL_DISABLED', 'ยังไม่เปิดใช้การเข้าสู่ระบบด้วยรหัสผ่าน');
-  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password || username.length > 64 || password.length > 128) throw httpError('BAD_CREDENTIALS', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
-  var userOk = safeEqual(username.trim().toLowerCase(), prop('LOCAL_USER').toLowerCase());
-  var hashOk = safeEqual(hashPassword(password, prop('LOCAL_SALT'), intProp('LOCAL_ITER', 5)), prop('LOCAL_HASH'));
-  if (!(userOk && hashOk)) { Utilities.sleep(500); throw httpError('BAD_CREDENTIALS', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
-  var email = localEmail();
-  var exp = Math.floor(Date.now() / 1000) + intProp('SESSION_TTL_MIN', 480) * 60;
-  return { session: signSession({ sub: 'local:' + prop('LOCAL_USER'), email: email, exp: exp }), exp: exp, user: { email: email, name: prop('LOCAL_NAME') || prop('LOCAL_USER'), picture: '' } };
 }
 
 function me(session) {
@@ -151,9 +130,13 @@ function requireUser(session) {
 function sheetTab(name, headers) {
   var id = prop('LOG_SHEET_ID');
   if (!id) throw httpError('NOT_CONFIGURED', 'ยังไม่ได้ตั้งค่า LOG_SHEET_ID');
-  var ss = SpreadsheetApp.openById(id);
-  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
-  if (sh.getLastRow() === 0) { sh.appendRow(headers); sh.setFrozenRows(1); }
+  if (!REQ.ss) REQ.ss = SpreadsheetApp.openById(id);      // opened once per request (it used to be opened for every read/write)
+  var sh = REQ.sheets[name];
+  if (!sh) {
+    sh = REQ.ss.getSheetByName(name) || REQ.ss.insertSheet(name);
+    if (sh.getLastRow() === 0) { sh.appendRow(headers); sh.setFrozenRows(1); }
+    REQ.sheets[name] = sh;
+  }
   return sh;
 }
 /** Text for a Sheet cell: trimmed, and neutralised against formula injection (=, +, -, @). */
@@ -171,31 +154,46 @@ function logUse(b) {
     Number(m.sizeIn) || 0, Number(m.sizeOut) || 0, cell(JSON.stringify(m.extra || {}), 500)]);
   return { logId: logId };
 }
-/** Latest log rows with their archived files. Admins (ADMIN_EMAILS) see everyone's rows; others only their own. */
+/** A log timestamp as an ISO string whatever the Sheet returned (Date, serial number, or text such as "07/10/2026 07:48:48"). */
+function histTs(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : v.toISOString();
+  if (typeof v === 'number') { var d = new Date(v > 1e11 ? v : Math.round((v - 25569) * 86400000)); return isNaN(d.getTime()) ? '' : d.toISOString(); }
+  var s = String(v == null ? '' : v).trim(), m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s);
+  if (m) { var yr = Number(m[3]); if (yr > 2400) yr -= 543; var t = Date.UTC(yr, Number(m[2]) - 1, Number(m[1]), Number(m[4] || 0) - 7, Number(m[5] || 0), Number(m[6] || 0)); return new Date(t).toISOString(); }
+  var p = Date.parse(s); return isNaN(p) ? '' : new Date(p).toISOString();
+}
+/**
+ * Newest usage-log rows with their archived files. Admins (ADMIN_EMAILS) see everyone's rows; others only their own.
+ * The newest HIST_SCAN rows of the Logs tab are scanned and the user's own rows are picked out FIRST (so other people's rows can no longer push
+ * a user's rows out of the window). The answer also says how many rows exist and how many belong to this account, which the page uses to explain an empty list.
+ */
+var HIST_SCAN = 5000, HIST_MAX = 300;
 function history(b) {
   var u = requireUser(b.session);
   rateLimit('history', 60);
   var admin = listProp('ADMIN_EMAILS').indexOf(u.email) >= 0;
-  var sh = sheetTab('Logs', LOG_HEADERS);
-  var fs = sheetTab('Files', FILE_HEADERS);
-  var files = {}, fl = fs.getLastRow();
-  if (fl > 1) {
-    var fv = fs.getRange(Math.max(2, fl - 999), 1, Math.min(1000, fl - 1), 8).getValues();
-    fv.forEach(function (r) {
-      if (!admin && String(r[2]).toLowerCase() !== u.email) return;
-      (files[r[1]] = files[r[1]] || []).push({ role: r[4], name: r[5], size: r[6], url: r[7] });
-    });
-  }
-  var last = sh.getLastRow(); if (last < 2) return { admin: admin, rows: [] };
-  var from = Math.max(2, last - 799);
-  var vals = sh.getRange(from, 1, last - from + 1, 9).getValues();
-  var rows = [];
-  for (var i = vals.length - 1; i >= 0 && rows.length < 200; i--) {
+  var sh = sheetTab('Logs', LOG_HEADERS), last = sh.getLastRow();
+  var out = { admin: admin, email: u.email, total: Math.max(0, last - 1), mine: 0, rows: [] };
+  if (last < 2) return out;
+  var from = Math.max(2, last - HIST_SCAN + 1), vals = sh.getRange(from, 1, last - from + 1, 9).getValues(), ids = {};
+  for (var i = vals.length - 1; i >= 0; i--) {
     var r = vals[i];
-    if (!admin && String(r[2]).toLowerCase() !== u.email) continue;
-    rows.push({ ts: r[0] instanceof Date ? r[0].toISOString() : String(r[0]), logId: r[1], email: r[2], tool: r[3], op: r[4], status: r[5], fileName: r[6], sizeIn: r[7], sizeOut: r[8], files: files[r[1]] || [] });
+    if (!admin && String(r[2]).trim().toLowerCase() !== u.email) continue;
+    out.mine++;
+    if (out.rows.length >= HIST_MAX) continue;
+    var id = String(r[1]); ids[id] = 1;
+    out.rows.push({ ts: histTs(r[0]), logId: id, email: String(r[2]), tool: String(r[3]), op: String(r[4]), status: String(r[5]), fileName: String(r[6]), sizeIn: Number(r[7]) || 0, sizeOut: Number(r[8]) || 0, files: [] });
   }
-  return { admin: admin, rows: rows };
+  var fs = sheetTab('Files', FILE_HEADERS), fl = fs.getLastRow();
+  if (fl > 1 && out.rows.length) {
+    var start = Math.max(2, fl - 2999), by = {};
+    fs.getRange(start, 1, fl - start + 1, 8).getValues().forEach(function (f) {
+      var k = String(f[1]);
+      if (ids[k]) (by[k] = by[k] || []).push({ role: String(f[4]), name: String(f[5]), size: Number(f[6]) || 0, url: String(f[7]) });
+    });
+    out.rows.forEach(function (row) { row.files = by[row.logId] || []; });
+  }
+  return out;
 }
 function subFolder(parent, name) {
   var it = parent.getFoldersByName(name);
@@ -234,6 +232,13 @@ function archive(b) {
 function verifyIdToken(idToken) {
   var clientId = prop('GOOGLE_CLIENT_ID');
   if (!clientId) throw httpError('NOT_CONFIGURED', 'ระบบยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID');
+  if (prop('STRICT_LOGIN') !== 'true') {
+    var fast = decodeJwtClaims(idToken);   // a real Google ID token (3 parts): check the claims locally, no round trip to Google
+    if (fast && fast.iss) {
+      if (fast.aud !== clientId || VALID_ISSUERS.indexOf(fast.iss) < 0 || !fast.sub || !fast.email || Number(fast.exp) * 1000 <= Date.now()) throw httpError('INVALID_TOKEN', 'ไม่สามารถยืนยันตัวตนได้');
+      return fast;
+    }
+  }
   var res;
   try {
     res = UrlFetchApp.fetch(TOKENINFO_URL + encodeURIComponent(idToken), { muteHttpExceptions: true, followRedirects: false });
@@ -248,10 +253,16 @@ function verifyIdToken(idToken) {
   return c;
 }
 
+/** Payload of a JWT (no signature check). null when the text is not a decodable JWT. */
+function decodeJwtClaims(t) {
+  var parts = String(t).split('.');
+  if (parts.length !== 3) return null;
+  try { var c = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[1])).getDataAsString()); return c && typeof c === 'object' ? c : null; } catch (x) { return null; }
+}
+
 /** Domain policy. `hd` (hosted domain claim) is cross-checked when present. Never trusts the browser. */
 function isEmailAllowed(email, hd) {
   email = String(email || '').toLowerCase();
-  if (email && email === localEmail()) return localEnabled();   // the internal password account (not subject to the Google domain list)
   var at = email.lastIndexOf('@');
   if (at < 1) return false;
   var domain = email.slice(at + 1);
@@ -300,20 +311,23 @@ function safeEqual(a, b) {
 
 /** Fixed-window counter in CacheService (global, because Apps Script does not expose client IPs). */
 function rateLimit(name, limit) {
+  // No lock: counting is approximate under heavy parallel load, which is fine for an intranet tool and saves a lock wait on every request.
   var cache = CacheService.getScriptCache();
   var key = 'rl:' + name + ':' + Math.floor(Date.now() / 60000);
-  var lock = LockService.getScriptLock();
-  lock.waitLock(5000);
-  try {
-    var n = Number(cache.get(key) || 0) + 1;
-    cache.put(key, String(n), 120);
-    if (n > limit) throw httpError('RATE_LIMITED', 'มีการเรียกใช้งานบ่อยเกินไป กรุณารอสักครู่');
-  } finally { lock.releaseLock(); }
+  var n = Number(cache.get(key) || 0) + 1;
+  cache.put(key, String(n), 120);
+  if (n > limit) throw httpError('RATE_LIMITED', 'มีการเรียกใช้งานบ่อยเกินไป กรุณารอสักครู่');
 }
 
 /* --------------------------------- plumbing -------------------------------- */
 
-function prop(name) { return PropertiesService.getScriptProperties().getProperty(name) || ''; }
+/** Per-request memo (Apps Script starts a fresh execution for every request, so nothing here outlives a request). */
+var REQ = { props: {}, ss: null, sheets: {} };
+function resetRequestCaches() { REQ = { props: {}, ss: null, sheets: {} }; }
+function prop(name) {
+  if (!(name in REQ.props)) REQ.props[name] = PropertiesService.getScriptProperties().getProperty(name) || '';
+  return REQ.props[name];
+}
 function intProp(name, dflt) { var n = parseInt(prop(name), 10); return isFinite(n) && n > 0 ? n : dflt; }
 function listProp(name) { return prop(name).split(/[,\s]+/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean); }
 function isConfigured() { return !!(prop('GOOGLE_CLIENT_ID') && prop('SESSION_SECRET')); }

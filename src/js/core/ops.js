@@ -6,6 +6,7 @@ import { gasCall } from './api.js';
 export async function sessionCall(action, op, params = {}, timeout = 60000) {
   const s = getSession();
   if (!s) { const e = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); /** @type {any} */ (e).code = 'INVALID_SESSION'; throw e; }
+  if (action === 'links' && (op === 'create' || op === 'update' || op === 'saveimg')) params = { origin: location.origin, ...params };   // lets the backend record the short URL when SHORT_BASE is not set
   try { return (await gasCall(action, { session: s.token, op, ...params }, timeout)).data; } catch (e) {
     if (e && (/** @type {any} */ (e).code === 'INVALID_SESSION' || /** @type {any} */ (e).code === 'DOMAIN_NOT_ALLOWED')) signOut();
     throw e;
