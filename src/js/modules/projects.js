@@ -26,8 +26,14 @@ const stateOf = (p) => (p.status === 'paused' || !p.track ? ['off', 'หยุ�
 
 /* ---------------------------------- page ---------------------------------- */
 
-/** The old /projects page now lives on the home dashboard — keep old bookmarks working. */
-export function mount() { location.replace('#/'); }
+/** The dedicated "โครงการ" page (also embedded on the home dashboard through mountProjectsPanel). */
+export async function mount(root) {
+  await Promise.all([loadCss('links'), loadCss('projects')]);
+  const host = h('div');
+  root.append(h('div', { class: 'page' }, h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'โครงการและสถิติเว็บไซต์'),
+    h('p', null, 'แนบเว็บไซต์หรือระบบของหน่วยงาน แล้วดูว่ามีคนเข้าใช้กี่ครั้ง หน้าไหนยอดนิยม และมาจากช่องทางใด — ไม่ใช้คุกกี้ ไม่เก็บ IP')), h('a', { class: 'btn', href: '#/' }, svgIcon(ICONS.home, 18), 'ดูแดชบอร์ดหน้าแรก')), host));
+  return mountProjectsPanel(host, { kpi: true });
+}
 
 /**
  * The projects panel (search · cards · create · detail drawer), embedded in the home dashboard.
