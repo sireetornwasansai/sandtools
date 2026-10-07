@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
+    "ocr:fetch": "node scripts/fetch-ocr.mjs",
     "preview": "node scripts/preview.mjs",
     "typecheck": "tsc -p jsconfig.json",
     "test": "node --test \"tests/unit/*.test.mjs\" tests/gas.test.mjs",
