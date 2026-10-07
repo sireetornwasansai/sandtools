@@ -161,14 +161,20 @@ async function authSetup(ctx, { loginResponse, requireLogin = true }) {
 await test('UNAUTHORIZED: login required → app content is NOT shown until backend accepts', async (page, ctx) => {
   await authSetup(ctx, { loginResponse: () => ({ success: false, error: { code: 'DOMAIN_NOT_ALLOWED', message: 'x' } }) });
   await page.goto(`${base}/index.html#/qr`); await page.waitForSelector('#fake-google'); eq(await page.locator('.sidebar').count(), 0); eq(await page.locator('.qr-canvas-wrap').count(), 0);
-  await page.click('#fake-google'); await page.waitForSelector('.login-status.error'); ok((await page.textContent('.login-status')).includes('ไม่ได้อยู่ในโดเมนที่อนุญาต')); eq(await page.locator('.sidebar').count(), 0, 'still locked'); eq(await page.evaluate(() => sessionStorage.getItem('sand:session')), null);
+  await page.click('#fake-google'); await page.waitForSelector('.login-status.error'); ok((await page.textContent('.login-status')).includes('ไม่ได้อยู่ในโดเมนที่อนุญาต')); eq(await page.locator('.sidebar').count(), 0, 'still locked'); eq(await page.evaluate(() => localStorage.getItem('sand:session')), null);
 });
 await test('login success → app opens, user shown, session validated server-side on reload, logout clears it', async (page, ctx) => {
   const calls = await authSetup(ctx, { loginResponse: () => ({ success: true, data: { session: 'SESSION-OK', exp: Math.floor(Date.now() / 1000) + 3600, user: { email: 'a@example.go.th', name: 'สมชาย ใจดี' } } }) });
   await page.goto(`${base}/index.html#/`); await page.click('#fake-google'); await page.waitForSelector('.sidebar'); ok((await page.textContent('.user-box')).includes('สมชาย ใจดี'));
-  ok(calls.some((c) => c.action === 'login' && c.idToken === 'FAKE.ID.TOKEN'), 'id token sent to backend'); await page.reload(); await page.waitForSelector('.sidebar'); ok(calls.some((c) => c.action === 'me' && c.session === 'SESSION-OK'), 'session re-validated by backend');
-  await page.evaluate(() => sessionStorage.setItem('sand:session', JSON.stringify({ token: 'FORGED', exp: 9999999999, user: { email: 'x@y.z', name: 'x' } }))); await page.reload(); await page.waitForSelector('#fake-google'); eq(await page.locator('.sidebar').count(), 0, 'forged session rejected by backend');
+  ok(calls.some((c) => c.action === 'login' && c.idToken === 'FAKE.ID.TOKEN'), 'id token sent to backend'); await page.reload(); await page.waitForSelector('.sidebar'); await page.waitForFunction(() => true); for (let i = 0; i < 50 && !calls.some((c) => c.action === 'me' && c.session === 'SESSION-OK'); i++) await page.waitForTimeout(100); ok(calls.some((c) => c.action === 'me' && c.session === 'SESSION-OK'), 'session re-validated by backend (in the background)');
+  await page.evaluate(() => localStorage.setItem('sand:session', JSON.stringify({ token: 'FORGED', exp: 9999999999, user: { email: 'x@y.z', name: 'x' } }))); await page.reload(); await page.waitForSelector('#fake-google'); eq(await page.locator('.sidebar').count(), 0, 'forged session rejected by backend');
 });
+await test('SPEED: a stored session opens the app at once (does not wait for the slow backend); a rejected session is signed out afterwards', async (page, ctx) => {
+  await authSetup(ctx, { loginResponse: () => ({}) });
+  await ctx.route(`${GAS}**`, async (r) => { const b = r.request().method() === 'POST' ? JSON.parse(r.request().postData() || '{}') : {}; if (b.action === 'me') { await new Promise((x) => setTimeout(x, 4000)); } await r.fallback(); });
+  await page.addInitScript(() => localStorage.setItem('sand:session', JSON.stringify({ token: 'SESSION-OK', exp: 9999999999, user: { email: 'a@example.go.th', name: 'สมชาย ใจดี' } })));
+  const t0 = Date.now(); await page.goto(`${base}/index.html#/`); await page.waitForSelector('.sidebar', { timeout: 3000 }); ok(Date.now() - t0 < 3500, 'opened before the 4 s backend answer');
+}, { ignore: /Failed to load resource/ });
 await test('backend unreachable at login → friendly Thai error, app stays locked', async (page, ctx) => {
   await authSetup(ctx, { loginResponse: () => ({}) }); await ctx.route(`${GAS}**`, (r) => r.abort()); await page.goto(`${base}/index.html#/`); await page.click('#fake-google'); await page.waitForSelector('.login-status.error'); ok((await page.textContent('.login-status')).includes('เชื่อมต่อ Backend ไม่ได้')); eq(await page.locator('.sidebar').count(), 0);
 }, { ignore: /Failed to load resource/ });
@@ -179,7 +185,7 @@ await test('backend health check in Settings (no login mode)', async (page, ctx)
 console.log('\nQR history (mocked backend)');
 /** In-memory stand-in for Links.gs: create / list / get / update / delete for kinds qr and qrs. */
 async function qrBackend(ctx) {
-  const items = []; const calls = [];
+  const items = []; const calls = []; const hist = { data: { admin: false, email: 'a@example.go.th', total: 0, mine: 0, rows: [] } };
   await ctx.route((u) => u.pathname === '/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.SAND_CONFIG=${JSON.stringify({ gasUrl: GAS, googleClientId: 'test-client', requireLogin: true, maxFileSizeMB: 25, conversionTimeoutSec: 60, version: 'dev' })};` }));
   await ctx.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.google={accounts:{id:{initialize:function(o){window.__cb=o.callback},renderButton:function(el){var b=document.createElement('button');b.textContent='Sign in with Google';b.id='fake-google';b.onclick=function(){window.__cb({credential:'FAKE.ID.TOKEN'})};el.appendChild(b)},disableAutoSelect:function(){}}}};` }));
   await ctx.route(`${GAS}**`, async (r) => {
@@ -192,6 +198,7 @@ async function qrBackend(ctx) {
     if (b.action === 'me') return res({ email: 'a@example.go.th' });
     if (b.action === 'projects') return res({ items: [] });
     if (b.action === 'log') return res({ logId: 'x' });
+    if (b.action === 'history') return res(hist.data);
     if (b.action !== 'links') return err('UNKNOWN_ACTION', 'x');
     const find = () => items.find((i) => i.code === b.code);
     if (b.op === 'list') return res({ admin: false, base, items: items.map((i) => ({ ...i })), scanned: false });
@@ -205,7 +212,7 @@ async function qrBackend(ctx) {
     if (b.op === 'delete') { const i = items.findIndex((x) => x.code === b.code); if (i >= 0) items.splice(i, 1); return res({ code: b.code }); }
     return err('UNKNOWN_ACTION', 'x');
   });
-  return { items, calls };
+  return { items, calls, hist };
 }
 const signIn = async (page) => { await page.goto(`${base}/index.html#/qr`); await page.click('#fake-google'); await page.waitForSelector('.sidebar'); await page.waitForSelector('.qr-save input[type=text]'); };
 await test('save a static QR (what it is for + category) → appears in QR history; Wi-Fi password is refused; edit and delete work', async (page, ctx) => {
@@ -247,6 +254,19 @@ await test('mobile 390px: QR history page has no horizontal overflow', async (pa
   await page.goto(`${base}/index.html#/qrs`); await page.click('#fake-google'); await page.waitForSelector('.qrh-card');
   const o = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]); ok(o[0] <= o[1] + 1, `scrollWidth ${o[0]} > ${o[1]}`);
 }, { viewport: { width: 390, height: 800 } });
+
+await test('usage history page: shows rows (even with odd dates) and explains an empty list', async (page, ctx) => {
+  const be = await qrBackend(ctx);
+  be.hist.data = { admin: false, email: 'a@example.go.th', total: 50, mine: 2, rows: [
+    { ts: '2026-10-06 09:30:00', logId: 'l1', email: 'a@example.go.th', tool: 'pdf', op: 'merge', status: 'ok', fileName: 'a.pdf', sizeIn: 1000, sizeOut: 900, files: [] },
+    { ts: 'not a date', logId: 'l2', email: 'a@example.go.th', tool: 'qr', op: 'make', status: 'ok', fileName: '', sizeIn: 0, sizeOut: 0, files: [] }] };
+  await page.goto(`${base}/index.html#/history`); await page.click('#fake-google'); await page.waitForSelector('.hist-card');
+  await page.waitForFunction(() => document.querySelector('.hist-card').textContent.includes('a.pdf'));
+  const t = await page.textContent('.hist-card'); ok(!t.includes('NaN') && !t.includes('undefined'), 'bad text: ' + t);
+  be.hist.data = { admin: false, email: 'a@example.go.th', total: 50, mine: 0, rows: [] };
+  await page.click('.hist-tools button'); await page.waitForFunction(() => document.querySelector('.hist-card .empty'));
+  ok((await page.textContent('.hist-card .empty')).includes('ไม่มีแถวของบัญชี a@example.go.th'), 'no diagnosis');
+});
 
 console.log('\nResponsive & offline');
 for (const r of ROUTES) {

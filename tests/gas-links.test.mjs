@@ -32,7 +32,7 @@ function makeSheet() {
 
 function makeEnv(extra = {}) {
   const store = { GOOGLE_CLIENT_ID: CLIENT, SESSION_SECRET: 'secret-secret-secret', LOG_SHEET_ID: 'sheet', SHORT_BASE: 'https://sand.example.go.th', ADMIN_EMAILS: 'admin@example.go.th', EDGE_SECRET: 'edge-secret', ...extra };
-  const cache = new Map(); const sheets = {};
+  const cache = new Map(); const sheets = {}; const counters = { open: 0 };
   const claimsFor = {};
   const toSigned = (buf) => Array.from(buf, (b) => (b > 127 ? b - 256 : b));
   const unsigned = (arr) => Buffer.from(arr.map((b) => (b < 0 ? b + 256 : b)));
@@ -41,7 +41,7 @@ function makeEnv(extra = {}) {
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k in store ? store[k] : null), setProperty: (k, v) => { store[k] = v; } }) },
     CacheService: { getScriptCache: () => ({ get: (k) => cache.get(k) ?? null, put: (k, v) => cache.set(k, v), remove: (k) => cache.delete(k) }) },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    SpreadsheetApp: { openById: () => ({ getName: () => 'x', getSheetByName: (n) => (sheets[n] ? sheets[n].sh : null), insertSheet: (n) => { sheets[n] = makeSheet(); return sheets[n].sh; } }) },
+    SpreadsheetApp: { openById: () => (counters.open++, { getName: () => 'x', getSheetByName: (n) => (sheets[n] ? sheets[n].sh : null), insertSheet: (n) => { sheets[n] = makeSheet(); return sheets[n].sh; } }) },
     UrlFetchApp: { fetch: (url) => { const t = decodeURIComponent(url.split('id_token=')[1]); return { getResponseCode: () => 200, getContentText: () => JSON.stringify(claimsFor[t]) }; } },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (t) => ({ text: t, setMimeType() { return this; } }) },
     Utilities: {
@@ -62,7 +62,7 @@ function makeEnv(extra = {}) {
     claimsFor[email] = { aud: CLIENT, iss: 'https://accounts.google.com', sub: email, email, email_verified: 'true', exp: String(Math.floor(Date.now() / 1000) + 3600), name: email };
     const r = post({ action: 'login', idToken: email }); assert.equal(r.success, true); return r.data.session;
   };
-  return { post, get, login, sheets, store };
+  return { post, get, login, sheets, store, counters };
 }
 
 const dz = { fg: '#112233', bg: '#ffffff', style: 'rounded', ec: 'Q', margin: 4, size: 512, cat: 'vaccine', cap: 'สแกนเพื่อลงทะเบียน' };
@@ -130,4 +130,47 @@ test('a short link can still be attached to a project and website hits are count
   const l = e.post({ action: 'links', session: s, op: 'create', kind: 'qr', title: 'QR โครงการ', url: 'https://hospital.example.go.th/x', project: key, qr: { d: dz } }); assert.equal(l.data.link.project, key);
   const hit = e.post({ action: 'hit', secret: 'edge-secret', k: key, t: 'pv', p: '/home', host: 'hospital.example.go.th', device: 'desktop', browser: 'Chrome', os: 'Windows', country: 'TH', vid: 'abcdef123456' }); assert.equal(hit.data.ok, true);
   const st = e.post({ action: 'projects', session: s, op: 'stats', key, days: 7 }).data; assert.equal(st.pv, 1);
+});
+
+const jwt = (claims) => ['e30', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'sig'].join('.');
+const goodJwt = (o = {}) => jwt({ aud: CLIENT, iss: 'https://accounts.google.com', sub: '1', email: 'somchai@example.go.th', email_verified: true, name: 'ส', exp: Math.floor(Date.now() / 1000) + 3600, ...o });
+
+test('fast login: a Google ID token is checked locally (no call to Google); wrong audience / expired are still refused; STRICT_LOGIN goes back to Google', () => {
+  const e = makeEnv({ ALLOWED_EMAIL_DOMAIN: 'example.go.th' });
+  const ok = e.post({ action: 'login', idToken: goodJwt() }); assert.equal(ok.success, true); assert.equal(ok.data.user.email, 'somchai@example.go.th');
+  assert.equal(e.post({ action: 'login', idToken: goodJwt({ aud: 'other' }) }).error.code, 'INVALID_TOKEN');
+  assert.equal(e.post({ action: 'login', idToken: goodJwt({ exp: 1 }) }).error.code, 'INVALID_TOKEN');
+  assert.equal(e.post({ action: 'login', idToken: goodJwt({ email: 'x@gmail.com' }) }).error.code, 'DOMAIN_NOT_ALLOWED');
+  assert.equal(e.post({ action: 'login', idToken: goodJwt({ email_verified: false }) }).error.code, 'EMAIL_NOT_VERIFIED');
+  assert.equal(e.post({ action: 'login', idToken: 'garbage' }).error.code, 'INVALID_TOKEN');
+  assert.equal(ok.data.exp - Math.floor(Date.now() / 1000) > 20 * 86400, true, 'session lasts about 30 days');
+  e.store.STRICT_LOGIN = 'true'; assert.equal(e.post({ action: 'login', idToken: goodJwt() }).error.code, 'INVALID_TOKEN');   // tokeninfo mock knows nothing about it
+});
+
+test('speed: the spreadsheet is opened once per request and list totals come from a one-minute cache', () => {
+  const e = makeEnv(); const s = e.login('somchai@example.go.th');
+  e.post({ action: 'links', session: s, op: 'create', url: 'https://example.com/a' });
+  const before = e.counters.open; e.post({ action: 'links', session: s, op: 'list' }); assert.equal(e.counters.open - before, 1, 'one openById for a list');
+  const code = e.post({ action: 'links', session: s, op: 'list' }).data.items[0].code;
+  e.post({ action: 'click', secret: 'edge-secret', code, device: 'desktop', vid: 'abcdef123456' });
+  assert.equal(e.post({ action: 'links', session: s, op: 'list' }).data.items[0].clicks, 0, 'totals may lag up to a minute');
+  assert.equal(e.post({ action: 'links', session: s, op: 'stats', code }).data.total, 1, 'the statistics drawer is always exact');
+});
+
+test('history: own rows are found even deep in a busy log, odd dates/emails are tolerated, admin sees all', () => {
+  const e = makeEnv(); const me = e.login('somchai@example.go.th'); const adm = e.login('admin@example.go.th');
+  e.post({ action: 'history', session: me }); // creates the Logs tab
+  const logs = e.sheets.Logs.rows;
+  logs.push([new Date('2026-01-01T10:00:00+07:00'), 'mine-old', ' SomChai@Example.go.th ', 'pdf', 'merge', 'ok', 'a.pdf', 1, 2]);
+  for (let i = 0; i < 900; i++) logs.push(['2026-02-01 10:00:00', 'o' + i, 'other@example.go.th', 'pdf', 'merge', 'ok', 'x.pdf', 1, 2]);
+  logs.push(['2026-03-05 08:00:00', 'mine-new', 'somchai@example.go.th', 'qr', 'make', 'ok', '', 0, 0]);
+  logs.push(['not a date', 'mine-bad', 'somchai@example.go.th', 'qr', 'make', 'ok', '', 0, 0]);
+  const r = e.post({ action: 'history', session: me });
+  assert.equal(r.success, true);
+  assert.equal(r.data.admin, false); assert.equal(r.data.email, 'somchai@example.go.th');
+  assert.equal(r.data.mine, 3); assert.equal(r.data.total, 903);
+  assert.deepEqual(r.data.rows.map((x) => x.logId).sort(), ['mine-bad', 'mine-new', 'mine-old']);
+  for (const x of r.data.rows) assert.equal(typeof x.ts, 'string');
+  const a = e.post({ action: 'history', session: adm });
+  assert.equal(a.data.admin, true); assert.ok(a.data.rows.length > 3 && a.data.rows.length <= 300);
 });
