@@ -27,11 +27,13 @@ const build = hash.digest('hex').slice(0, 10);
 const version = `${pkg.version}+${build}`;
 
 fs.writeFileSync(path.join(dist, 'config.js'), configJs(process.env, version));
-const precache = files.filter((f) => f !== 'sw.js' && f !== 'config.js');
+// js/vendor/ocr/ (≈8 MB OCR engine for scanned PDFs) is cached by the service worker on first use instead of being precached
+const precache = files.filter((f) => f !== 'sw.js' && f !== 'config.js' && !f.startsWith('js/vendor/ocr/'));
 const sw = fs.readFileSync(path.join(src, 'sw.js'), 'utf8')
   .replace('__CACHE_VERSION__', build).replace('__PRECACHE__', JSON.stringify(['./', ...precache], null, 2));
 fs.writeFileSync(path.join(dist, 'sw.js'), sw);
 
+if (!files.includes('js/vendor/ocr/tesseract.esm.min.js')) console.warn('Note: OCR engine files are missing (src/js/vendor/ocr/) — scanned PDFs cannot be read. Run: npm run ocr:fetch');
 const missing = [];
 if (!process.env.SAND_GAS_URL) missing.push('SAND_GAS_URL');
 if (!process.env.SAND_GOOGLE_CLIENT_ID) missing.push('SAND_GOOGLE_CLIENT_ID');
