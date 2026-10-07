@@ -34,12 +34,13 @@ const LIST_KEY = 'sand:links:list';
 export function cachedLinksList() {
   try {
     const s = getSession(); const c = JSON.parse(localStorage.getItem(LIST_KEY) || 'null');
-    return c && s && s.user && c.u === s.user.email ? c.d : null;
+    return c && s && s.user && c.u === s.user.email && c.d && Array.isArray(c.d.items) ? c.d : null;   // ignore a cache entry that has no list (older/odd answer)
   } catch { return null; }
 }
 /** Fresh "list" from the backend (also stored for the next visit). */
 export async function fetchLinksList() {
   const d = await linksCall('list');
+  if (!d || !Array.isArray(d.items)) { const e = new Error('Backend ตอบรายการลิงก์/QR ไม่ครบ — Deploy Apps Script เวอร์ชันใหม่ (Code.gs, Links.gs, Analytics.gs) แล้วลองอีกครั้ง'); /** @type {any} */ (e).code = 'BAD_RESPONSE'; throw e; }
   try { const s = getSession(); const t = JSON.stringify({ u: s && s.user && s.user.email, d }); if (t.length < 1_500_000) localStorage.setItem(LIST_KEY, t); } catch { /* quota */ }
   return d;
 }
