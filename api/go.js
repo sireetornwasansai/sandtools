@@ -55,16 +55,25 @@ async function gasJson(url, init, ms) {
   try { const r = await fetch(url, { ...init, redirect: 'follow', signal: ctrl.signal }); return await r.json(); } finally { clearTimeout(t); }
 }
 
+// Resolved targets are remembered for a minute inside each edge instance, so a busy link redirects instantly without asking Apps Script
+// (a disabled / deleted / edited link therefore takes up to 60 s to change for visitors). Clicks are still recorded every time.
+const MEMO = new Map(); const MEMO_MS = 60_000; const MEMO_MAX = 500;
+
 export default async function handler(request, context) {
   const url = new URL(request.url);
   const code = (url.searchParams.get('c') || url.pathname.split('/').filter(Boolean).pop() || '').toLowerCase();
   const gas = process.env.SAND_GAS_URL; const secret = process.env.SAND_EDGE_SECRET || '';
   if (!CODE_RE.test(code)) return errorPage('notfound');
   if (!gas) return errorPage('error');
-  let res;
-  try { res = await gasJson(`${gas}${gas.includes('?') ? '&' : '?'}action=go&c=${encodeURIComponent(code)}`, { method: 'GET' }, 6000); } catch { return errorPage('error'); }
-  if (!res || res.success !== true) return errorPage('error');
-  const d = res.data || {};
+  let d; const hit = MEMO.get(code);
+  if (hit && hit.until > Date.now()) d = hit.d;
+  else {
+    let res;
+    try { res = await gasJson(`${gas}${gas.includes('?') ? '&' : '?'}action=go&c=${encodeURIComponent(code)}`, { method: 'GET' }, 6000); } catch { return errorPage('error'); }
+    if (!res || res.success !== true) return errorPage('error');
+    d = res.data || {};
+    if (d.url) { if (MEMO.size >= MEMO_MAX) MEMO.delete(MEMO.keys().next().value); MEMO.set(code, { d, until: Date.now() + MEMO_MS }); }
+  }
   let target = '';
   try { const u = new URL(d.url); if (u.protocol === 'http:' || u.protocol === 'https:') target = u.href; } catch { /* invalid */ }
   if (!target) return errorPage(d.reason || 'notfound');
