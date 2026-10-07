@@ -217,6 +217,58 @@ function anaStats(s, daysIn) {
     languages: lnkTop(lang, 4), eventNames: lnkTop(evs, 10), scanned: rows.length >= ANA_SCAN_ROWS };
 }
 
+/* ------------------------------ dashboard overview ----------------------------- */
+/** Everything the home dashboard needs in ONE call (cached 60 s per user): totals vs the previous period, daily series, top projects / pages,
+ *  breakdowns and the short-link / QR scans of the same period. Read-only; the page falls back to op "list" when this Apps Script is older. */
+function anaOverview(sc, daysIn) {
+  var days = [7, 30, 90].indexOf(Number(daysIn)) >= 0 ? Number(daysIn) : 30;
+  var cache = CacheService.getScriptCache(), ck = 'ov:' + (sc.admin ? '*' : sc.email) + ':' + days;
+  try { var hit = cache.get(ck); if (hit) return JSON.parse(hit); } catch (x) { /* recompute */ }
+  anaFlush();
+  var mine = anaAll().filter(function (s) { return s.status !== 'deleted' && (sc.admin || s.owner === sc.email); }), keys = Object.create(null), names = Object.create(null);
+  mine.forEach(function (s) { keys[s.key] = true; names[s.key] = s.name; });
+  var now = Date.now(), cut = now - days * 86400000, pcut = now - 2 * days * 86400000, five = now - 5 * 60000;
+  var perDay = Object.create(null), dayVid = Object.create(null), siteAgg = Object.create(null), pageAgg = Object.create(null);
+  var ref = Object.create(null), co = Object.create(null), dev = Object.create(null), br = Object.create(null);
+  var hours = []; for (var h = 0; h < 24; h++) hours.push(0);
+  var pv = 0, prevPv = 0, bots = 0, lastAny = 0, real = Object.create(null), seq = 0;
+  anaRead(null).forEach(function (r) {
+    if (!keys[r.key]) return;
+    if (r.t > lastAny) lastAny = r.t;
+    if (r.bot) { bots++; return; }
+    if (r.type !== 'pv') return;
+    if (r.t >= five && r.vid) real[r.vid] = 1;
+    if (r.t < pcut) return;
+    var d = anaDay(r.t), vid = (r.vid || ('x' + (++seq))), s = siteAgg[r.key] = siteAgg[r.key] || { pv: 0, prev: 0, vids: Object.create(null) };
+    (dayVid[d] = dayVid[d] || Object.create(null))[vid] = 1;
+    if (r.t < cut) { prevPv++; s.prev++; return; }
+    pv++; s.pv++; s.vids[vid + d] = 1;
+    var pd = perDay[d] = perDay[d] || { pv: 0 }; pd.pv++;
+    lnkBump(ref, r.ref); lnkBump(co, r.country); lnkBump(dev, r.device); lnkBump(br, r.browser);
+    var pk = r.key + '\u0001' + r.name, pg = pageAgg[pk] = pageAgg[pk] || { site: r.key, name: r.name, n: 0 }; pg.n++;
+    hours[Number(Utilities.formatDate(new Date(r.t), LNK_TZ, 'H'))]++;
+  });
+  /* short links + QR scans of the same user scope */
+  var links = lnkAll().filter(function (l) { return l.status !== 'deleted' && (sc.admin || l.owner === sc.email); }), only = Object.create(null), meta = Object.create(null), kinds = { link: 0, qr: 0, qrs: 0 };
+  links.forEach(function (l) { only[l.code] = 1; meta[l.code] = l; kinds[l.kind] = (kinds[l.kind] || 0) + 1; });
+  var scanDay = Object.create(null), perCode = Object.create(null), scans = 0, prevScans = 0;
+  (links.length ? lnkClicks(only) : []).forEach(function (c) {
+    if (c.bot) return;
+    if (c.t >= cut) { scans++; var d = anaDay(c.t); scanDay[d] = (scanDay[d] || 0) + 1; perCode[c.code] = (perCode[c.code] || 0) + 1; } else if (c.t >= pcut) prevScans++;
+  });
+  var byDay = [], uv = 0, prevUv = 0, i;
+  for (i = days - 1; i >= 0; i--) { var dd = anaDay(now - i * 86400000), u = dayVid[dd] ? Object.keys(dayVid[dd]).length : 0; uv += u; byDay.push({ d: dd, pv: perDay[dd] ? perDay[dd].pv : 0, uv: u, sc: scanDay[dd] || 0 }); }
+  for (i = days; i < 2 * days; i++) { var pd2 = anaDay(now - i * 86400000); prevUv += dayVid[pd2] ? Object.keys(dayVid[pd2]).length : 0; }
+  var topProjects = Object.keys(siteAgg).map(function (k) { var s = siteAgg[k]; return { key: k, name: names[k] || k, pv: s.pv, prev: s.prev, uv: Object.keys(s.vids).length }; }).sort(function (a, c) { return c.pv - a.pv; }).slice(0, 8);
+  var pages = Object.keys(pageAgg).map(function (k) { var p = pageAgg[k]; return { site: names[p.site] || p.site, name: p.name, n: p.n }; }).sort(function (a, c) { return c.n - a.n; }).slice(0, 10);
+  var out = { days: days, generated: now, projects: { total: mine.length, tracking: mine.filter(function (s) { return s.track && s.status === 'active'; }).length },
+    pv: pv, prevPv: prevPv, uv: uv, prevUv: prevUv, avgPages: uv ? Math.round((pv / uv) * 10) / 10 : 0, realtime: Object.keys(real).length, bots: bots, last: lastAny ? new Date(lastAny).toISOString() : '',
+    byDay: byDay, byHour: hours, topProjects: topProjects, pages: pages, referrers: lnkTop(ref, 6), countries: lnkTop(co, 6), devices: lnkTop(dev, 5), browsers: lnkTop(br, 5),
+    links: { links: kinds.link || 0, qr: kinds.qr || 0, qrs: kinds.qrs || 0, scans: scans, prevScans: prevScans, top: lnkTop(perCode, 5).map(function (x) { var l = meta[x.name]; return { code: x.name, n: x.n, kind: l.kind, title: l.title || l.url }; }) } };
+  try { cache.put(ck, JSON.stringify(out), 60); } catch (x) { /* too big for the cache: just recompute next time */ }
+  return out;
+}
+
 /* ------------------------------------ actions ------------------------------------ */
 
 function projects(b) {
@@ -224,6 +276,7 @@ function projects(b) {
   rateLimit('projects', intProp('LINK_LIMIT_PER_MIN', 60) * (op === 'create' || op === 'update' || op === 'delete' ? 1 : 5));
   switch (op) {
     case 'list':   return anaList(sc);
+    case 'overview': return anaOverview(sc, b.days);   // home dashboard: one cached call
     case 'names':  return { items: anaAll().filter(function (s) { return s.status !== 'deleted' && (sc.admin || s.owner === sc.email); }).map(function (s) { return { key: s.key, name: s.name }; }) };
     case 'create': return anaCreate(sc, u, b);
     case 'update': return anaUpdate(sc, u, b);

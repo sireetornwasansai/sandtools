@@ -6,7 +6,7 @@ import { record } from '../core/logger.js';
 import { getSession } from '../core/auth.js';
 import { backendConfigured } from '../core/api.js';
 import { notice } from '../core/notices.js';
-import { QR_TYPES, QR_CATS, linksCall, shortUrl, savedForm, savedDesign } from '../core/qrsaved.js';
+import { QR_TYPES, QR_CATS, linksCall, shortUrl, savedForm, savedDesign, fetchSavedItem } from '../core/qrsaved.js';
 import { buildMatrix, PAYLOADS, toSvg, drawToCanvas, byteLength, MAX_BYTES, contrastRatio } from './qr-engine.js';
 
 const TYPES = QR_TYPES;
@@ -24,6 +24,7 @@ export function mount(root, ctx) {
   let editing = null;
   let logoImage = null; let logoDataUrl = null;
   let current = null; // {matrix, payload, opts}
+  let leftCol = null;
 
   const inp = (key, label, attrs = {}, hint) => {
     const el = attrs.multiline ? h('textarea', { rows: attrs.rows || 4, ...attrs.attrs }) : h('input', { type: attrs.type || 'text', autocomplete: 'off', ...attrs.attrs });
@@ -210,7 +211,7 @@ export function mount(root, ctx) {
       if (update) {
         const body = { code: editing.code, title, note: noteIn.value.trim(), qr };
         if (tracked) body.url = PAYLOADS.url(form) || form.url;
-        const r = await linksCall('update', body); link = r.link; base = (await linksCall('get', { code: link.code })).base;
+        const r = await linksCall('update', body); link = r.link || editing; base = r.base || (await fetchSavedItem(editing.code).catch(() => ({ base: '' }))).base || '';
       } else {
         const body = { kind: tracked ? 'qr' : 'qrs', title, note: noteIn.value.trim(), qr };
         if (tracked) body.url = PAYLOADS.url(form) || form.url;
@@ -233,25 +234,31 @@ export function mount(root, ctx) {
       record('qr', update ? 'update_saved' : 'save', { fileName: title, extra: { type, tracked, category: catIn.value } });
     } catch (e) { toast(e.message || 'บันทึกไม่สำเร็จ', 'error', 7000); } finally { saveNewBtn.disabled = false; syncPanel(); }
   }
+  /** Loading overlay on the form while a saved QR is being fetched (spinner + skeleton, blocks double clicks). */
+  const loadVeil = h('div', { class: 'qr-veil', hidden: true, role: 'status', 'aria-live': 'polite' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('b', null, 'กำลังเปิด QR ที่บันทึกไว้…'), h('span', { class: 'skeleton', style: 'height:.9rem;width:70%' }), h('span', { class: 'skeleton', style: 'height:.9rem;width:48%' }));
+  const loadErr = h('div', { hidden: true });
+  function setVeil(on) { loadVeil.hidden = !on; if (leftCol) { leftCol.classList.toggle('is-busy', on); leftCol.setAttribute('aria-busy', String(on)); } }
   async function loadSaved(code) {
+    setVeil(true); loadErr.hidden = true; loadErr.replaceChildren();
     try {
-      const d = await linksCall('get', { code }); const it = d.link;
+      const { link: it, base } = await fetchSavedItem(code);
+      if (!it || !it.code) throw new Error('ไม่พบ QR นี้ หรือไม่มีสิทธิ์เข้าถึง');
       if (it.kind === 'link') { toast('รายการนี้เป็นลิงก์ย่อ ไม่ใช่ QR', 'error'); return; }
       const dz = savedDesign(it);
       sizeIn.value = String(dz.size); marginIn.value = String(dz.margin); ecIn.value = dz.ec; fgIn.value = dz.fg; bgIn.value = dz.bg; styleIn.value = dz.style; catIn.value = dz.cat; capIn.value = dz.cap;
       capIn.placeholder = (CATS.find((c) => c[0] === catIn.value) || [])[2] || 'เช่น สแกนเพื่อลงทะเบียน';
-      nameIn.value = it.title; noteIn.value = it.note || '';
-      editing = { code: it.code, kind: it.kind, title: it.title };
-      if (it.kind === 'qr') {
-        modeTracked.checked = true; setType('url'); fillForm({ url: it.url });
-        override = { payload: shortUrl(d.base, it.code), forUrl: it.url };
-      } else {
-        modeStatic.checked = true; setType((it.qr && it.qr.t) || 'url'); fillForm(savedForm(it));
-        if (type === 'wifi') toast('ไม่ได้เก็บรหัสผ่าน Wi-Fi ไว้ กรุณากรอกรหัสผ่านใหม่ก่อนดาวน์โหลด', 'info', 6000);
-      }
-      schedule.flush(); syncPanel();
-    } catch (e) { toast(e.message || 'เปิด QR ที่บันทึกไว้ไม่ได้', 'error', 6000); }
+      nameIn.value = it.title || ''; noteIn.value = it.note || '';
+      editing = { code: it.code, kind: it.kind || 'qrs', title: it.title || '' };
+      if (editing.kind === 'qr') { modeTracked.checked = true; setType('url'); fillForm({ url: it.url }); override = { payload: shortUrl(base, it.code), forUrl: it.url }; }
+      else { modeStatic.checked = true; setType((it.qr && it.qr.t) || 'url'); fillForm(savedForm(it)); if (type === 'wifi') toast('ไม่ได้เก็บรหัสผ่าน Wi-Fi ไว้ กรุณากรอกรหัสผ่านใหม่ก่อนดาวน์โหลด', 'info', 6000); }
+      schedule.flush(); syncPanel(); saveResult.hidden = true;
+    } catch (e) {
+      editing = null; override = null; syncPanel(); loadErr.hidden = false;
+      loadErr.replaceChildren(h('div', { class: 'notice notice-error', role: 'alert' }, svgIcon(ICONS.alert), h('div', null, h('strong', null, 'เปิด QR ที่บันทึกไว้ไม่ได้'), h('p', null, e.message || 'เกิดข้อผิดพลาด'),
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => loadSaved(code) }, svgIcon(ICONS.rotate, 16), 'ลองใหม่'), h('a', { class: 'btn btn-sm', href: '#/qrs' }, 'กลับไปประวัติ QR')))));
+    } finally { setVeil(false); }
   }
+
   const savePanel = h('div', { class: 'card qr-save' }, h('h2', null, 'บันทึกลงประวัติ QR'),
     canSave() ? h('div', null, editBar,
       field('ชื่อ QR (เป็น QR ของอะไร)', nameIn, 'ใช้ค้นหาในหน้า ประวัติ QR — หมวดงานเลือกจากการ์ดด้านบน').root, field('หมายเหตุ', noteIn).root,
@@ -265,7 +272,7 @@ export function mount(root, ctx) {
     h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'QR Code Generator'), h('p', null, 'สร้าง QR Code ในเบราว์เซอร์ ข้อมูลไม่ถูกส่งออกไปที่ใด เว้นแต่คุณกดบันทึกลงประวัติเอง')),
       canSave() ? h('a', { class: 'btn', href: '#/qrs' }, svgIcon(ICONS.list, 18), 'ประวัติ QR') : null),
     h('div', { class: 'two-col' },
-      h('div', null,
+      (leftCol = h('div', { class: 'qr-left' }, loadVeil, loadErr,
         h('div', { class: 'card' }, tabs, fieldHost),
         h('div', { class: 'card' }, h('h2', null, 'หมวดงานและข้อความใต้ QR'), h('div', { class: 'grid-2' }, field('หมวดงาน', catIn, 'ตั้งชื่อไฟล์ตามหมวด เช่น vaccine-qr-link.png').root, field('ข้อความใต้ QR (ไม่บังคับ)', capIn).root)),
         savePanel,
@@ -274,7 +281,7 @@ export function mount(root, ctx) {
             field('ขนาดภาพ (px)', sizeIn).root, field('ขอบขาว (โมดูล)', marginIn).root,
             field('ระดับแก้ไขข้อผิดพลาด', ecIn).root, field('รูปแบบจุด', styleIn).root,
             h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'สี QR'), fgIn), h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'สีพื้นหลัง'), bgIn)),
-          field('โลโก้กลาง QR (ไม่บังคับ)', logoIn, 'ใช้ PNG/JPG/WEBP/SVG ไม่เกิน 2 MB').root, logoClear)),
+          field('โลโก้กลาง QR (ไม่บังคับ)', logoIn, 'ใช้ PNG/JPG/WEBP/SVG ไม่เกิน 2 MB').root, logoClear))),
       h('div', { class: 'qr-preview card' }, placeholder, canvasWrap, info, warn,
         h('div', { class: 'btn-row', style: 'justify-content:center' }, btnPng, btnSvg, btnCopyImg, btnCopyTxt)))));
   setType('url');

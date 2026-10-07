@@ -62,3 +62,40 @@ export function savedDesign(item) {
   const d = (item && item.qr && item.qr.d) || {};
   return { size: d.size || 512, margin: d.margin ?? 4, fg: d.fg || '#000000', bg: d.bg || '#ffffff', style: d.style || 'square', ec: d.ec || 'M', cat: d.cat || 'general', cap: d.cap || '' };
 }
+
+/** Normalise whatever the backend answered for one record: {link, base} (current) · {item|data} wrappers · or the record itself (older deployments). null when nothing usable. */
+function pickLink(d) {
+  if (!d || typeof d !== 'object') return null;
+  const c = d.link || d.item || d.data || (d.code ? d : null);
+  return c && typeof c === 'object' && c.code ? c : null;
+}
+
+/**
+ * One saved QR / link by code, for "open to edit". Tries the fast `get` op first; if the backend is older (no `get`, or an unexpected answer)
+ * it falls back to the list (cached copy first, then a fresh one) so editing never depends on a particular Apps Script version.
+ * @returns {Promise<{link: any, base: string}>}
+ */
+export async function fetchSavedItem(code) {
+  let base = '';
+  let lastErr = null;
+  try {
+    const d = await linksCall('get', { code });
+    const link = pickLink(d);
+    base = (d && d.base) || '';
+    if (link) return { link: { ...link, kind: link.kind || 'link' }, base: base || (cachedLinksList() || {}).base || '' };
+  } catch (e) {
+    lastErr = e;
+    const c = e && /** @type {any} */ (e).code;
+    if (['NOT_FOUND', 'INVALID_SESSION', 'DOMAIN_NOT_ALLOWED', 'NETWORK', 'TIMEOUT'].includes(c)) throw e;
+  }
+  const pool = [];
+  try { const c = cachedLinksList(); if (c) pool.push(c); } catch { /* ignore */ }
+  for (let i = 0; i < 2; i += 1) {
+    const hit = pool.map((l) => ({ l, it: (l.items || []).find((x) => x.code === code) })).find((x) => x.it);
+    if (hit) return { link: { ...hit.it, kind: hit.it.kind || 'link' }, base: base || hit.l.base || '' };
+    if (i === 0) pool.unshift(await fetchLinksList());
+  }
+  const err = new Error((lastErr && lastErr.message) || 'ไม่พบ QR นี้ หรือไม่มีสิทธิ์เข้าถึง');
+  /** @type {any} */ (err).code = (lastErr && /** @type {any} */ (lastErr).code) || 'NOT_FOUND';
+  throw err;
+}

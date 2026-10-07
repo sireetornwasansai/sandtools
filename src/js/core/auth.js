@@ -19,7 +19,7 @@ export function getSession() {
 }
 function setSession(s) { try { store().setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* ignore */ } }
 export function signOut() {
-  try { store().removeItem(SESSION_KEY); window.sessionStorage.removeItem(SESSION_KEY); window.localStorage.removeItem('sand:links:list'); } catch { /* ignore */ }
+  try { store().removeItem(SESSION_KEY); window.sessionStorage.removeItem(SESSION_KEY); window.localStorage.removeItem('sand:links:list'); Object.keys(window.localStorage).filter((k) => k.startsWith('sand:c:')).forEach((k) => window.localStorage.removeItem(k)); } catch { /* ignore */ }
   if (window.google && window.google.accounts && window.google.accounts.id) window.google.accounts.id.disableAutoSelect();
 }
 export function loginRequired() { return config.requireLogin; }

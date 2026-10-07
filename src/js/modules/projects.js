@@ -1,14 +1,14 @@
 import { h, field, svgIcon, debounce } from '../core/dom.js';
 import { ICONS } from '../core/icons.js';
-import { getSession, signOut } from '../core/auth.js';
-import { gasCall } from '../core/api.js';
+import { getSession } from '../core/auth.js';
+import { sessionCall, cacheGet, cacheSet } from '../core/ops.js';
 import { notice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { copyText, downloadBlob } from '../core/download.js';
 import { addLayer, modal, confirmBox, closeAllLayers } from '../core/layers.js';
 import { showQr } from '../core/qrdialog.js';
 import { loadCss } from '../core/css.js';
-import { fmt, hostOf, when, ago, barChart, dualBars, hBars, dayLabel, countryName, DEVICE } from '../core/charts.js';
+import { fmt, hostOf, when, ago, barChart, areaChart, hBars, dayLabel, countryName, DEVICE } from '../core/charts.js';
 
 /* ------------------------------- helpers ------------------------------- */
 
@@ -18,26 +18,26 @@ const I = {
   link: '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>', user: ICONS.user, eye: ICONS.eye,
   qr: ICONS.qr, code: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/>'
 };
-async function call(action, op, params = {}, timeout = 60000) {
-  const s = getSession();
-  if (!s) { const e = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); e.code = 'INVALID_SESSION'; throw e; }
-  try { return (await gasCall(action, { session: s.token, op, ...params }, timeout)).data; } catch (e) { if (e && (e.code === 'INVALID_SESSION' || e.code === 'DOMAIN_NOT_ALLOWED')) signOut(); throw e; }
-}
+const call = (action, op, params = {}, timeout = 60000) => sessionCall(action, op, params, timeout);
+
 const shortUrl = (base, code) => `${String(base || location.origin).replace(/\/+$/, '')}/s/${code}`;
 async function copy(text, msg = 'คัดลอกแล้ว') { if (await copyText(text)) toast(msg, 'success'); else toast('คัดลอกไม่ได้ — เลือกข้อความแล้วกด Ctrl+C', 'error'); }
 const stateOf = (p) => (p.status === 'paused' || !p.track ? ['off', 'หยุดเก็บสถิติ'] : !p.last ? ['wait', 'รอข้อมูลแรก'] : ['on', 'กำลังเก็บสถิติ']);
 
 /* ---------------------------------- page ---------------------------------- */
 
-export async function mount(root) {
-  await Promise.all([loadCss('links'), loadCss('projects')]);
-  const sess = getSession();
-  const host = h('div');
-  const addBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => createDialog() }, svgIcon(ICONS.plus, 18), 'เพิ่มโครงการ');
-  root.append(h('div', { class: 'page' }, h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'โครงการและสถิติเว็บไซต์'),
-    h('p', null, 'แนบเว็บไซต์หรือระบบของหน่วยงาน แล้วดูว่ามีคนเข้าใช้กี่ครั้ง หน้าไหนยอดนิยม และมาจากช่องทางใด — ไม่ใช้คุกกี้ ไม่เก็บ IP')), addBtn), host));
-  if (!sess) { addBtn.hidden = true; host.append(notice('warn', 'ต้องเข้าสู่ระบบก่อน', 'ระบบโครงการใช้ได้เฉพาะผู้ที่ล็อกอินแล้ว')); return () => {}; }
+/** The old /projects page now lives on the home dashboard — keep old bookmarks working. */
+export function mount() { location.replace('#/'); }
 
+/**
+ * The projects panel (search · cards · create · detail drawer), embedded in the home dashboard.
+ * @param {HTMLElement} host where to draw · @param {{kpi?: boolean, onData?: (items: any[]) => void}} [opts]
+ * @returns {(() => void) & {open: (key: string, tab?: string) => void}}
+ */
+export function mountProjectsPanel(host, opts = {}) {
+  const sess = getSession();
+  const addBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => createDialog() }, svgIcon(ICONS.plus, 18), 'เพิ่มโครงการ');
+  if (!sess) { host.append(notice('warn', 'ต้องเข้าสู่ระบบก่อน', 'ระบบโครงการใช้ได้เฉพาะผู้ที่ล็อกอินแล้ว')); return Object.assign(() => {}, { open: () => {} }); }
   const st = { items: [], base: '', admin: false, q: '', loaded: false };
   const me = ((sess.user && sess.user.email) || '').toLowerCase();
   let seq = 0; let closeDrawer = null; let pollTimer = null;
@@ -46,19 +46,20 @@ export async function mount(root) {
   search.addEventListener('input', debounce(() => { st.q = search.value.trim().toLowerCase(); draw(); }, 150));
   const refreshBtn = h('button', { class: 'btn', type: 'button', onclick: () => load(true) }, svgIcon(ICONS.rotate, 18), 'รีเฟรช');
   const grid = h('div', { class: 'prj-grid' });
-  host.append(kpi, h('div', { class: 'hist-tools prj-tools' }, search, refreshBtn), grid);
+  host.append(...(opts.kpi ? [kpi] : []), h('div', { class: 'hist-tools prj-tools' }, search, refreshBtn, addBtn), grid);
 
   async function load(skeleton = true) {
     const my = ++seq;
-    if (skeleton) grid.replaceChildren(...[1, 2, 3].map(() => h('div', { class: 'skeleton', style: 'height:170px' })));
-    try {
-      const d = await call('projects', 'list'); if (my !== seq) return;
-      st.items = d.items; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; draw();
-    } catch (e) {
+    const apply = (d) => { st.items = d.items; st.base = d.base || ''; st.admin = d.admin; st.loaded = true; draw(); if (opts.onData) opts.onData(st.items); };
+    const cached = skeleton && !st.loaded ? cacheGet('prj:list') : null;
+    if (cached) apply(cached.d);   // last known list first, refreshed below
+    else if (skeleton && !st.loaded) grid.replaceChildren(...[1, 2, 3].map(() => h('div', { class: 'skeleton', style: 'height:170px' })));
+    refreshBtn.classList.add('is-loading');
+    try { const d = await call('projects', 'list'); if (my !== seq) return; cacheSet('prj:list', d); apply(d); } catch (e) {
       if (my !== seq) return;
-      grid.replaceChildren(...[notice('error', 'โหลดโครงการไม่ได้', e.code === 'UNKNOWN_ACTION' ? 'ฝั่ง Apps Script ยังไม่มีไฟล์ Analytics.gs หรือยังไม่ได้ Deploy เวอร์ชันใหม่' : e.message),
-        e.code === 'INVALID_SESSION' ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, 'เข้าสู่ระบบใหม่') : null].filter(Boolean));
-    }
+      if (st.loaded) { toast(`อัปเดตรายการโครงการไม่สำเร็จ — ${e.message}`, 'error', 5000); return; }
+      grid.replaceChildren(...[notice('error', 'โหลดโครงการไม่ได้', e.code === 'UNKNOWN_ACTION' ? 'ฝั่ง Apps Script ยังไม่มีไฟล์ Analytics.gs หรือยังไม่ได้ Deploy เวอร์ชันใหม่' : e.message), e.code === 'INVALID_SESSION' ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => location.reload() }, 'เข้าสู่ระบบใหม่') : null].filter(Boolean));
+    } finally { if (my === seq) refreshBtn.classList.remove('is-loading'); }
   }
 
   function draw() {
@@ -134,7 +135,7 @@ export async function mount(root) {
         empty ? notice('info', 'ยังไม่มีข้อมูลเข้ามา', 'นำโค้ดจากแท็บ "ติดตั้ง" ไปวางในเว็บไซต์ แล้วเปิดเว็บนั้นสักครั้ง ข้อมูลจะปรากฏที่นี่ภายใน 1–2 นาที') : null,
         h('div', { class: 'lnk-stats' }, stat('การเปิดหน้า', d.pv, `ใน ${d.days} วัน`), stat('ผู้เข้าชม', d.uv, 'นับรายวัน ไม่ซ้ำกันในแต่ละวัน'), stat('หน้าต่อผู้เข้าชม', d.avgPages), stat('เหตุการณ์ที่กำหนดเอง', d.events), stat('บอทที่ไม่นับ', d.bots)),
         range,
-        h('section', { class: 'lnk-sec' }, h('h3', null, 'การเปิดหน้าและผู้เข้าชมต่อวัน'), h('div', { class: 'prj-legends' }, h('span', { class: 'prj-legend a' }, 'เปิดหน้า'), h('span', { class: 'prj-legend b' }, 'ผู้เข้าชม')), dualBars(d.byDay.map((p) => ({ a: p.pv, b: p.uv, label: dayLabel(p.d) })), 'สถิติต่อวัน', 'เปิดหน้า', 'ผู้เข้าชม')),
+        h('section', { class: 'lnk-sec' }, h('h3', null, 'การเปิดหน้าและผู้เข้าชมต่อวัน'), areaChart(d.byDay, [{ key: 'pv', label: 'เปิดหน้า', cls: 's1' }, { key: 'uv', label: 'ผู้เข้าชม', cls: 's2' }], { height: 210, label: 'สถิติต่อวัน' })),
         h('section', { class: 'lnk-sec' }, h('h3', null, 'หน้ายอดนิยม'), pages),
         h('div', { class: 'lnk-breaks' }, hBars('มาจาก', d.referrers, (n) => n || 'เข้าโดยตรง / แอปแชต'), hBars('ประเทศ', d.countries, countryName), hBars('อุปกรณ์', d.devices, (n) => DEVICE[n] || n),
           hBars('เบราว์เซอร์/แอป', d.browsers, (n) => n || 'ไม่ทราบ'), hBars('ระบบปฏิบัติการ', d.systems, (n) => n || 'ไม่ทราบ'), d.utms.length ? hBars('แคมเปญ (utm_source)', d.utms, (n) => n) : null, d.eventNames.length ? hBars('เหตุการณ์ที่กำหนดเอง', d.eventNames, (n) => n) : null),
@@ -242,5 +243,8 @@ export async function mount(root) {
   }
 
   load();
-  return () => { seq += 1; stopPoll(); closeAllLayers(); };
+  const cleanup = () => { seq += 1; stopPoll(); closeAllLayers(); };
+  /** Open a project's detail drawer from outside (e.g. the dashboard's top-projects list). */
+  cleanup.open = (key, tab = 'overview') => { const s = st.items.find((x) => x.key === key); if (s) openDrawer(s, tab); };
+  return cleanup;
 }

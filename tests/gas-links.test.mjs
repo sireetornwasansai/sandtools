@@ -132,6 +132,20 @@ test('a short link can still be attached to a project and website hits are count
   const st = e.post({ action: 'projects', session: s, op: 'stats', key, days: 7 }).data; assert.equal(st.pv, 1);
 });
 
+test('dashboard overview: one call returns totals, daily series, top projects and link/QR scans — scoped to the user', () => {
+  const e = makeEnv(); const s = e.login('somchai@example.go.th'); const other = e.login('other@example.go.th');
+  const p = e.post({ action: 'projects', session: s, op: 'create', name: 'เว็บโรงพยาบาล', url: 'https://hospital.example.go.th' }); const key = p.data.site.key;
+  const q = e.post({ action: 'links', session: s, op: 'create', kind: 'qr', title: 'QR วัคซีน', url: 'https://hospital.example.go.th/v', project: key, qr: { d: dz } }).data.link;
+  for (const [pg, vid] of [['/home', 'aaaaaaaa1111'], ['/home', 'bbbbbbbb2222'], ['/about', 'aaaaaaaa1111']]) e.post({ action: 'hit', secret: 'edge-secret', k: key, t: 'pv', p: pg, host: 'hospital.example.go.th', device: 'mobile', browser: 'Chrome', os: 'Android', country: 'TH', vid });
+  e.post({ action: 'click', secret: 'edge-secret', code: q.code, device: 'mobile', vid: 'cccccccc3333' });
+  const o = e.post({ action: 'projects', session: s, op: 'overview', days: 7 }); assert.equal(o.success, true, JSON.stringify(o.error));
+  assert.equal(o.data.pv, 3); assert.equal(o.data.uv, 2); assert.equal(o.data.byDay.length, 7); assert.equal(o.data.projects.total, 1);
+  assert.equal(o.data.topProjects[0].name, 'เว็บโรงพยาบาล'); assert.equal(o.data.pages[0].name, '/home'); assert.equal(o.data.devices[0].name, 'mobile');
+  assert.equal(o.data.links.qr, 1); assert.equal(o.data.links.scans, 1); assert.equal(o.data.links.top[0].code, q.code); assert.equal(o.data.byDay.reduce((a, d) => a + d.sc, 0), 1);
+  const mine = e.post({ action: 'projects', session: other, op: 'overview', days: 30 }).data; assert.equal(mine.pv, 0); assert.equal(mine.projects.total, 0); assert.equal(mine.links.scans, 0);
+  assert.equal(e.post({ action: 'projects', session: s, op: 'overview', days: 999 }).data.days, 30, 'unknown range falls back to 30 days');
+});
+
 const jwt = (claims) => ['e30', Buffer.from(JSON.stringify(claims)).toString('base64url'), 'sig'].join('.');
 const goodJwt = (o = {}) => jwt({ aud: CLIENT, iss: 'https://accounts.google.com', sub: '1', email: 'somchai@example.go.th', email_verified: true, name: 'ส', exp: Math.floor(Date.now() / 1000) + 3600, ...o });
 

@@ -17,6 +17,9 @@ let main;
 let unmountCurrent = null;
 let routeToken = 0;
 const bar = h('div', { id: 'route-bar', 'aria-hidden': 'true' });
+// Thin activity bar under the top edge while any backend (Apps Script) call is running.
+const netBar = h('div', { id: 'net-bar', 'aria-hidden': 'true' });
+window.addEventListener('sand:net', (e) => { netBar.classList.toggle('on', Number(e.detail) > 0); });
 let barTimer = 0;
 const barStart = () => { clearTimeout(barTimer); bar.className = 'run'; };
 const barEnd = () => { bar.className = 'end'; barTimer = window.setTimeout(() => { bar.className = ''; }, 400); };
@@ -64,11 +67,11 @@ function buildShell() {
     h('nav', { class: 'sidebar', 'aria-label': 'เมนูหลัก' },
       h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), h('div', { class: 'nav-title' }, 'เครื่องมือ'), ...TOOLS.map((t) => navLink(t)),
         ...((backendConfigured() && user) || recording() ? [h('div', { class: 'nav-title' }, 'ข้อมูลของฉัน')] : []),
-        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE), navLink(LINKS_ROUTE), navLink(QRS_ROUTE), navLink(PROJECTS_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
+        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE), navLink(LINKS_ROUTE), navLink(QRS_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
       h('div', { class: 'nav-group nav-bottom' }, navLink(SETTINGS_ROUTE), collapseBtn)),
     (main = h('main', { id: 'main', class: 'main', tabindex: '-1' })),
     h('nav', { class: 'bottomnav', 'aria-label': 'เมนูหลัก (มือถือ)', style: `grid-template-columns:repeat(${TOOLS.length + 1},1fr)` }, navLink(HOME_ROUTE, 'bn-link'), ...TOOLS.map((t) => navLink(t, 'bn-link'))));
-  app.replaceChildren(shell, bar);
+  app.replaceChildren(shell, bar, netBar);
   return shell;
 }
 

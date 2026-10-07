@@ -12,11 +12,17 @@ export class ApiError extends Error {
 
 export function backendConfigured() { return Boolean(config.gasUrl); }
 
+let inflight = 0;
+/** Tell the shell how many backend calls are running (it shows a thin activity bar while > 0). */
+function netBusy(delta) { inflight = Math.max(0, inflight + delta); try { window.dispatchEvent(new CustomEvent('sand:net', { detail: inflight })); } catch { /* ignore */ } }
+export const netInflight = () => inflight;
+
 /** @param {string} action @param {Record<string, any>} [payload] @param {number} [timeoutMs] */
 export async function gasCall(action, payload = {}, timeoutMs = 20000) {
   if (!config.gasUrl) throw new ApiError('NO_BACKEND', 'ยังไม่ได้ตั้งค่า Backend (GAS URL)');
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  netBusy(1);
   try {
     const res = await fetch(config.gasUrl, {
       method: 'POST',
@@ -35,7 +41,7 @@ export async function gasCall(action, payload = {}, timeoutMs = 20000) {
     if (e instanceof ApiError) throw e;
     if (e && e.name === 'AbortError') throw new ApiError('TIMEOUT', 'Backend ตอบกลับช้าเกินไป');
     throw new ApiError('NETWORK', 'เชื่อมต่อ Backend ไม่ได้');
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); netBusy(-1); }
 }
 
 let warmed = false;
