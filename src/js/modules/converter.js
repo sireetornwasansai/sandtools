@@ -9,6 +9,8 @@ import { record, recording, recordingNote } from '../core/logger.js';
 import { convertFile, detectFormat, FORMATS, ACCEPT } from './converters/index.js';
 
 const STAGES = [['reading', 'อ่านไฟล์'], ['converting', 'กำลังแปลง'], ['done', 'เสร็จเรียบร้อย']];
+/** Shown instead when a scanned PDF needs OCR (reading text from the page images). */
+const STAGES_OCR = [['reading', 'อ่านไฟล์'], ['ocr', 'อ่านข้อความจากภาพ (OCR)'], ['done', 'เสร็จเรียบร้อย']];
 
 /** @param {HTMLElement} root @param {{params?: URLSearchParams, navigate?: Function}} [_ctx] */
 export function mount(root, _ctx) {
@@ -32,9 +34,11 @@ export function mount(root, _ctx) {
     zoneHost.replaceChildren(zone, input);
   }
 
+  let stages = STAGES;
   function stepList(active) {
-    const idx = STAGES.findIndex((s) => s[0] === active);
-    return h('ol', { class: 'steps', 'aria-label': 'ขั้นตอนการแปลง' }, STAGES.map(([id, label], i) => h('li', { class: i < idx || active === 'done' ? 'done' : i === idx ? 'active' : '', 'aria-current': i === idx ? 'step' : null }, `${i + 1}. ${label}`)));
+    if (active === 'ocr') stages = STAGES_OCR;
+    const idx = stages.findIndex((s) => s[0] === active);
+    return h('ol', { class: 'steps', 'aria-label': 'ขั้นตอนการแปลง' }, stages.map(([id, label], i) => h('li', { class: i < idx || active === 'done' ? 'done' : i === idx ? 'active' : '', 'aria-current': i === idx ? 'step' : null }, `${i + 1}. ${label}`)));
   }
 
   function friendlyError(e, file) {
@@ -54,18 +58,19 @@ export function mount(root, _ctx) {
     if (busy) return;
     const fmt = detectFormat(file.name);
     if (!fmt) { toast('ไม่รองรับไฟล์ประเภทนี้', 'error'); return; }
-    busy = true; resultHost.replaceChildren(); zoneHost.replaceChildren();
+    busy = true; stages = STAGES; resultHost.replaceChildren(); zoneHost.replaceChildren();
     const meta = h('div', { class: 'file-meta' }, h('span', null, h('b', null, file.name)), h('span', null, FORMATS[fmt].label), h('span', null, formatBytes(file.size)));
     const bar = h('div', { class: 'progress indeterminate', role: 'progressbar', 'aria-label': 'ความคืบหน้าการแปลง' }, h('span'));
     const steps = h('div'); steps.append(stepList('reading'));
-    statusHost.replaceChildren(h('div', { class: 'card' }, meta, steps, bar));
+    const note = h('p', { class: 'muted', style: 'margin-top:.5rem', role: 'status' });   // live detail, e.g. OCR page x of y
+    statusHost.replaceChildren(h('div', { class: 'card' }, meta, steps, bar, note));
     const setBar = (f) => { bar.classList.remove('indeterminate'); bar.firstElementChild.style.width = `${Math.round(f * 100)}%`; bar.setAttribute('aria-valuenow', String(Math.round(f * 100))); };
     try {
       const r = await convertFile(file, {
         maxBytes: MAX_FILE_BYTES, timeoutMs: Math.max(5, config.conversionTimeoutSec) * 1000,
-        onStage: (s) => steps.replaceChildren(stepList(s)), onProgress: setBar
+        onStage: (s) => steps.replaceChildren(stepList(s)), onProgress: setBar, onStatus: (t) => { note.textContent = t; }
       });
-      steps.replaceChildren(stepList('done')); setBar(1);
+      note.textContent = ''; steps.replaceChildren(stepList('done')); setBar(1);
       showResult(file, r);
       record('converter', 'convert', { fileName: file.name, sizeIn: file.size, sizeOut: r.markdown.length, inputs: [file], outputs: [new Blob([r.markdown], { type: 'text/markdown' })], outputName: r.filename });
     } catch (e) {
@@ -103,7 +108,7 @@ export function mount(root, _ctx) {
     zoneHost, statusHost, resultHost,
     h('details', { class: 'card', style: 'margin-top:1rem' }, h('summary', null, 'ข้อจำกัดของการแปลง'),
       h('ul', null,
-        h('li', null, 'PDF: อ่านได้เฉพาะไฟล์ที่มีข้อความ (ไม่ใช่ภาพสแกน) ตารางใน PDF จะเป็นข้อความธรรมดา'),
+        h('li', null, 'PDF: ไฟล์ที่มีข้อความอ่านได้ตรง ๆ (ตารางจะเป็นข้อความธรรมดา) · ไฟล์ภาพสแกนจะอ่านด้วย OCR ไทย/อังกฤษบนเครื่องของคุณ (ช้ากว่า — ประมาณ 5–15 วินาทีต่อหน้า, ครั้งแรกต้องโหลดตัวอ่านประมาณ 8 MB) ความแม่นยำไม่ถึง 100% โดยเฉพาะเลขไทย กรุณาตรวจทานกับต้นฉบับ'),
         h('li', null, 'Word/PowerPoint: แปลงข้อความ หัวข้อ รายการ ตาราง ลิงก์ ไม่รวมกราฟ กล่องข้อความ และรูปภาพ (ระบุเป็นลิงก์รูป)'),
         h('li', null, 'Excel: รองรับ .xlsx (ไฟล์ .xls รุ่นเก่า ให้บันทึกเป็น .xlsx ก่อน) ผลลัพธ์เป็นค่าที่แสดงในเซลล์ ไม่ใช่สูตร'),
         h('li', null, 'รูปภาพ: ให้เฉพาะข้อมูลไฟล์ ไม่มีการอ่านข้อความในรูป (OCR)')))));

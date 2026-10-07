@@ -56,7 +56,7 @@ function validateMime(id, type) {
 /**
  * Convert a File to Markdown entirely in the browser.
  * @param {File} file
- * @param {{maxBytes:number,timeoutMs:number,onStage?:(s:'reading'|'converting')=>void,onProgress?:(f:number)=>void}} opts
+ * @param {{maxBytes:number,timeoutMs:number,onStage?:(s:'reading'|'converting'|'ocr')=>void,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocr?:boolean,ocrTimeoutMs?:number}} opts
  * @returns {Promise<{markdown:string,filename:string,format:string,warnings:string[],ms:number}>}
  */
 export async function convertFile(file, opts) {
@@ -71,7 +71,10 @@ export async function convertFile(file, opts) {
   validateMagic(id, new Uint8Array(buf, 0, Math.min(buf.byteLength, 2048)));
   if (opts.onStage) opts.onStage('converting');
   const deadline = new Deadline(opts.timeoutMs);
-  const o = { deadline, onProgress: opts.onProgress };
+  // OCR (scanned PDFs) is slow, so it gets its own, longer budget; the normal timeout still covers everything that is not OCR.
+  const ac = new AbortController();
+  const ocrOn = opts.ocr !== false, ocrTimeoutMs = opts.ocrTimeoutMs || 15 * 60 * 1000;
+  const o = { deadline, onProgress: opts.onProgress, onStage: opts.onStage, onStatus: opts.onStatus, signal: ac.signal, ocr: ocrOn, ocrTimeoutMs };
   const run = async () => {
     switch (id) {
       case 'pdf': return convertPdf(buf, o);
@@ -85,7 +88,8 @@ export async function convertFile(file, opts) {
       default: throw new ConversionError('UNSUPPORTED', 'ไม่รองรับไฟล์ประเภทนี้');
     }
   };
-  const r = await withTimeout(run(), opts.timeoutMs);
+  let r;
+  try { r = await withTimeout(run(), id === 'pdf' && ocrOn ? opts.timeoutMs + ocrTimeoutMs : opts.timeoutMs); } catch (e) { ac.abort(); throw e; }   // abort stops a running OCR worker
   return { markdown: r.markdown, filename: withExt(file.name, 'md'), format: id, warnings: r.warnings || [], ms: Math.round(performance.now() - t0) };
 }
 

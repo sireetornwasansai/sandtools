@@ -44,9 +44,11 @@ export function itemsToLines(items) {
 const BULLET = /^[•●▪◦‣∙·\uF0B7\uF0A7\uF0D8\uF076–-]\s*/;
 
 /**
- * Convert a PDF with a text layer into Markdown (paragraphs, headings by font size, bullets).
- * Scanned PDFs have no text layer and need OCR, which is not supported.
+ * Convert a PDF into Markdown (paragraphs, headings by font size, bullets).
+ * Pages with a text layer are read directly. Pages without one (scans) are read with browser OCR (ocr.js, Thai + English)
+ * unless `opts.ocr === false`.
  * @param {ArrayBuffer} buf
+ * @param {{deadline?:any,onProgress?:(f:number)=>void,onStage?:(s:string)=>void,onStatus?:(s:string)=>void,signal?:AbortSignal,ocr?:boolean,ocrTimeoutMs?:number}} [opts]
  */
 export async function convertPdf(buf, opts = {}) {
   const pdfjs = await getPdfjs();
@@ -74,12 +76,33 @@ export async function convertPdf(buf, opts = {}) {
       page.cleanup();
     }
     const allText = pages.flat().map((l) => l.text).join('');
-    if (!allText.trim()) throw new ConversionError('PDF_NO_TEXT', 'PDF นี้ไม่มีข้อความที่เลือกคัดลอกได้ (อาจเป็นไฟล์สแกน) การอ่านข้อความจากภาพ (OCR) ยังไม่รองรับในเวอร์ชันนี้');
+    const hasText = !!allText.trim();
+    // pages with no text layer = scans → OCR (all pages of a fully scanned file, or just the image-only pages of a mixed file)
+    const scanned = pages.map((l, i) => (l.length ? -1 : i)).filter((i) => i >= 0);
+    /** @type {Map<number,string>} */
+    let ocrMd = new Map();
+    if (scanned.length && opts.ocr !== false) {
+      try {
+        const { ocrPdfPages } = await import('./ocr.js');
+        ocrMd = await ocrPdfPages(pdf, scanned, opts, warnings);
+      } catch (e) {
+        if (!hasText || (e && e.code === 'CANCELLED')) throw e;                // nothing else to show: surface the real reason
+        warnings.push(`หน้าที่เป็นภาพสแกน (${scanned.length} หน้า) อ่านด้วย OCR ไม่สำเร็จ: ${e && e.message ? e.message : e}`);
+      }
+    }
+    if (!hasText && ![...ocrMd.values()].some((t) => t.trim())) {
+      throw new ConversionError('PDF_NO_TEXT', opts.ocr === false
+        ? 'PDF นี้ไม่มีข้อความที่เลือกคัดลอกได้ (อาจเป็นไฟล์สแกน) และปิดการอ่านข้อความจากภาพ (OCR) ไว้'
+        : 'ไม่พบข้อความใน PDF นี้ แม้ลองอ่านด้วย OCR แล้ว (ภาพอาจเบลอ เอียง หรือไม่มีตัวอักษร)');
+    }
+    if (scanned.length && opts.ocr === false && hasText) warnings.push(`PDF มี ${scanned.length} หน้าที่เป็นภาพสแกน ซึ่งไม่ได้อ่านข้อความ`);
 
     let bodyFs = 10; let max = -1;
     for (const [k, v] of sizeChars) if (v > max) { max = v; bodyFs = k; }
     const out = [];
-    for (const lines of pages) {
+    for (let pi = 0; pi < pages.length; pi++) {
+      const lines = pages[pi];
+      if (ocrMd.has(pi)) { if (ocrMd.get(pi).trim()) out.push(ocrMd.get(pi)); continue; }
       const gaps = []; for (let i = 1; i < lines.length; i++) gaps.push(lines[i - 1].y - lines[i].y);
       const typical = median(gaps) || bodyFs * 1.3;
       let para = [];
@@ -98,7 +121,7 @@ export async function convertPdf(buf, opts = {}) {
     const md = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ''); // drop unmapped glyph control codes
     const bad = (raw.match(/[\u0000-\u0008\u000e-\u001f\uE000-\uF8FF\uFFFD]/g) || []).length;
     if (bad > Math.max(5, md.length * 0.03)) warnings.push('ข้อความบางส่วนอ่านไม่ออก เนื่องจากฟอนต์ใน PDF ไม่มีข้อมูลแปลงตัวอักษร (พบบ่อยกับภาษาไทย) แนะนำให้ส่งออก PDF ใหม่จากโปรแกรมต้นฉบับ');
-    warnings.push('การแปลง PDF ไม่จัดตารางให้อัตโนมัติ ข้อมูลในตารางจะแสดงเป็นข้อความธรรมดา');
+    if (pages.some((l) => l.length)) warnings.push('การแปลง PDF ไม่จัดตารางให้อัตโนมัติ ข้อมูลในตารางจะแสดงเป็นข้อความธรรมดา');
     return { markdown: `${md}\n`, warnings };
   } finally { try { await pdf.destroy(); } catch { /* ignore */ } }
 }
