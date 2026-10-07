@@ -18,7 +18,7 @@ function netBusy(delta) { inflight = Math.max(0, inflight + delta); try { window
 export const netInflight = () => inflight;
 
 /** @param {string} action @param {Record<string, any>} [payload] @param {number} [timeoutMs] */
-export async function gasCall(action, payload = {}, timeoutMs = 20000) {
+async function gasCallOnce(action, payload = {}, timeoutMs = 20000) {
   if (!config.gasUrl) throw new ApiError('NO_BACKEND', 'ยังไม่ได้ตั้งค่า Backend (GAS URL)');
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -42,6 +42,26 @@ export async function gasCall(action, payload = {}, timeoutMs = 20000) {
     if (e && e.name === 'AbortError') throw new ApiError('TIMEOUT', 'Backend ตอบกลับช้าเกินไป');
     throw new ApiError('NETWORK', 'เชื่อมต่อ Backend ไม่ได้');
   } finally { clearTimeout(timer); netBusy(-1); }
+}
+
+/** Read-only operations are safe to repeat; writes (create/update/delete…) are never retried so nothing is saved twice. */
+const READ_OPS = new Set(['list', 'get', 'stats', 'overview', 'names']);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Call the backend. Apps Script sometimes answers with an expired/blank page instead of JSON (BAD_RESPONSE) or drops the connection (NETWORK),
+ * especially right after a cold start — for read-only requests this is retried automatically (up to 2 more times) before an error is shown.
+ * @param {string} action @param {Record<string, any>} [payload] @param {number} [timeoutMs]
+ */
+export async function gasCall(action, payload = {}, timeoutMs = 20000) {
+  const safe = action === 'me' || action === 'health' || READ_OPS.has(String(payload.op || ''));
+  for (let i = 0; ; i += 1) {
+    try { return await gasCallOnce(action, payload, timeoutMs); } catch (e) {
+      const c = e && /** @type {any} */ (e).code;
+      if (!safe || i >= 2 || (c !== 'BAD_RESPONSE' && c !== 'NETWORK')) throw e;
+      await sleep(i === 0 ? 700 : 1800);
+    }
+  }
 }
 
 let warmed = false;
