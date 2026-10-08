@@ -95,12 +95,30 @@ await test('customisation: size/colour/style/logo; low-contrast warning', async 
 console.log('\nFile converter (runs in the browser)');
 for (const [f, expectIn] of [['sample.docx', ['# รายงานการประชุม', '## วาระที่ 1', '**ตัวหนา**', '*ตัวเอียง*', '* รายการที่ 1', '1. ขั้นที่ 1', '| สมชาย | การเงิน | 10 |']], ['sample.pptx', ['<!-- Slide number: 1 -->', '# แผนงานประจำปี', '### Notes:', 'บันทึกผู้พูด', '| A | B |']], ['sample.xlsx', ['## งบประมาณ', '| กระดาษ | 5 | 120.5 |', '## Sheet2']], ['sample.csv', ['| ชื่อ | อายุ |', '| สม, หญิง | 25 |']], ['sample.html', ['# หัวข้อ', '**หนา**', '[ลิงก์](https://example.com)', '```', '| a | b |']], ['sample.txt', ['บรรทัดหนึ่ง']], ['english.pdf', ['# Annual Report 2026', '* First point']]]) {
   await test(`convert ${f} → ${f.replace(/\.[^.]+$/, '.md')} with UI result actions`, async (page) => {
-    await go(page, '/converter'); await page.setInputFiles('input[type=file]', fx(f)); await page.waitForSelector('.notice-success', { timeout: 30000 });
+    await go(page, '/converter'); await page.click('button.chip:has-text("Markdown")'); await page.setInputFiles('input[type=file]', fx(f)); await page.waitForSelector('.notice-success', { timeout: 30000 });
     const text = await page.inputValue('textarea[aria-label="ผลลัพธ์ Markdown"]'); for (const s of expectIn) ok(text.includes(s), `missing "${s}" in:\n${text}`);
     const d = await dl(page, () => page.click(`button:has-text("ดาวน์โหลด")`)); eq(d.name, f.replace(/\.[^.]+$/, '.md'), 'download keeps base name'); eq(d.buf.toString('utf8'), text);
     await page.click('button:has-text("ดูตัวอย่าง")'); await page.waitForSelector('.md-preview:not([hidden]) >> nth=0');
   });
 }
+await test('converter: pick the target format, switch it afterwards without uploading again (docx → PDF → Excel → Word)', async (page) => {
+  await go(page, '/converter'); await page.waitForSelector('.conv-targets .chip');
+  eq(await page.locator('.conv-targets .chip').count(), 11, 'all formats offered before a file is chosen');
+  await page.click('button.chip:has-text("PDF")'); await page.setInputFiles('input[type=file]', fx('sample.docx')); await page.waitForSelector('.notice-success', { timeout: 60000 });
+  eq(await page.locator('.conv-targets .chip', { hasText: 'Word' }).count(), 0, 'own format is not offered');
+  let d = await dl(page, () => page.click('button.btn-primary')); eq(d.name, 'sample.pdf'); eq(d.buf.subarray(0, 5).toString(), '%PDF-'); ok(d.buf.length > 5000);
+  await page.click('button.chip:has-text("Excel")'); await page.waitForSelector('.notice-success:has-text("sample.xlsx")', { timeout: 30000 });
+  d = await dl(page, () => page.click('button.btn-primary')); eq(d.name, 'sample.xlsx'); eq(d.buf.subarray(0, 2).toString(), 'PK');
+  await page.click('button.chip:has-text("CSV")').catch(() => {});   // docx has no CSV target: chip is absent, nothing happens
+  await page.click('button.chip:has-text("Markdown")'); await page.waitForSelector('textarea[aria-label="ผลลัพธ์ Markdown"]', { timeout: 30000 });
+});
+await test('converter: PDF → Word and Excel → Word produce a real .docx; CSV → Excel a real .xlsx', async (page) => {
+  for (const [f, chip, ext] of [['english.pdf', 'Word', 'docx'], ['sample.xlsx', 'Word', 'docx'], ['sample.csv', 'Excel', 'xlsx']]) {
+    if (f === 'english.pdf') await go(page, '/converter'); else await page.click('button:has-text("แปลงไฟล์อื่น")');
+    await page.click(`button.chip:has-text("${chip}")`); await page.setInputFiles('input[type=file]', fx(f)); await page.waitForSelector('.notice-success', { timeout: 60000 });
+    const d = await dl(page, () => page.click('button.btn-primary')); eq(d.name, f.replace(/\.[^.]+$/, `.${ext}`)); eq(d.buf.subarray(0, 2).toString(), 'PK');
+  }
+});
 await test('drag & drop: file dropped on dashboard routes to the converter', async (page) => {
   await go(page, '/');
   const drop = async (name, buf, type) => { await page.evaluate(({ name, b64, type }) => { const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); const dt = new DataTransfer(); dt.items.add(new File([bytes], name, { type })); window.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true })); window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }, { name, b64: buf.toString('base64'), type }); };

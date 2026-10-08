@@ -31,7 +31,7 @@ If byte-for-byte MarkItDown behaviour (or OCR / legacy `.xls`) is ever required,
 | `src/index.html`, `src/css/` | App shell and design system (CSS variables, light/dark) |
 | `src/js/core/` | Router, store (settings/recent/IndexedDB), auth, GAS client, palette, Drive, helpers |
 | `src/js/modules/` | One file per tool (`qr`, `converter`, `dashboard`, `settings`) plus DOM-free `*-engine.js` / `*-utils.js` that are unit tested |
-| `src/js/modules/converters/` | File → Markdown engine (`docx`, `pptx`, `xlsx`, `csv`, `pdf`, `html-md`, `misc`, `common`) |
+| `src/js/modules/converters/` | File converter. Readers (`docx`, `pptx`, `xlsx`, `csv`, `pdf`, `html-md`, `misc`, `ocr`) turn any input into a common model (Markdown, or sheets for spreadsheets); writers (`write-docx`, `write-sheets` = xlsx/csv/json, `write-html`, `write-text`, `write-pdf`, `raster` = images) produce the chosen output; `convert-to.js` routes source → target (`targetsFor`, `convertTo`). `index.js` keeps the original file → Markdown API (`convertFile`) |
 | `src/js/vendor/` | Vendored third-party code (pdf.js, marked, DOMPurify, JSZip, highlight.js, QR encoder) — no CDN at runtime |
 | `gas/` | Google Apps Script backend (`Code.gs`, `appsscript.json`) |
 | `scripts/` | Zero-dependency dev server, build (writes `config.js`, service worker), preview |
