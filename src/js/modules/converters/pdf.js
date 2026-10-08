@@ -1,5 +1,8 @@
 import { ConversionError, LIMITS } from './common.js';
 import { layoutToMarkdown } from './ocr-layout.js';
+import { applyActualText, normalizeThai, readActualTextSpans } from './pdf-actualtext.js';
+
+const THAI = /[\u0e00-\u0e7f]/;
 
 let pdfjsPromise = null;
 export function getPdfjs() {
@@ -38,7 +41,7 @@ export function itemsToLines(items) {
       text += it.str;
       prevEnd = prevEnd === null ? it.x + it.w : Math.max(prevEnd, it.x + it.w); // combining marks sit inside the previous glyph
     }
-    return { y: ln.y, fs: ln.fs, text: text.replace(/[ \t]+/g, ' ').trim(), chars: text.length };
+    return { y: ln.y, fs: ln.fs, text: normalizeThai(text.replace(/[ \t]+/g, ' ')).trim(), chars: text.length };
   }).filter((l) => l.text);
 }
 
@@ -68,23 +71,45 @@ export async function convertPdf(buf, opts = {}) {
     const pages = [];
     /** @type {Array<{width:number,words:any[]}>} */ const wordsByPage = [];
     const sizeChars = new Map();
+    // 1) read every page's text items (with marked-content markers, needed to recover /ActualText)
+    const rawItems = []; const views = [];
     for (let p = 1; p <= total; p++) {
       if (opts.deadline) opts.deadline.check();
-      if (opts.onProgress) opts.onProgress(p / total);
+      if (opts.onProgress) opts.onProgress(p / total * 0.9);
       const page = await pdf.getPage(p);
-      const content = await page.getTextContent();
-      const lines = itemsToLines(content.items);
+      const content = await page.getTextContent({ includeMarkedContent: true });
+      rawItems.push(content.items); views.push(page.view);
+      page.cleanup();
+    }
+    // 2) Thai PDFs made with Type 3 fonts (Chrome/Cairo exports) lose tone marks in pdf.js's text layer, the right text is in /ActualText
+    let spansByPage = null;
+    if (rawItems.some((items) => items.some((it) => typeof it.str === 'string' && THAI.test(it.str)))) {
+      try {
+        const { getPdfLib } = await import('../pdf/engine.js');
+        spansByPage = await readActualTextSpans(await pdf.getData(), await getPdfLib());
+      } catch { spansByPage = null; }
+    }
+    let spanMismatch = 0;
+    for (let p = 1; p <= total; p++) {
+      let items = rawItems[p - 1];
+      const spans = spansByPage && spansByPage[p - 1];
+      if (spans && spans.some(Boolean)) {
+        const fixed = applyActualText(items, spans);
+        if (fixed.ok) items = fixed.items; else spanMismatch++;
+      }
+      const lines = itemsToLines(items);
       for (const l of lines) { const k = Math.round(l.fs); sizeChars.set(k, (sizeChars.get(k) || 0) + l.chars); }
       pages.push(lines);
       if (opts.tables) {
-        const [vx, vy, vx1, vy1] = page.view; const ph = vy1 - vy;
-        wordsByPage[p - 1] = { width: vx1 - vx, words: content.items.filter((it) => typeof it.str === 'string' && it.str.trim()).map((it) => {
+        const [vx, vy, vx1, vy1] = views[p - 1]; const ph = vy1 - vy;
+        wordsByPage[p - 1] = { width: vx1 - vx, words: items.filter((it) => typeof it.str === 'string' && it.str.trim()).map((it) => {
           const fs = Math.hypot(it.transform[0], it.transform[1]) || it.height || 10; const x = it.transform[4] - vx; const base = ph - (it.transform[5] - vy);
-          return { text: it.str.trim(), bbox: { x0: x, y0: base - fs * 0.8, x1: x + (it.width || fs * it.str.length * 0.5), y1: base + fs * 0.2 }, confidence: 100 };
+          return { text: normalizeThai(it.str.trim()), bbox: { x0: x, y0: base - fs * 0.8, x1: x + (it.width || fs * it.str.length * 0.5), y1: base + fs * 0.2 }, confidence: 100 };
         }) };
       }
-      page.cleanup();
+      if (opts.onProgress) opts.onProgress(0.9 + (p / total) * 0.1);
     }
+    if (spanMismatch) warnings.push(`PDF ${spanMismatch} หน้ามีโครงสร้างข้อความที่อ่านวรรณยุกต์ภาษาไทยไม่ครบ อาจมีวรรณยุกต์หายบางตัว ควรตรวจทานกับต้นฉบับ`);
     const allText = pages.flat().map((l) => l.text).join('');
     const hasText = !!allText.trim();
     // pages with no text layer = scans → OCR (all pages of a fully scanned file, or just the image-only pages of a mixed file)
