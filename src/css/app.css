@@ -354,3 +354,10 @@ textarea[readonly] { background: var(--surface-2); }
 .login-btn { transition: opacity .2s, filter .2s; } .login-btn.is-off { opacity: .35; filter: grayscale(1); pointer-events: none; }
 .login-status.busy { display: flex; align-items: center; justify-content: center; gap: .6rem; color: var(--text-2); }
 .login-card[aria-busy="true"] { box-shadow: var(--shadow-lg), 0 0 0 3px var(--primary-ring); }
+
+/* File Converter: choose the output format */
+.conv-targets { margin-bottom: .75rem; }
+.conv-targets-label { font-size: .86rem; color: var(--muted); margin-bottom: .35rem; overflow-wrap: anywhere; }
+.conv-targets .chip:disabled { opacity: .55; cursor: not-allowed; }
+.conv-file { display: flex; align-items: center; gap: .85rem; padding: 1rem 1.1rem; margin-bottom: .75rem; overflow-wrap: anywhere; }
+.conv-preview { padding: .75rem; margin-bottom: .75rem; }

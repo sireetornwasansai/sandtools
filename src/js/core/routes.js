@@ -7,8 +7,8 @@ import { ICONS } from './icons.js';
 export const TOOLS = [
   { id: 'qr', path: '/qr', title: 'QR Code', fullTitle: 'QR Code Generator', desc: 'สร้าง QR จากลิงก์ ข้อความ Wi-Fi อีเมล โทรศัพท์ vCard',
     icon: ICONS.qr, keywords: 'qr qrcode คิวอาร์ barcode wifi vcard url sms email โทรศัพท์', load: () => import('../modules/qr.js') },
-  { id: 'converter', path: '/converter', title: 'แปลงไฟล์', fullTitle: 'File Converter', desc: 'แปลง PDF, Word, PowerPoint, Excel, CSV, HTML เป็น Markdown',
-    icon: ICONS.file, keywords: 'converter convert pdf docx word pptx powerpoint xlsx excel csv html txt markitdown แปลง ไฟล์', load: () => import('../modules/converter.js') },
+  { id: 'converter', path: '/converter', title: 'แปลงไฟล์', fullTitle: 'File Converter', desc: 'แปลงไฟล์ระหว่าง PDF, Word, Excel, PowerPoint, CSV, HTML, ข้อความ, รูปภาพ — เช่น Word เป็น PDF, PDF เป็น Word, Excel เป็น Word',
+    icon: ICONS.file, keywords: 'converter convert pdf docx word doc pptx powerpoint xlsx excel csv html txt json png jpg jpeg webp image markdown markitdown ocr แปลง ไฟล์ เวิร์ด เอ็กเซล พีดีเอฟ รูปภาพ', load: () => import('../modules/converter.js') },
   { id: 'compress', path: '/compress', title: 'ย่อไฟล์', fullTitle: 'ย่อไฟล์', desc: 'ลดขนาดรูปภาพ และรวมไฟล์เป็น ZIP เพื่อส่งหรืออัปโหลด',
     icon: ICONS.crop, keywords: 'compress resize shrink zip ย่อ ลดขนาด บีบอัด รูป ภาพ ไฟล์ใหญ่', load: () => import('../modules/compress.js') },
   { id: 'pdf', path: '/pdf', title: 'PDF', fullTitle: 'เครื่องมือ PDF', desc: 'รวม แยก หมุน ลบหน้า · รูปสแกน → PDF · ลายน้ำ เลขหน้า ตราประทับ',

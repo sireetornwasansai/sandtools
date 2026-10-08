@@ -32,8 +32,8 @@ function numText(raw) {
   return String(n);
 }
 
-/** Convert an .xlsx workbook: one "## Sheet" section with a table per sheet (like MarkItDown/pandas). */
-export async function convertXlsx(buf, opts = {}) {
+/** Read an .xlsx workbook into sheets: [{name, rows: string[][]}] (cell values as displayed; dates as text). */
+export async function readXlsx(buf, opts = {}) {
   const zip = await openZip(buf);
   const wb = await readXml(zip, 'xl/workbook.xml');
   if (!wb) throw new ConversionError('CORRUPT', 'ไฟล์นี้ไม่ใช่สมุดงาน Excel (.xlsx) ที่ถูกต้อง');
@@ -58,7 +58,7 @@ export async function convertXlsx(buf, opts = {}) {
     }
   }
 
-  const sections = [];
+  const out = [];
   const sheets = descendants(wb.documentElement, 'sheet');
   for (let i = 0; i < sheets.length; i++) {
     if (opts.deadline) opts.deadline.check();
@@ -102,8 +102,15 @@ export async function convertXlsx(buf, opts = {}) {
     while (rows.length && rows[rows.length - 1].every((x) => x === '')) rows.pop();
     while (rows.length && rows[0].every((x) => x === '')) rows.shift();
     if (truncated) warnings.push(`ชีต "${name}" มีมากกว่า ${LIMITS.maxRows.toLocaleString('en-US')} แถว แปลงเฉพาะส่วนต้น`);
-    sections.push(`## ${name}\n\n${rows.length ? mdTable(rows) : '_(ชีตนี้ไม่มีข้อมูล)_'}`);
+    out.push({ name, rows });
   }
-  if (!sections.length) warnings.push('ไม่พบชีตในไฟล์');
+  if (!out.length) warnings.push('ไม่พบชีตในไฟล์');
+  return { sheets: out, warnings };
+}
+
+/** Convert an .xlsx workbook: one "## Sheet" section with a table per sheet (like MarkItDown/pandas). */
+export async function convertXlsx(buf, opts = {}) {
+  const { sheets, warnings } = await readXlsx(buf, opts);
+  const sections = sheets.map((s) => `## ${s.name}\n\n${s.rows.length ? mdTable(s.rows) : '_(ชีตนี้ไม่มีข้อมูล)_'}`);
   return { markdown: `${sections.join('\n\n')}\n`, warnings };
 }

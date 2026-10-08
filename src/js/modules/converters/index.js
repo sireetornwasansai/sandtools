@@ -17,6 +17,7 @@ export const FORMATS = {
   csv: { label: 'CSV', exts: ['csv'], mimes: ['text/csv', 'application/csv', 'application/vnd.ms-excel', 'text/plain'] },
   html: { label: 'HTML', exts: ['html', 'htm'], mimes: ['text/html', 'application/xhtml+xml'] },
   txt: { label: 'ข้อความ', exts: ['txt'], mimes: ['text/plain'] },
+  md: { label: 'Markdown', exts: ['md', 'markdown'], mimes: ['text/markdown', 'text/x-markdown', 'text/plain'] },
   image: { label: 'รูปภาพ', exts: ['jpg', 'jpeg', 'png', 'webp'], mimes: ['image/jpeg', 'image/png', 'image/webp'] }
 };
 export const ACCEPT = Object.values(FORMATS).flatMap((f) => f.exts.map((e) => `.${e}`)).join(',');
@@ -53,14 +54,8 @@ function validateMime(id, type) {
   if (!FORMATS[id].mimes.includes(type)) throw new ConversionError('MISMATCH', 'ชนิดไฟล์ (MIME) ไม่ตรงกับนามสกุลไฟล์', `mime=${type}`);
 }
 
-/**
- * Convert a File to Markdown entirely in the browser.
- * @param {File} file
- * @param {{maxBytes:number,timeoutMs:number,onStage?:(s:'reading'|'converting'|'ocr')=>void,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocr?:boolean,ocrTimeoutMs?:number}} opts
- * @returns {Promise<{markdown:string,filename:string,format:string,warnings:string[],ms:number}>}
- */
-export async function convertFile(file, opts) {
-  const t0 = performance.now();
+/** Checks (type, size, real content) and reads a File. @param {File} file @param {{maxBytes:number,onStage?:Function}} opts */
+export async function prepareFile(file, opts) {
   const id = detectFormat(file.name);
   if (!id) throw new ConversionError('UNSUPPORTED', 'ไม่รองรับไฟล์ประเภทนี้');
   if (!file.size) throw new ConversionError('EMPTY', 'ไฟล์ว่างเปล่า');
@@ -69,12 +64,24 @@ export async function convertFile(file, opts) {
   if (opts.onStage) opts.onStage('reading');
   const buf = await file.arrayBuffer();
   validateMagic(id, new Uint8Array(buf, 0, Math.min(buf.byteLength, 2048)));
+  return { id, buf };
+}
+
+/**
+ * Convert a File to Markdown entirely in the browser (the "hub" format every other output is built from).
+ * @param {File} file
+ * @param {{maxBytes:number,timeoutMs:number,onStage?:(s:'reading'|'converting'|'ocr')=>void,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocr?:boolean,ocrTimeoutMs?:number,pdfTables?:boolean}} opts
+ * @returns {Promise<{markdown:string,filename:string,format:string,warnings:string[],ms:number}>}
+ */
+export async function convertFile(file, opts) {
+  const t0 = performance.now();
+  const { id, buf } = await prepareFile(file, opts);
   if (opts.onStage) opts.onStage('converting');
   const deadline = new Deadline(opts.timeoutMs);
   // OCR (scanned PDFs) is slow, so it gets its own, longer budget; the normal timeout still covers everything that is not OCR.
   const ac = new AbortController();
   const ocrOn = opts.ocr !== false, ocrTimeoutMs = opts.ocrTimeoutMs || 15 * 60 * 1000;
-  const o = { deadline, onProgress: opts.onProgress, onStage: opts.onStage, onStatus: opts.onStatus, signal: ac.signal, ocr: ocrOn, ocrTimeoutMs };
+  const o = { tables: opts.pdfTables === true, deadline, onProgress: opts.onProgress, onStage: opts.onStage, onStatus: opts.onStatus, signal: ac.signal, ocr: ocrOn, ocrTimeoutMs };
   const run = async () => {
     switch (id) {
       case 'pdf': return convertPdf(buf, o);
@@ -83,7 +90,7 @@ export async function convertFile(file, opts) {
       case 'xlsx': return convertXlsx(buf, o);
       case 'csv': return convertCsv(decodeText(buf));
       case 'html': return convertHtml(buf);
-      case 'txt': return convertText(buf);
+      case 'txt': case 'md': return convertText(buf);
       case 'image': return convertImage(file);
       default: throw new ConversionError('UNSUPPORTED', 'ไม่รองรับไฟล์ประเภทนี้');
     }

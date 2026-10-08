@@ -24,6 +24,7 @@ export function normalizeThai(s) {
     .trim();
 }
 
+const BULLET = /^[•●▪◦‣∙·\uF0B7\uF0A7\uF0D8\uF076]\s*/;
 const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
 const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
 
@@ -86,7 +87,9 @@ const isNoise = (t) => !/[\p{L}\p{N}]/u.test(t);
 
 /**
  * @param {OcrWord[]} words
- * @param {{width?:number}} [opts] page width in pixels (used to recognise centred lines)
+ * @param {{width?:number,headings?:boolean,bullets?:boolean,cellGap?:number}} [opts] width = page width (recognises centred lines);
+ *   headings = rows set clearly larger than the body become # headings (PDF text only: sizes are exact); bullets = •/● lines become list items;
+ *   cellGap = column gap in text heights (default 1.6; 0.85 suits PDF text where cell padding is small)
  * @returns {{markdown:string, confidence:number, words:number}}
  */
 export function layoutToMarkdown(words, opts = {}) {
@@ -96,7 +99,7 @@ export function layoutToMarkdown(words, opts = {}) {
   const pageW = opts.width || Math.max(...clean.map((w) => w.bbox.x1));
   const confidence = Math.round(mean(clean.map((w) => w.confidence == null ? 100 : w.confidence)));
 
-  const rows = buildRows(clean, H).map((r) => ({ ...r, cells: splitCells(r, H, 1.6 * H) })).filter((r) => r.cells.length && !isNoise(r.cells.map((c) => c.text).join('')));
+  const rows = buildRows(clean, H).map((r) => ({ ...r, cells: splitCells(r, H, (opts.cellGap || 1.6) * H) })).filter((r) => r.cells.length && !isNoise(r.cells.map((c) => c.text).join('')));
   if (!rows.length) return { markdown: '', confidence, words: clean.length };
 
   // --- find tables: runs of rows that have ≥2 cells whose left edges line up
@@ -124,7 +127,9 @@ export function layoutToMarkdown(words, opts = {}) {
   const flush = () => { if (para.length) { out.push(para.join('\n')); para = []; } };
   for (const b of blocks) {
     if (b.type === 'table') { flush(); out.push(tableMd(b.rows, b.starts, tol)); prev = null; continue; }
-    const r = b.row; const text = r.cells.map((c) => c.text).join(' ');
+    const r = b.row; let text = r.cells.map((c) => c.text).join(' ');
+    if (opts.headings && r.h / H >= 1.3 && text.length <= 120) { flush(); out.push(`${r.h / H >= 1.8 ? '# ' : r.h / H >= 1.5 ? '## ' : '### '}${text}`); prev = null; continue; }
+    if (opts.bullets && BULLET.test(text)) { flush(); out.push(text.replace(BULLET, '* ')); prev = r; continue; }
     const newPara = !prev || (r.yc - prev.yc) > 1.55 * pitch || r.x0 > leftMargin + 1.6 * H || isCentred(r) || isCentred(prev);
     if (newPara) flush();
     para.push(text); prev = r;
