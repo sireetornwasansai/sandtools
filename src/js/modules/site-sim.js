@@ -1,6 +1,9 @@
 // หน้าแรก 3 มิติ: "ผังโครงการและเว็บไซต์" — หนึ่งสถานี = หนึ่งโครงการ/เว็บไซต์ที่ผู้ใช้ติดตามไว้ (isometric canvas, ไม่ใช้ไลบรารีเพิ่ม)
 // ข้อมูล: GAS action `projects` op `floor` (ครั้งเดียวต่อช่วงเวลา, cache ฝั่งเซิร์ฟเวอร์ 60 วินาที) · ถ้า Apps Script ยังเก่า ใช้ list + stats แทน · ยังไม่ล็อกอิน = ข้อมูลตัวอย่าง
 // คลิกสถานี → ซูมเข้า "ภายในระบบ": แต่ละหน้าของเว็บเป็นห้อง 3 มิติ เห็นคนเดินจากหน้าหนึ่งไปอีกหน้า (GAS op `projects/pages`)
+// ผัง = โรงพยาบาลสันทราย · กลุ่มงานพัฒนาคุณภาพและระบบบริการ (พื้นอาคาร ทางเดินกลาง ป้ายหน่วยงาน) · ประตู "เข้าสู่ระบบ" / "ออกสู่ระบบ" แทนทางเข้า–ออกเดิม
+// โหมดเล่นซ้ำ: วันทั่วไป (เฉลี่ย) · วันนี้ · วันที่คนใช้มากสุด (GAS op `projects/replay`) — วนเล่นซ้ำได้ · แยก "ผู้ใช้ใหม่ / ผู้ใช้เดิมที่กลับมา" ภายในวันเดียวกัน (รหัสผู้เข้าชมเปลี่ยนทุกวัน จึงไม่ตามรอยข้ามวัน)
+// ลำดับสถานีตามสถานะการใช้งานปัจจุบัน: มีคนออนไลน์ → ปกติ → เงียบ → ยังไม่มีข้อมูล → หยุดเก็บ
 // ใช้งาน: const stop = mountSiteFloor(hostElement, { onOpen: (key) => panel.open(key) });  → stop() ตอนออกจากหน้า
 import { h, svgIcon } from '../core/dom.js';
 import { ICONS } from '../core/icons.js';
@@ -13,20 +16,29 @@ import { backendConfigured } from '../core/api.js';
 import { sessionCall, cacheGet, cacheSet } from '../core/ops.js';
 import { deltaChip, ago } from '../core/charts.js';
 import { THEMES, themeOf, MAX_SITES, PALETTE, IDLE_COL, DEFAULTS, hhmm, fmt, hostOf, normalizeFloor, fromListStats, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample,
-  kindMeta, normalizePages, pagesFromStats, pageJourneys, nextPages, prevPages, pageInsights, pagesCsv, makeSamplePages, asJourneys } from './site-engine.js';
+  kindMeta, normalizePages, pagesFromStats, pageJourneys, nextPages, prevPages, pageInsights, pagesCsv, makeSamplePages, asJourneys,
+  MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY } from './site-engine.js';
 import { drawRoom, roomColor } from './site-rooms.js';
 
 const G = 12; const CORR = 6; const ENT = [0.6, CORR]; const EXIT = [11.4, CORR]; const CAP = 16;
 const RANGES = [[7, '7 วัน'], [30, '30 วัน'], [90, '90 วัน']]; const RANGE_KEY = 'sand:home3d:days';
 const STATE_TXT = { ok: 'ปกติ', paused: 'หยุดเก็บสถิติ', idle: 'ยังไม่มีข้อมูล', silent: 'เงียบผิดปกติ' };
+const stTxt = (s) => (usageRank(s) === 0 ? 'กำลังใช้งาน' : STATE_TXT[stateOf(s)]);   // priority = current usage status
+const stCls = (s) => (usageRank(s) === 0 ? 'live' : stateOf(s));
+const bkkDay = () => new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
 const STATE_COL = { ok: '#16a34a', paused: '#f59e0b', idle: '#94a3b8', silent: '#ef4444' };
 const SCREEN = { paused: '#475569', idle: '#334155', silent: '#7f1d1d' };
 const WALK = '#64748b';
+const MODE_KEY = 'sand:home3d:mode'; const LOOP_KEY = 'sand:home3d:loop';
+const BACK_COL = '#f59e0b';   // ring around people who came back the same day
+const GATE = { in: { col: '#14b8a6', label: 'เข้าสู่ระบบ', at: ENT }, out: { col: '#fb7185', label: 'ออกสู่ระบบ', at: EXIT } };
+const GATE_H = 1.3; const GATE_W = 0.56;
+const MODE_HINT = { typical: 'ภาพเฉลี่ยของ “วันทั่วไป” จากช่วงที่เลือก', today: 'ย้อนดูการเข้าใช้งานจริงของวันนี้ ตั้งแต่ต้นวันถึงขณะนี้', peak: 'ย้อนดูวันที่มีคนใช้มากที่สุดในรอบ 90 วัน' };
 const PAL = {
-  light: { floor: '#e9eef3', grid: '#d3dbe3', ink: '#1f2937', pill: 'rgba(255,255,255,.95)', pillLine: '#cfd8e1', desk: '#b08968', screen: '#334155' },
-  dark: { floor: '#1c2535', grid: '#2b374b', ink: '#e5e7eb', pill: 'rgba(17,24,39,.93)', pillLine: '#374357', desk: '#8a6a4f', screen: '#0f172a' },
+  light: { floor: '#e9eef3', grid: '#d3dbe3', ink: '#1f2937', pill: 'rgba(255,255,255,.95)', pillLine: '#cfd8e1', desk: '#b08968', screen: '#334155', frame: '#334155', corr: '#f6f9fb', slab: '#c3ccd6', brand: '#0f766e' },
+  dark: { floor: '#1c2535', grid: '#2b374b', ink: '#e5e7eb', pill: 'rgba(17,24,39,.93)', pillLine: '#374357', desk: '#8a6a4f', screen: '#0f172a', frame: '#94a3b8', corr: '#243149', slab: '#0f1623', brand: '#2dd4bf' },
 };
-const TITLE_FLOOR = 'โครงการและเว็บไซต์ที่ดูแล · ผัง 3 มิติ';
+const TITLE_FLOOR = 'โรงพยาบาลสันทราย · โครงการและเว็บไซต์ที่ดูแล';
 const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
 const shade = (c, f) => `rgb(${rgb(c).map((v) => Math.round(f <= 1 ? v * f : v + (255 - v) * (f - 1))).join(',')})`;
 const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -54,6 +66,8 @@ export function mountSiteFloor(host, opts = {}) {
   const cfg = { ...DEFAULTS };
   const S = { days: 30, all: [], extra: {}, source: 'sample', busy: false, err: null, at: 0, fromCache: false, legacy: false };
   const saved = Number(localStorage.getItem(RANGE_KEY)); if (RANGES.some(([n]) => n === saved)) S.days = saved;
+  const savedMode = localStorage.getItem(MODE_KEY); let mode = MODE_IDS.includes(savedMode) ? savedMode : 'today'; let loopOn = localStorage.getItem(LOOP_KEY) !== '0'; let endHold = 0;
+  const R = { rep: null, st: null, busy: false, at: 0, src: '' }; const RC = Object.create(null); let rseq = 0;   // R = the replayed real day · RC = 60 s memory per mode
   let sites = []; let themes = []; let more = 0; let LAY = []; let vis = []; let range = { from: cfg.open, to: cfg.close }; let pf = 1; let sm = summarize([]); let hits = [];
   let started = false; let t = 0; let playing = false; let speed = 20; let raf = 0; let last = 0; let lastMin = -1; let seq = 0; let dead = false; let onScreen = true; let hover = -1;
   let jr = []; let floorRange = range; let ins = null; let ILAY = []; let focus = -1; let entering = false; let iseq = 0; const cam = { z: 1, tx: 0, ty: 0, tz: 1, ttx: 0, tty: 0 };
@@ -63,30 +77,34 @@ export function mountSiteFloor(host, opts = {}) {
   const cv = h('canvas', { role: 'img', 'aria-label': 'ผัง 3 มิติของโครงการและเว็บไซต์ที่ติดตาม' });
   const clock = h('div', { class: 's3-clock' }); const sub = h('small'); const live = h('small', { class: 's3-live' }); const chip = h('div', { class: 's3-chip' }); const tip = h('div', { class: 's3-tip', role: 'status', hidden: true });
   const scroller = h('div', { class: 's3-scroll' }, cv);
-  const stage = h('div', { class: 's3-stage' }, h('div', { class: 's3-clockbox' }, clock, sub, live), chip, scroller, tip);
+  const brand = h('div', { class: 's3-brand', 'aria-hidden': 'true' }, h('i', null, '✚'), h('span', null, h('b', null, 'โรงพยาบาลสันทราย'), h('small', null, 'กลุ่มงานพัฒนาคุณภาพและระบบบริการ')));
+  const stage = h('div', { class: 's3-stage' }, h('div', { class: 's3-clockbox' }, clock, sub, live), chip, scroller, brand, tip);
   const prog = h('i'); const banner = h('div', { class: 's3-banner' }); const status = h('span', { class: 's3-status', role: 'status', 'aria-live': 'polite' });
   const rangeEl = h('div', { class: 'tabs s3-range', role: 'tablist', 'aria-label': 'ช่วงเวลา' });
   const refreshBtn = h('button', { class: 'btn btn-sm', type: 'button', onclick: () => load(true) }, svgIcon(ICONS.rotate, 16), 'รีเฟรช');
-  const csvBtn = h('button', { class: 'btn btn-sm', type: 'button', disabled: true, onclick: () => { downloadText(`\ufeff${ins ? pagesCsv(ins.units, S.days, ins.site.name) : sitesCsv(S.all, S.days)}`, `${ins ? `หน้าในระบบ_${ins.site.key}` : 'โครงการและเว็บไซต์'}_${S.days}วัน_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`, 'text/csv'); toast('ส่งออกรายงานแล้ว', 'success'); } }, svgIcon(ICONS.download, 16), 'ส่งออก CSV');
+  const csvBtn = h('button', { class: 'btn btn-sm', type: 'button', disabled: true, onclick: () => { downloadText(`\ufeff${ins ? pagesCsv(ins.units, S.days, ins.site.name) : dayOn() ? replayCsv(R.rep, sites) : sitesCsv(S.all, S.days)}`, `${ins ? `หน้าในระบบ_${ins.site.key}` : dayOn() ? `โครงการและเว็บไซต์_${R.rep.day}` : 'โครงการและเว็บไซต์'}_${dayOn() && !ins ? 'รายวัน' : `${S.days}วัน`}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`, 'text/csv'); toast('ส่งออกรายงานแล้ว', 'success'); } }, svgIcon(ICONS.download, 16), 'ส่งออก CSV');
   const playBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => (playing ? pause() : play()) });
+  const loopBtn = h('button', { class: 'btn s3-loop', type: 'button', 'aria-pressed': String(loopOn), title: 'เมื่อเล่นถึงสิ้นวัน ให้เริ่มใหม่ต่อเนื่อง', onclick: () => setLoop(!loopOn) }, svgIcon(ICONS.rotate, 16), 'วนเล่นซ้ำ');
+  const modeEl = h('div', { class: 'tabs s3-mode', role: 'tablist', 'aria-label': 'โหมดการเล่นซ้ำ' }); const modeHint = h('small', { class: 's3-modehint', role: 'status', 'aria-live': 'polite' });
   const spd = h('select', { 'aria-label': 'ความเร็วการเล่น', onchange: () => { speed = Number(spd.value); } }, [[10, 'ช้า'], [20, 'ปกติ'], [40, 'เร็ว'], [80, 'เร็วมาก']].map(([v, l]) => h('option', { value: v, selected: v === 20 }, `${l} (${v} นาที/วินาที)`)));
   const legend = h('div', { class: 's3-legend', 'aria-label': 'โครงการที่แสดงในผัง' });
   const kpis = h('div', { class: 's3-kpis' }); const hoursEl = h('div', { class: 's3-hours', role: 'group', 'aria-label': 'จำนวนการเปิดหน้ารายชั่วโมง กดเพื่อข้ามไปช่วงเวลานั้น' });
   const titleEl = h('h2', { id: 's3-title' }, TITLE_FLOOR); const tblTitle = h('h3', { id: 's3-h-tbl' }, 'ทุกโครงการ'); const roomCard = h('section', { class: 'card s3-room', hidden: true, 'aria-live': 'polite' });
   const backBtn = h('button', { class: 'btn btn-sm s3-back', type: 'button', hidden: true, onclick: () => leave() }, '← กลับผังรวม');
   const openBtn = h('button', { class: 'btn btn-sm', type: 'button', hidden: true, onclick: () => { if (ins && opts.onOpen) opts.onOpen(ins.site.key); } }, 'เปิดรายละเอียดโครงการ');
+  const hoursTitle = h('h3', { id: 's3-h-hours' }, 'ช่วงเวลาที่คนเข้าเว็บ (เฉลี่ยต่อวัน)');
   const insightBox = h('div', { class: 's3-insights' }); const tableBox = h('div', { class: 's3-table-wrap' }); const note = h('p', { class: 's3-note' });
   host.append(h('section', { class: 's3', 'aria-labelledby': 's3-title' },
     h('div', { class: 's3-head' }, h('div', null, backBtn, titleEl, status), h('div', { class: 's3-tools' }, rangeEl, openBtn, refreshBtn, csvBtn)),
-    banner, stage, h('div', { class: 's3-progress', 'aria-hidden': 'true' }, prog),
-    h('div', { class: 's3-controls' }, playBtn,
+    banner, h('div', { class: 's3-modebar' }, modeEl, modeHint), stage, h('div', { class: 's3-progress', 'aria-hidden': 'true' }, prog),
+    h('div', { class: 's3-controls' }, playBtn, loopBtn,
       h('button', { class: 'btn', type: 'button', onclick: () => { t = range.from; lastMin = -1; playing = true; sync(); } }, svgIcon(ICONS.rotate, 16), 'เล่นใหม่ตั้งแต่เช้า'),
       h('button', { class: 'btn', type: 'button', onclick: () => { t = Math.min(range.to, Math.max(range.from, bkkMinutes())); lastMin = -1; pause(); } }, svgIcon(ICONS.eye, 16), 'ไปที่เวลาปัจจุบัน'),
       h('button', { class: 'btn', type: 'button', onclick: () => { t = crowdPeak(crowd(), range); lastMin = -1; pause(); } }, svgIcon(ICONS.focus, 16), 'ไปที่ช่วงคนแน่นสุด'),
       h('label', { class: 's3-field' }, h('span', null, 'ความเร็ว'), spd)),
     legend, kpis, roomCard,
     h('div', { class: 's3-grid' },
-      h('section', { class: 'card', 'aria-labelledby': 's3-h-hours' }, h('h3', { id: 's3-h-hours' }, 'ช่วงเวลาที่คนเข้าเว็บ (เฉลี่ยต่อวัน)'), hoursEl),
+      h('section', { class: 'card', 'aria-labelledby': 's3-h-hours' }, hoursTitle, hoursEl),
       h('section', { class: 'card', 'aria-labelledby': 's3-h-ai' }, h('h3', { id: 's3-h-ai' }, 'ตัวช่วยวิเคราะห์'), insightBox)),
     h('section', { class: 'card s3-tablecard', 'aria-labelledby': 's3-h-tbl' }, tblTitle, tableBox), note));
 
@@ -131,12 +149,58 @@ export function mountSiteFloor(host, opts = {}) {
     S.source = source; S.at = at; S.fromCache = fromCache; S.extra = extra || {}; S.all = floor.sites; S.days = floor.days || S.days;
     const pick = pickSites(S.all); sites = pick.sites; themes = sites.map(themeOf); more = pick.more; LAY = layout(sites.length); sm = summarize(S.all); pf = perFigure(sites, S.days);
     if (ins && ins.source !== source) leave();
-    vis = visitors(sites, S.days, pf, cfg); jr = asJourneys(vis); floorRange = timeRange(jr, cfg);
-    if (!ins) { range = floorRange; if (!started || t < range.from || t > range.to) t = Math.min(range.to, Math.max(range.from, bkkMinutes())); } started = true;
-    lastMin = -1; hover = -1; tip.hidden = true;
+    if (R.src !== source) { R.rep = null; R.st = null; R.src = source; }
+    rebuild(started ? 'keep' : 'start'); started = true; tip.hidden = true;
     chip.textContent = source === 'sample' ? 'ข้อมูลตัวอย่าง' : 'ข้อมูลจริง'; chip.dataset.kind = source;
     if (!ins) cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`);
     csvBtn.disabled = false; drawAll();
+    if (mode !== 'typical') loadReplay(mode, !!R.rep);
+  }
+
+  // ---------- replay of a real day (today / the busiest day) ----------
+  const dayOn = () => !ins && mode !== 'typical' && !!R.rep;
+  const pfNow = () => (ins ? ins.pf : dayOn() ? 1 : pf);
+  let rnote = null;
+  /** The people, the replay window and the playhead. how: 'start' first draw · 'keep' data refreshed · 'reset' new mode/day → play it from its first hour. */
+  function rebuild(how = 'keep') {
+    const day = mode !== 'typical' && !!R.rep;
+    vis = day ? replayVisitors(R.rep, sites, cfg) : visitors(sites, S.days, pf, cfg); jr = asJourneys(vis); floorRange = day ? replayRange(jr, R.rep, bkkMinutes(), cfg) : timeRange(jr, cfg);
+    if (!ins) {
+      range = floorRange; const home = () => (day ? range.from : Math.min(range.to, Math.max(range.from, bkkMinutes())));
+      if (how === 'reset') { t = home(); playing = !reduced; endHold = 0; } else if (how === 'start' || t < range.from || t > range.to) t = home();
+      cv.setAttribute('aria-label', day ? `ผัง 3 มิติ ${sites.length} โครงการ · ${R.rep.day === R.rep.today ? 'วันนี้' : dayLabel(R.rep.day)} เปิดหน้า ${fmt(R.st.views)} ครั้ง` : `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`);
+    }
+    lastMin = -1; hover = -1;
+  }
+  function setReplay(rep, quiet) { R.rep = rep; R.st = dayStats(rep); R.at = Date.now(); R.busy = false; if (rnote) { rnote.remove(); rnote = null; } rebuild(quiet ? 'keep' : 'reset'); drawAll(); }
+  async function loadReplay(m, quiet = false) {
+    if (dead || !sites.length) return; const my = ++rseq; const ck = m + S.source; const hit = RC[ck];
+    if (hit && Date.now() - hit.t < 60000) { setReplay(hit.rep, quiet); return; }
+    if (!quiet) { R.busy = true; drawStatus(); drawModes(); }
+    try {
+      let rep;
+      if (S.source === 'sample') rep = normalizeReplay(makeSampleReplay(S.all, m, bkkDay(), bkkMinutes()));
+      else { rep = normalizeReplay(await sessionCall('projects', 'replay', { mode: m })); if (!rep) { const bad = new Error('รูปแบบข้อมูลไม่ตรงกับเวอร์ชันล่าสุด'); /** @type {any} */ (bad).code = 'UNKNOWN_ACTION'; throw bad; } }
+      if (my !== rseq || dead || mode !== m) return; RC[ck] = { t: Date.now(), rep }; setReplay(rep, quiet);
+    } catch (e) {
+      if (my !== rseq || dead || mode !== m) return; R.busy = false;
+      if (quiet && R.rep) { drawStatus(); return; }
+      R.rep = null; R.st = null; mode = 'typical'; if (rnote) rnote.remove();
+      rnote = e && e.code === 'UNKNOWN_ACTION' ? notice('warn', 'ยังไม่มีโหมดเล่นซ้ำวันจริง', 'Apps Script ยังเป็น Analytics.gs เวอร์ชันเก่า (ไม่มี op replay) — วางไฟล์ใหม่แล้ว Deploy เวอร์ชันใหม่ ระหว่างนี้ผังแสดง “วันทั่วไป (เฉลี่ย)”') : notice('error', 'โหลดข้อมูลรายวันไม่ได้', (e && e.message) || 'เกิดข้อผิดพลาด');
+      banner.append(rnote); rebuild('start'); drawAll();
+    }
+  }
+  function setMode(m) {
+    if (m === mode || !MODE_IDS.includes(m)) return; if (ins) leave(); mode = m; try { localStorage.setItem(MODE_KEY, m); } catch { /* ignore */ }
+    if (rnote) { rnote.remove(); rnote = null; } rseq += 1; R.busy = false;
+    if (m === 'typical') { rebuild('reset'); drawAll(); return; }
+    R.rep = null; R.st = null; rebuild('keep'); drawAll(); loadReplay(m, false);
+  }
+  function setLoop(v) { loopOn = v; endHold = 0; try { localStorage.setItem(LOOP_KEY, v ? '1' : '0'); } catch { /* ignore */ } loopBtn.setAttribute('aria-pressed', String(v)); toast(v ? 'เปิดวนเล่นซ้ำ — เล่นถึงสิ้นวันแล้วเริ่มใหม่' : 'ปิดวนเล่นซ้ำ — เล่นจบแล้วหยุด', 'success', 2200); }
+  function drawModes() {
+    modeEl.replaceChildren(...MODES.map(([id, l]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(mode === id), onclick: () => setMode(id) }, l)));
+    modeEl.parentElement.hidden = !!ins; rangeEl.hidden = !(mode === 'typical' || ins); loopBtn.setAttribute('aria-pressed', String(loopOn));
+    modeHint.textContent = mode === 'typical' ? MODE_HINT.typical : R.busy ? 'กำลังโหลดข้อมูลรายวัน…' : R.rep ? `${R.rep.day === R.rep.today ? 'วันนี้' : dayLabel(R.rep.day)}${R.rep.day === R.rep.today ? ` · ถึงเวลา ${hhmm(bkkMinutes())} น.` : ` · ${fmt(R.st.views)} ครั้ง`}${R.rep.scale > 1 ? ` · สุ่มแสดง 1 ใน ${R.rep.scale} คน` : ''}` : MODE_HINT[mode];
   }
 
   // ---------- panels ----------
@@ -146,14 +210,24 @@ export function mountSiteFloor(host, opts = {}) {
   function drawStatus() {
     refreshBtn.disabled = S.busy; refreshBtn.classList.toggle('is-loading', S.busy);
     if (S.busy) { status.className = 's3-status is-busy'; status.replaceChildren(S.all.length ? 'กำลังอัปเดตข้อมูล…' : 'กำลังโหลดข้อมูล…'); return; }
+    if (R.busy) { status.className = 's3-status is-busy'; status.replaceChildren('กำลังโหลดข้อมูลรายวัน…'); return; }
     if (S.source === 'sample') { status.className = 's3-status'; status.replaceChildren('ตัวอย่างการทำงานของผัง'); return; }
     if (S.err) { status.className = 's3-status is-err'; status.replaceChildren(dot('#ef4444'), 'อัปเดตล่าสุดไม่สำเร็จ · แสดงข้อมูลเดิม'); return; }
-    status.className = 's3-status is-ok'; status.replaceChildren(dot('#16a34a'), `อัปเดต ${ago(S.at)}${S.fromCache ? ' · จากข้อมูลที่จำไว้' : ''} · ย้อนหลัง ${S.days} วัน`);
+    status.className = 's3-status is-ok'; status.replaceChildren(dot('#16a34a'), `อัปเดต ${ago(S.at)}${S.fromCache ? ' · จากข้อมูลที่จำไว้' : ''} · ${dayOn() ? (R.rep.day === R.rep.today ? 'วันนี้' : dayLabel(R.rep.day)) : `ย้อนหลัง ${S.days} วัน`}`);
   }
   function drawRange() { rangeEl.replaceChildren(...RANGES.map(([n, l]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(S.days === n), onclick: () => setDays(n) }, l))); }
   function setDays(n) { if (n === S.days) return; if (ins) leave(); S.days = n; try { localStorage.setItem(RANGE_KEY, String(n)); } catch { /* ignore */ } drawRange(); if (S.source === 'sample') { useSample(null); return; } load(); }
   function kpi(label, value, hint, extra) { return h('div', { class: 's3-kpi' }, h('span', null, label, extra || null), h('b', null, value), hint ? h('small', null, hint) : null); }
-  function drawKpis() { if (ins) kpisIn(); else kpisFloor(); }
+  function drawKpis() { if (ins) kpisIn(); else if (dayOn()) kpisDay(); else kpisFloor(); }
+  function kpisDay() {
+    const st = R.st; const isToday = R.rep.day === R.rep.today; const cmp = compareToPeak(R.rep.byDay, R.rep.today); const when = isToday ? 'วันนี้ถึงขณะนี้' : dayLabel(R.rep.day);
+    kpis.replaceChildren(
+      kpi('การเปิดหน้า', fmt(st.views), isToday && cmp && !cmp.isPeak ? `≈${cmp.pct}% ของวันที่คนใช้มากสุด` : isToday ? 'วันนี้คนใช้มากสุดแล้ว' : `ผู้เข้าชม ${fmt(st.uv)} คน`),
+      kpi('ผู้ใช้ใหม่', fmt(st.fresh), 'เข้ามาครั้งแรกของวัน'),
+      kpi('ผู้ใช้เดิมกลับมา', fmt(st.back), st.visits ? `${st.backPct}% ของการเข้าใช้ · ในวันเดียวกัน` : when),
+      kpi('ออนไลน์ตอนนี้', sm.realtime === null ? '–' : fmt(sm.realtime), 'ภายใน 5 นาทีล่าสุด'),
+      kpi('ช่วงคนเข้ามากสุด', st.peakHour >= 0 ? `${String(st.peakHour).padStart(2, '0')}:00–${String((st.peakHour + 1) % 24).padStart(2, '0')}:00` : '–', st.top ? `เด่นสุด: ${(S.all.find((x) => x.key === st.top.key) || { name: st.top.key }).name}` : when));
+  }
   function kpisFloor() {
     kpis.replaceChildren(
       kpi('การเปิดหน้า', fmt(sm.pv), `ใน ${S.days} วัน · ไม่นับบอท`, sm.prev !== null ? deltaChip(sm.pv, sm.prev) : null),
@@ -163,40 +237,46 @@ export function mountSiteFloor(host, opts = {}) {
       kpi('ช่วงคนเข้ามากสุด', sm.peakHour >= 0 ? `${String(sm.peakHour).padStart(2, '0')}:00–${String((sm.peakHour + 1) % 24).padStart(2, '0')}:00` : '–', sm.top && sm.top.pv ? `เด่นสุด: ${sm.top.name}` : null));
   }
   function drawHours() {
-    const a = Math.floor(range.from / 60); const b = Math.ceil(range.to / 60); const hourly = ins ? ins.hourly : sm.hourly; const peak = ins ? ins.peak : sm.peakHour; const mx = Math.max(1, ...hourly.slice(a, b)); const per = Math.max(1, S.days);
+    const a = Math.floor(range.from / 60); const b = Math.ceil(range.to / 60); const dd = dayOn(); const hourly = ins ? ins.hourly : dd ? R.st.hourly : sm.hourly; const peak = ins ? ins.peak : dd ? R.st.peakHour : sm.peakHour; const mx = Math.max(1, ...hourly.slice(a, b)); const per = dd ? 1 : Math.max(1, S.days);
+    hoursTitle.textContent = dd ? `ช่วงเวลาที่คนเข้าเว็บ (${R.rep.day === R.rep.today ? 'วันนี้' : dayLabel(R.rep.day)})` : 'ช่วงเวลาที่คนเข้าเว็บ (เฉลี่ยต่อวัน)';
     hoursEl.replaceChildren(...Array.from({ length: Math.max(0, b - a) }, (_, i) => { const hr = a + i; const n = hourly[hr] || 0;
-      return h('button', { type: 'button', class: `s3-hbar${hr === peak ? ' peak' : ''}`, 'data-h': hr, 'aria-label': `${String(hr).padStart(2, '0')}:00 เฉลี่ย ${fmt(Math.round(n / per))} ครั้งต่อวัน`, onclick: () => { t = hr * 60 + 30; lastMin = -1; pause(); } },
+      return h('button', { type: 'button', class: `s3-hbar${hr === peak ? ' peak' : ''}`, 'data-h': hr, 'aria-label': `${String(hr).padStart(2, '0')}:00 ${dd ? '' : 'เฉลี่ย '}${fmt(Math.round(n / per))} ครั้ง${dd ? '' : 'ต่อวัน'}`, onclick: () => { t = hr * 60 + 30; lastMin = -1; pause(); } },
         h('i', { style: `height:${Math.max(n ? 4 : 1, (n / mx) * 100)}%` }), h('small', null, String(hr).padStart(2, '0')), h('em', null, n ? fmt(Math.round(n / per)) : '')); }));
   }
   function drawInsights() {
-    const list = ins ? pageInsights(ins.units, ins.flows, S.days) : insights(S.all, S.days, S.extra);
+    let list;
+    if (ins) list = pageInsights(ins.units, ins.flows, S.days);
+    else if (dayOn()) { const base = replayInsights(R.rep, R.st, Object.fromEntries(S.all.map((x) => [x.key, x.name]))); const priv = base.pop(); list = [...base, ...insights(S.all, S.days, S.extra).filter((x) => x.tone === 'warn'), priv]; } else list = insights(S.all, S.days, S.extra);
     insightBox.replaceChildren(h('ul', { class: 's3-ilist' }, list.map((x) => h('li', { class: `tone-${x.tone}` }, svgIcon(x.tone === 'warn' ? ICONS.alert : x.tone === 'ok' ? ICONS.check : ICONS.eye, 18), h('span', null, x.text)))));
   }
   function drawLegend() { if (ins) legendIn(); else legendFloor(); }
   function legendFloor() {
-    legend.replaceChildren(...sites.map((s, i) => h('button', { type: 'button', class: 's3-lg', title: `${STATE_TXT[stateOf(s)]} · เปิดรายละเอียด`, onclick: () => open(s.key) }, h('i', { style: `background:${colOf(i)}` }), `${THEMES[themes[i]].icon} ${s.name}`)),
-      ...(more ? [h('span', { class: 's3-lg more' }, `+${more} โครงการในตารางด้านล่าง`)] : []), h('span', { class: 's3-lg' }, h('i', { style: `background:${WALK}` }), 'กำลังเดินเข้า/ออก'), h('span', { class: 's3-lg' }, h('i', { style: `background:${STATE_COL.silent}` }), 'เงียบผิดปกติ'));
+    legend.replaceChildren(...sites.map((s, i) => h('button', { type: 'button', class: `s3-lg${usageRank(s) === 0 ? ' is-live' : ''}`, title: `${stTxt(s)} · เปิดรายละเอียด`, onclick: () => open(s.key) }, h('i', { style: `background:${colOf(i)}` }), `${THEMES[themes[i]].icon} ${s.name}`, usageRank(s) === 0 ? h('em', { class: 's3-livetag' }, `● ${fmt(s.realtime)}`) : null)),
+      ...(more ? [h('span', { class: 's3-lg more' }, `+${more} โครงการในตารางด้านล่าง`)] : []),
+      ...(dayOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-new' }), 'ผู้ใช้ใหม่ (ครั้งแรกของวัน)'), h('span', { class: 's3-lg' }, h('i', { class: 's3-ring' }), 'ผู้ใช้เดิมที่กลับมาในวันเดียวกัน')] : []),
+      h('span', { class: 's3-lg' }, h('i', { style: `background:${WALK}` }), 'กำลังเดินเข้า/ออก'), h('span', { class: 's3-lg' }, h('i', { style: `background:${STATE_COL.silent}` }), 'เงียบผิดปกติ'));
   }
   function drawTable() { if (ins) tableIn(); else tableFloor(); }
   function tableFloor() {
-    const rows = S.all.filter((x) => x.status !== 'deleted');
-    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, ['โครงการ', 'เว็บไซต์', 'เปิดหน้า', 'เทียบก่อนหน้า', 'ผู้เข้าชม', 'ออนไลน์', 'สถานะ'].map((x) => h('th', null, x)))),
-      h('tbody', null, rows.map((s) => { const st = stateOf(s); const tr = trendOf(s);
-        return h('tr', null, h('td', null, h('button', { type: 'button', class: 'rowbtn', onclick: () => open(s.key), title: 'เปิดรายละเอียด' }, `${THEMES[themeOf(s)].icon} ${s.name}`), sites.some((x) => x.key === s.key) ? h('button', { type: 'button', class: 'rowbtn s3-enter', onclick: () => enterSite(sites.findIndex((x) => x.key === s.key)), title: 'ซูมเข้าไปดูหน้าต่างๆ ภายในระบบ' }, 'เข้าไปดูภายใน ›') : null), h('td', { class: 's3-cut', title: s.url }, hostOf(s.url) || '–'), h('td', null, fmt(s.pv)),
-          h('td', null, s.prev === null ? '–' : tr === null ? '0%' : deltaChip(s.pv, s.prev)), h('td', null, fmt(s.uv)), h('td', null, s.realtime === null ? '–' : fmt(s.realtime)),
-          h('td', null, h('span', { class: `s3-pill st-${st}` }, STATE_TXT[st]))); }))));
+    const dd = dayOn(); const rows = S.all.filter((x) => x.status !== 'deleted').slice().sort((x, y) => usageRank(x) - usageRank(y) || y.pv - x.pv);
+    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, (dd ? ['โครงการ', 'เว็บไซต์', 'เปิดหน้า (วันนั้น)', 'ผู้ใช้ใหม่', 'ผู้ใช้เดิมกลับมา', 'ออนไลน์', 'สถานะ'] : ['โครงการ', 'เว็บไซต์', 'เปิดหน้า', 'เทียบก่อนหน้า', 'ผู้เข้าชม', 'ออนไลน์', 'สถานะ']).map((x) => h('th', null, x)))),
+      h('tbody', null, rows.map((s2) => { const tr = trendOf(s2); const dr = dd ? R.rep.sites[s2.key] : null;
+        return h('tr', null, h('td', null, h('button', { type: 'button', class: 'rowbtn', onclick: () => open(s2.key), title: 'เปิดรายละเอียด' }, `${THEMES[themeOf(s2)].icon} ${s2.name}`), sites.some((x) => x.key === s2.key) ? h('button', { type: 'button', class: 'rowbtn s3-enter', onclick: () => enterSite(sites.findIndex((x) => x.key === s2.key)), title: 'ซูมเข้าไปดูหน้าต่างๆ ภายในระบบ' }, 'เข้าไปดูภายใน ›') : null), h('td', { class: 's3-cut', title: s2.url }, hostOf(s2.url) || '–'),
+          dd ? [h('td', null, fmt(dr ? dr.n : 0)), h('td', null, fmt(dr ? dr.fresh : 0)), h('td', null, fmt(dr ? dr.back : 0))] : [h('td', null, fmt(s2.pv)), h('td', null, s2.prev === null ? '–' : tr === null ? '0%' : deltaChip(s2.pv, s2.prev)), h('td', null, fmt(s2.uv))],
+          h('td', null, s2.realtime === null ? '–' : fmt(s2.realtime)), h('td', null, h('span', { class: `s3-pill st-${stCls(s2)}` }, stTxt(s2)))); }))));
   }
   function drawNote() {
     if (ins) { note.textContent = `ห้องหนึ่ง = หนึ่งหน้าของระบบ · คน 1 คนในภาพ ≈ ${fmt(ins.pf)} การเปิดหน้า · เส้นทางเดินระหว่างห้องนับจากผู้เข้าชมคนเดียวกันในวันเดียวกัน (ไม่ระบุตัวตน) · ภาพเป็น "วันทั่วไป" ที่เฉลี่ยจากช่วง ${S.days} วัน (เวลาไทย) · เวลาเดินและเวลาอยู่ในห้องเป็นเวลาสมมติเพื่อให้มองเห็นได้`; return; }
+    if (dayOn()) { note.textContent = `${S.source === 'sample' ? 'ข้อมูลตัวอย่างเพื่อแสดงการทำงานของผัง · ' : ''}คน 1 คนในภาพ = การเข้าใช้จริง 1 ครั้ง${R.rep.scale > 1 ? ` (สุ่มแสดง 1 ใน ${R.rep.scale} คน ตัวเลขด้านบนเป็นค่าจริงทั้งหมด)` : ''} · คนที่มีวงแหวนสีทองคือผู้ใช้เดิมที่กลับมาใหม่ภายในวันเดียวกัน (ห่างจากการเปิดครั้งก่อนเกิน 30 นาที) · ${REPLAY_PRIVACY} · เวลาเดินเข้า–ออกและเวลาอยู่ที่สถานีเป็นเวลาสมมติเพื่อให้มองเห็นได้ · ไม่นับบอท`; return; }
     note.textContent = `${S.source === 'sample' ? 'ข้อมูลตัวอย่างเพื่อแสดงการทำงานของผัง · ' : ''}คน 1 คนในภาพ ≈ ${fmt(pf)} การเปิดหน้า · ภาพเป็น "วันทั่วไป" ที่เฉลี่ยจากช่วง ${S.days} วัน (เวลาไทย) ไม่ใช่ตัวเลขของวันใดวันหนึ่ง · เวลาเดินเข้า–ออกและเวลาอยู่ที่สถานีเป็นเวลาสมมติเพื่อให้มองเห็นได้ · สถิติไม่ใช้คุกกี้ ไม่เก็บ IP และไม่นับบอท`;
   }
   function drawTitle() { titleEl.textContent = ins ? `${ins.site.name} · ภายในระบบ` : TITLE_FLOOR; tblTitle.textContent = ins ? 'ทุกหน้าในระบบนี้' : 'ทุกโครงการ'; backBtn.hidden = !ins; openBtn.hidden = !(ins && S.source === 'real' && opts.onOpen); }
-  function drawAll() { drawTitle(); drawRange(); drawStatus(); drawKpis(); drawHours(); drawInsights(); drawLegend(); drawTable(); drawRoomCard(); drawNote(); sync(); }
+  function drawAll() { drawTitle(); drawRange(); drawModes(); drawStatus(); drawKpis(); drawHours(); drawInsights(); drawLegend(); drawTable(); drawRoomCard(); drawNote(); sync(); }
 
   // ---------- control ----------
   function play() { if (t >= range.to - 1) t = range.from; playing = true; sync(); }
   function pause() { playing = false; sync(); }
-  function sync() { playBtn.replaceChildren(svgIcon(playing ? '<path d="M8 5v14M16 5v14"/>' : '<path d="M7 4l13 8-13 8z"/>', 16), playing ? 'หยุด' : 'เล่นย้อนดูทั้งวัน'); }
+  function sync() { playBtn.replaceChildren(svgIcon(playing ? '<path d="M8 5v14M16 5v14"/>' : '<path d="M7 4l13 8-13 8z"/>', 16), playing ? 'หยุด' : mode === 'today' && !ins ? 'เล่นย้อนดูวันนี้' : mode === 'peak' && !ins ? 'เล่นย้อนดูวันที่คนใช้มากสุด' : 'เล่นย้อนดูทั้งวัน'); }
 
   // ---------- geometry ----------
   const P = (x, y, z = 0) => [ox + ((x - y) * tw) / 2, oy + ((x + y) * tw) / 4 - z];
@@ -215,11 +295,17 @@ export function mountSiteFloor(host, opts = {}) {
     poly([P(x0, y1, a), P(x1, y1, a), P(x1, y1, b), P(x0, y1, b)], shade(col, 0.82)); poly([P(x1, y0, a), P(x1, y1, a), P(x1, y1, b), P(x1, y0, b)], shade(col, 0.66));
     poly([P(x0, y0, b), P(x1, y0, b), P(x1, y1, b), P(x0, y1, b)], shade(col, 1.08));
   }
-  function person(x, y, col) {
+  function person(x, y, col, back = false, now = 0) {
     const [sx, sy] = P(x, y); const s = tw * 0.075;
-    ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.2, s * 0.55, 0, 0, 7); ctx.fill();
+    if (back) {   // came back the same day: gold halo on the floor, dark outline on the body, gold ring round the head
+      const k = reduced ? 1 : 0.9 + 0.1 * Math.sin(now / 280 + x * 3);
+      ctx.fillStyle = 'rgba(245,158,11,.30)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 2.1 * k, s * 0.98 * k, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.4, s * 0.32); ctx.beginPath(); ctx.ellipse(sx, sy, s * 2.1 * k, s * 0.98 * k, 0, 0, 7); ctx.stroke();
+    } else { ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.2, s * 0.55, 0, 0, 7); ctx.fill(); }
     ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, sy - s * 3.3, s * 1.7, s * 3.3, s * 0.7); ctx.fill();
+    if (back) { ctx.strokeStyle = pal.ink; ctx.lineWidth = Math.max(1.5, s * 0.4); ctx.stroke(); }
     ctx.fillStyle = '#f1c9a5'; ctx.beginPath(); ctx.arc(sx, sy - s * 4, s * 0.85, 0, 7); ctx.fill();
+    if (back) { ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.5, s * 0.42); ctx.stroke(); }
   }
   function pill(text, x, y, color, sc = 1) {
     const kz = Math.pow(cam.z, -0.6) * sc;   // labels grow only a little when the camera zooms in
@@ -227,6 +313,50 @@ export function mountSiteFloor(host, opts = {}) {
     ctx.fillStyle = pal.pill; ctx.strokeStyle = color || pal.pillLine; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x - w / 2, y - hh / 2, w, hh, hh / 2); ctx.fill(); ctx.stroke();
     ctx.fillStyle = color || pal.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, x, y + 0.5);
   }
+  // ---------- hospital building: floor slab, service corridor, emblem ----------
+  function hospitalBase(now) {
+    const th = Z(0.32); const A = P(0, G); const B = P(G, G); const C = P(G, 0);
+    poly([A, B, [B[0], B[1] + th], [A[0], A[1] + th]], shade(pal.slab, 0.9)); poly([B, C, [C[0], C[1] + th], [B[0], B[1] + th]], shade(pal.slab, 0.72));   // building slab (visible sides)
+    poly([P(0, 0), P(G, 0), P(G, G), P(0, G)], pal.floor);
+    ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.beginPath(); for (let i = 0; i <= G; i++) { const a = P(i, 0); const b = P(i, G); const c = P(0, i); const d = P(G, i); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.moveTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); } ctx.stroke();
+    ctx.globalAlpha = 0.9; poly([P(0.2, CORR - 0.5), P(G - 0.2, CORR - 0.5), P(G - 0.2, CORR + 0.5), P(0.2, CORR + 0.5)], pal.corr); ctx.globalAlpha = 1;
+    poly([P(0.2, CORR - 0.5), P(G - 0.2, CORR - 0.5), P(G - 0.2, CORR + 0.5), P(0.2, CORR + 0.5)], null, pal.grid, 1.5);
+    ctx.save(); ctx.strokeStyle = pal.brand; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1.5, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); ctx.beginPath(); const l0 = P(1.7, CORR); const l1 = P(G - 1.7, CORR); ctx.moveTo(l0[0], l0[1]); ctx.lineTo(l1[0], l1[1]); ctx.stroke(); ctx.restore();
+    const pulse = reduced ? 0.85 : 0.75 + 0.15 * Math.sin(now / 600); ctx.globalAlpha = pulse;   // medical cross emblem painted on the corridor
+    poly([P(G / 2 - 0.55, CORR - 0.15), P(G / 2 + 0.55, CORR - 0.15), P(G / 2 + 0.55, CORR + 0.15), P(G / 2 - 0.55, CORR + 0.15)], pal.brand); poly([P(G / 2 - 0.15, CORR - 0.55), P(G / 2 + 0.15, CORR - 0.55), P(G / 2 + 0.15, CORR + 0.55), P(G / 2 - 0.15, CORR + 0.55)], pal.brand); ctx.globalAlpha = 1;
+    poly([P(0, 0), P(G, 0), P(G, G), P(0, G)], null, pal.brand, 2);   // building outline
+  }
+
+  // ---------- gates: เข้าสู่ระบบ (teal) / ออกสู่ระบบ (rose) — a glass portal with a neon frame, a scan band and chevrons that flow the way people walk ----------
+  function gatePad(kind, now) {
+    const g = GATE[kind]; const [gx, gy] = g.at; const y0 = gy - GATE_W - 0.08; const y1 = gy + GATE_W + 0.08; const pad = [P(gx - 0.62, y0), P(gx + 0.62, y0), P(gx + 0.62, y1), P(gx - 0.62, y1)];
+    ctx.globalAlpha = reduced ? 0.26 : 0.2 + 0.08 * Math.sin(now / 420 + (kind === 'in' ? 0 : 2)); poly(pad, g.col); ctx.globalAlpha = 1; poly(pad, null, g.col, 1.5);
+    ctx.strokeStyle = g.col; ctx.lineWidth = Math.max(2, tw * 0.035); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (let k = 0; k < 3; k++) {
+      const fr = reduced ? (k + 0.5) / 3 : (now / 1100 + k / 3) % 1; const x = gx - 0.5 + fr; ctx.globalAlpha = Math.sin(Math.PI * fr) * 0.95;
+      ctx.beginPath(); [P(x - 0.1, gy - 0.17), P(x + 0.07, gy), P(x - 0.1, gy + 0.17)].forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py))); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  function gateItems(kind, now) {
+    const g = GATE[kind]; const [gx, gy] = g.at; const y0 = gy - GATE_W - 0.08; const y1 = gy + GATE_W + 0.08; const fr = pal.frame;
+    const pillar = (y) => () => { box(gx, y, 0.17, 0.17, GATE_H, fr); faceX(gx + 0.087, y - 0.04, y + 0.04, 0.06, GATE_H - 0.03, g.col); box(gx, y, 0.1, 0.1, 0.05, g.col, GATE_H); };
+    return [{ d: gx + y0, f: pillar(y0) }, { d: gx + gy + 0.001, f: () => {
+      ctx.globalAlpha = 0.16 + (reduced ? 0.04 : 0.04 * Math.sin(now / 500)); faceX(gx, y0 + 0.09, y1 - 0.09, 0.05, GATE_H - 0.02, g.col);
+      const f = reduced ? 0.5 : (now / 1700 + (kind === 'in' ? 0 : 0.5)) % 1; const zb = 0.08 + f * (GATE_H - 0.3); ctx.globalAlpha = 0.05 + 0.5 * Math.sin(Math.PI * f); faceX(gx, y0 + 0.09, y1 - 0.09, zb, zb + 0.11, shade(g.col, 1.6)); ctx.globalAlpha = 1;
+      box(gx, gy, 0.2, y1 - y0 + 0.17, 0.17, fr, GATE_H); faceX(gx + 0.102, y0 - 0.06, y1 + 0.06, GATE_H + 0.05, GATE_H + 0.12, g.col);
+    } }, { d: gx + y1, f: pillar(y1) }];
+  }
+  /** Icon badge on the lintel + name + live counter (drawn on top of the crowd). */
+  function gateSign(kind, sub) {
+    const g = GATE[kind]; const [gx, gy] = g.at; const [ax, ay] = P(gx, gy, Z(GATE_H + 0.42)); const kz = Math.pow(cam.z, -0.6); const r = Math.max(9, tw * 0.1 * kz); const hh = Math.max(16, tw * 0.27 * kz); const u = r * 0.5;
+    ctx.fillStyle = g.col; ctx.beginPath(); ctx.arc(ax, ay, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1.6, r * 0.2); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath();
+    if (kind === 'in') { ctx.moveTo(ax + u * 0.55, ay - u * 0.75); ctx.lineTo(ax + u * 0.85, ay - u * 0.75); ctx.lineTo(ax + u * 0.85, ay + u * 0.75); ctx.lineTo(ax + u * 0.55, ay + u * 0.75); ctx.moveTo(ax - u * 0.9, ay); ctx.lineTo(ax + u * 0.3, ay); ctx.moveTo(ax - u * 0.1, ay - u * 0.45); ctx.lineTo(ax + u * 0.35, ay); ctx.lineTo(ax - u * 0.1, ay + u * 0.45); }
+    else { ctx.moveTo(ax - u * 0.55, ay - u * 0.75); ctx.lineTo(ax - u * 0.85, ay - u * 0.75); ctx.lineTo(ax - u * 0.85, ay + u * 0.75); ctx.lineTo(ax - u * 0.55, ay + u * 0.75); ctx.moveTo(ax - u * 0.25, ay); ctx.lineTo(ax + u * 0.9, ay); ctx.moveTo(ax + u * 0.45, ay - u * 0.45); ctx.lineTo(ax + u * 0.9, ay); ctx.lineTo(ax + u * 0.45, ay + u * 0.45); }
+    ctx.stroke(); pill(g.label, ax, ay - r - hh * 0.72, g.col);
+    const [sx, sy] = P(gx, gy + GATE_W + 0.62, 0); pill(sub, sx, sy, g.col, 0.9);
+  }
+
   // ---------- station models (one per kind of system) ----------
   const faceY = (x0, x1, y, z0, z1, fill) => poly([P(x0, y, Z(z0)), P(x1, y, Z(z0)), P(x1, y, Z(z1)), P(x0, y, Z(z1))], fill);   // wall facing the viewer (+y)
   const faceX = (x, y0, y1, z0, z1, fill) => poly([P(x, y0, Z(z0)), P(x, y1, Z(z0)), P(x, y1, Z(z1)), P(x, y0, Z(z1))], fill);   // wall facing the viewer (+x)
@@ -287,6 +417,7 @@ export function mountSiteFloor(host, opts = {}) {
     const n = curLay().length; const work = Array.from({ length: n }, () => []); const cum = Array(n).fill(0);
     for (const j of crowd()) j.stops.forEach((s, k) => { if (tt >= s.start) cum[s.zone] += 1; if (tt >= s.start && tt < s.end) work[s.zone].push({ s, id: j.id, key: j.id * 8 + k }); });
     const rank = new Map(); work.forEach((a) => a.sort((x, y) => x.s.start - y.s.start || x.id - y.id).forEach((w, i) => rank.set(w.key, i)));
+    if (dayOn()) sites.forEach((s2, i) => { cum[i] = cumViews(R.rep, s2.key, tt); });   // a replayed day counts its real page views, not the drawn people
     return { work, cum, rank };
   }
   /** Where a visitor is at minute `tt`: walking in → at a station/room → (walking to the next room) → walking out. */
@@ -317,7 +448,7 @@ export function mountSiteFloor(host, opts = {}) {
     return sites.map((s, i) => { const st = stateOf(s); const lit = st === 'ok';
       return { key: s.key, col: colOf(i), pv: s.pv, lit, live: lit && (s.realtime > 0 || s.key === topKey), alpha: st === 'paused' || st === 'idle' ? 0.6 : 1, icon: THEMES[themes[i]].icon, name: s.name, top: s.key === topKey,
         dot: STATE_COL[st], dotBlink: lit || st === 'silent', dotZ: themes[i] === 'ems' || themes[i] === 'visit' ? 1.35 : 1.7,
-        lineCol: (F) => (st === 'ok' ? (F.work[i].length ? colOf(i) : null) : STATE_COL[st]), line: (F) => (st === 'ok' ? `≈${fmt(F.cum[i] * pf)} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]),
+        lineCol: (F) => (st === 'ok' ? (F.work[i].length ? colOf(i) : null) : STATE_COL[st]), line: (F) => (st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]),
         prop: (g, cx, cy, col, live, now) => prop(themes[i], cx, cy, col, live, st, now, i) }; });
   }
 
@@ -342,9 +473,7 @@ export function mountSiteFloor(host, opts = {}) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, hgt); ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.tx, dpr * cam.ty);
     const L = curLay(); const Zs = zones(); const F = frameState(t); const items = []; const mx = Math.max(1, ...Zs.map((z) => z.pv)); const Hz = Z(1.4); hits = [];
     const kit = { ctx, P, Z, tw, pal, reduced, box, faceX, faceY, disc, poly, shade };
-    poly([P(0, 0), P(G, 0), P(G, G), P(0, G)], pal.floor);
-    ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.beginPath(); for (let i = 0; i <= G; i++) { const a = P(i, 0); const b = P(i, G); const c = P(0, i); const d = P(G, i); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.moveTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); } ctx.stroke();
-    ctx.globalAlpha = 0.5; poly([P(0.2, CORR - 0.5), P(G - 0.2, CORR - 0.5), P(G - 0.2, CORR + 0.5), P(0.2, CORR + 0.5)], null, pal.grid, 1.5); ctx.globalAlpha = 1;
+    hospitalBase(now); gatePad('in', now); gatePad('out', now);
     const lanes = ins ? flowLanes(Zs, L) : [];
     Zs.forEach((z, i) => {
       const l = L[i]; const [cx, cy] = l.c; const x0 = cx - l.hx; const x1 = cx + l.hx; const y0 = cy - l.hy; const y1 = cy + l.hy; const col = z.col; const dim = focus >= 0 && focus !== i ? 0.4 : 1;
@@ -360,12 +489,13 @@ export function mountSiteFloor(host, opts = {}) {
       } });
       const ph = z.pv ? 0.2 + 0.8 * (z.pv / mx) : 0.08; items.push({ d: cx + cy + 0.3, f: () => { ctx.globalAlpha = dim; box(x1 - 0.22, cy + l.dir * 0.05, 0.24, 0.24, ph, col); ctx.globalAlpha = 1; } });   // data pillar: height = page views
     });
-    items.push({ d: ENT[0] + ENT[1], f: () => box(ENT[0], ENT[1], 0.8, 0.8, 1.2, '#64748b') }, { d: EXIT[0] + EXIT[1], f: () => box(EXIT[0], EXIT[1], 0.8, 0.8, 1.2, '#64748b') });
-    let here = 0;
+    items.push(...gateItems('in', now), ...gateItems('out', now));
+    let here = 0; let entered = 0; let enteredBack = 0; let left = 0;
     for (const j of crowd()) {
+      if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
       const r = place(j, t, F); if (!r) continue; here += 1;
       if (r.state === 'work' && r.rank >= CAP) continue;
-      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK) });
+      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK, !!j.back, now) });
     }
     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
     Zs.forEach((z, i) => {
@@ -375,11 +505,11 @@ export function mountSiteFloor(host, opts = {}) {
       pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
     });
     lanes.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.8));
-    for (const [tx, p0] of [['ทางเข้า', ENT], ['ทางออก', EXIT]]) { const [a, b] = P(p0[0], p0[1], Z(1.2)); ctx.font = `500 ${Math.max(10, tw * 0.14)}px ${font}`; ctx.fillStyle = pal.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillText(tx, a, b - 8); }
+    gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`);
     const min = Math.floor(t);
     if (min !== lastMin) {
-      lastMin = min; clock.textContent = hhmm(t); sub.textContent = ins ? `${ins.site.name} · ภายในระบบ · วันทั่วไป` : 'วันทั่วไป · เฉลี่ยจากช่วงที่เลือก';
-      const done = F.cum.reduce((a, b) => a + b, 0); live.textContent = `${ins ? 'ในระบบ' : 'ในผัง'}ตอนนี้ ${fmt(here)} คน · เปิดหน้าสะสม ≈${fmt(done * (ins ? ins.pf : pf))}`;
+      lastMin = min; clock.textContent = hhmm(t); sub.textContent = ins ? `${ins.site.name} · ภายในระบบ · วันทั่วไป` : dayOn() ? `${R.rep.day === R.rep.today ? 'วันนี้' : 'วันที่คนใช้มากสุด'} · ${dayLabel(R.rep.day)}` : 'วันทั่วไป · เฉลี่ยจากช่วงที่เลือก';
+      const done = F.cum.reduce((a, b) => a + b, 0); live.textContent = `${ins ? 'ในระบบ' : 'ในผัง'}ตอนนี้ ${fmt(here)} คน · เปิดหน้าสะสม ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(done * pfNow())}`;
       prog.style.width = `${Math.min(100, Math.max(0, ((t - range.from) / Math.max(1, range.to - range.from)) * 100))}%`;
       const hr = Math.floor(t / 60); [...hoursEl.children].forEach((b) => { if (Number(b.dataset.h) === hr) b.setAttribute('aria-current', 'time'); else b.removeAttribute('aria-current'); });
     }
@@ -477,7 +607,7 @@ export function mountSiteFloor(host, opts = {}) {
         nx ? h('small', null, `มักไปต่อ → ${unitName(nx.to)} (${fmt(nx.n)})`) : null, h('small', null, focus === i ? 'คลิกเพื่อซูมออก' : 'คลิกเพื่อซูมเข้าห้องนี้'));
     } else {
       const s = sites[i]; const st = stateOf(s); const tr = trendOf(s);
-      tip.replaceChildren(h('b', null, `${THEMES[themes[i]].icon} ${s.name}`), h('small', null, `${THEMES[themes[i]].label} · ${hostOf(s.url) || '–'}`), h('span', null, `${fmt(s.pv)} ครั้ง · ผู้เข้าชม ${fmt(s.uv)}${tr === null ? '' : tr === 'new' ? ' · ใหม่' : ` · ${tr > 0 ? '+' : ''}${tr}%`}`), h('span', { class: `s3-pill st-${st}` }, STATE_TXT[st]), h('small', null, 'คลิกเพื่อซูมเข้าไปดูหน้าต่างๆ ภายในระบบ'));
+      tip.replaceChildren(h('b', null, `${THEMES[themes[i]].icon} ${s.name}`), h('small', null, `${THEMES[themes[i]].label} · ${hostOf(s.url) || '–'}`), h('span', null, `${fmt(s.pv)} ครั้ง · ผู้เข้าชม ${fmt(s.uv)}${tr === null ? '' : tr === 'new' ? ' · ใหม่' : ` · ${tr > 0 ? '+' : ''}${tr}%`}`), dayOn() && R.rep.sites[s.key] ? h('span', null, `วันนั้น ${fmt(R.rep.sites[s.key].n)} ครั้ง · ใหม่ ${fmt(R.rep.sites[s.key].fresh)} · กลับมา ${fmt(R.rep.sites[s.key].back)}`) : null, h('span', { class: `s3-pill st-${stCls(s)}` }, stTxt(s)), h('small', null, 'คลิกเพื่อซูมเข้าไปดูหน้าต่างๆ ภายในระบบ'));
     }
     tip.hidden = false; const px = ev.clientX - sr.left; tip.style.left = `${Math.min(Math.max(8, px + 14), Math.max(8, sr.width - 230))}px`; tip.style.top = `${Math.max(8, ev.clientY - sr.top + 14)}px`;
   }
@@ -491,7 +621,10 @@ export function mountSiteFloor(host, opts = {}) {
   function themeSync() { pal = document.documentElement.dataset.theme === 'dark' ? PAL.dark : PAL.light; font = getComputedStyle(document.body).fontFamily || 'sans-serif'; }
   function loop(now) {
     raf = requestAnimationFrame(loop); const dt = last ? Math.min(100, Math.max(0, now - last)) : 0; last = now; if (document.hidden || !onScreen || !sites.length) return;
-    if (playing) { t = Math.min(range.to, t + (dt / 1000) * speed); if (t >= range.to) pause(); }
+    if (playing) {
+      if (t >= range.to) { if (!loopOn) pause(); else if (!endHold) endHold = now + 1200; else if (now >= endHold) { t = range.from; endHold = 0; lastMin = -1; } }   // วนเล่นซ้ำ
+      else t = Math.min(range.to, t + (dt / 1000) * speed);
+    }
     const k = reduced ? 1 : 1 - Math.exp(-dt / 110); cam.z += (cam.tz - cam.z) * k; cam.tx += (cam.ttx - cam.tx) * k; cam.ty += (cam.tty - cam.ty) * k;
     draw(now);
   }
