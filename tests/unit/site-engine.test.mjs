@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pageKey, pageKind, pageLabel, normalizePages, pageJourneys, nextPages, pageInsights, pagesCsv, makeSamplePages, pagesFromStats, themeOf, THEMES, normalizeFloor, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample, MAX_SITES, MAX_FIGURES, DEFAULTS,
   usageRank, asJourneys, busiestDay, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, dayLabel, addDays, MODES, MODE_IDS, MAX_DAY_FIGURES, REPLAY_PRIVACY,
-  WING_MAX, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext, wingLayout } from '../../src/js/modules/site-engine.js';
+  WING_MAX, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext,
+  DEPT, HOSP, deptWorld, deptLayout, deptStand, headStand, HOSP_GROUPS, groupOf, HG, hospitalLayout, hospStand, hospRoute, VIEW_IDS } from '../../src/js/modules/site-engine.js';
 
 const sample = () => makeSample(30);
 
@@ -46,7 +47,7 @@ test('themeOf: SAND fleet, HRD, EC, vaccine and tag override', () => {
   const T = (name, url = '', tags = []) => themeOf({ name, url, key: 'k', tags });
   assert.equal(T('SAND', 'https://carsystemsansai.example.org'), 'ems'); assert.equal(T('ระบบขอใช้รถ'), 'ems');
   assert.equal(T('HRD training management'), 'hrd'); assert.equal(T('EC Sansai', 'https://ec-sansai.github.io'), 'ec'); assert.equal(T('ระบบจริยธรรมการวิจัย'), 'ec');
-  assert.equal(T('งานวัคซีนเด็ก'), 'vaccine'); assert.equal(T('SAND Office Tools'), 'web'); assert.equal(T('เว็บข่าว'), 'web');
+  assert.equal(T('ระบบรายงาน FTE'), 'fte'); assert.equal(T('FTE report', 'https://fte.example.org'), 'fte'); assert.equal(T('งานวัคซีนเด็ก'), 'vaccine'); assert.equal(T('SAND Office Tools'), 'web'); assert.equal(T('เว็บข่าว'), 'web');
   assert.equal(T('อะไรก็ได้', '', ['theme:dental']), 'dental'); assert.equal(T('อะไรก็ได้', '', ['theme:nope']), 'web');
   for (const id of Object.keys(THEMES)) assert.ok(THEMES[id].icon && THEMES[id].label);
 });
@@ -153,8 +154,6 @@ test('replayCsv + sample replay + helpers', () => {
 });
 
 /* ---------------------------------------- wings: the pages behind each station ---------------------------------------- */
-const lay = (n) => Array.from({ length: n }, (_, i) => { const top = Math.ceil(n / 2); const isTop = i < top; const cnt = isTop ? top : n - top; const k = isTop ? i : i - top; const x = ((k + 0.5) * 12) / cnt; return { top: isTop, c: [x, isTop ? 1.7 : 10.3], door: [x, isTop ? 2.9 : 9.1], dir: isTop ? 1 : -1 }; });
-
 test('wingOf / normalizeWings: busiest pages only, never the "other" bucket, answers of other shapes are rejected', () => {
   const d = sample(); const s = pickSites(d.sites).sites[0]; const pg = normalizePages(makeSamplePages(s, 30)); const w = wingOf(pg);
   assert.ok(w.units.length > 0 && w.units.length <= WING_MAX); assert.ok(w.units.every((u) => u.kind !== 'p:other'));
@@ -172,17 +171,37 @@ test('wingPick: deterministic, follows the page views, -1 when there is nothing 
   assert.equal(pick(5), pick(5)); const n = Array.from({ length: 400 }, (_, i) => pick(i + 1)); const c0 = n.filter((x) => x === 0).length;
   assert.ok(c0 > 300 && c0 < 390); assert.ok(n.every((x) => x === 0 || x === 1)); assert.equal(wingPick({ units: [] }, 1), -1); assert.equal(wingPick(null, 1), -1); assert.equal(wingPick({ units: [{ pv: 0 }] }, 1), -1);
 });
-test('wingLayout: tiles stay behind the right wall, inside the slab, finite, and the side walkway is in the gap between stations', () => {
+test('deptLayout: rooms stay inside their department, off the hall, and the busiest sit nearest the corridor', () => {
   for (const n of [1, 2, 3, 5, 8]) {
-    const L = lay(n); const wl = wingLayout(L, L.map((_, i) => (i % 2 ? 6 : 3)));
-    wl.forEach((w, i) => {
-      assert.equal(w.out, L[i].top ? -1 : 1); assert.ok(w.tiles.every((t) => t.c.every(Number.isFinite)));
-      for (const t of w.tiles) { assert.ok(t.c[0] - w.size / 2 >= w.slab.x0 - 1e-9 && t.c[0] + w.size / 2 <= w.slab.x1 + 1e-9, `x n=${n} i=${i}`); assert.ok(L[i].top ? t.c[1] < 0 : t.c[1] > 12, `y n=${n} i=${i}`); assert.ok(t.c[1] >= w.slab.y0 && t.c[1] <= w.slab.y1); }
-      assert.ok(w.lane.x > 0 && w.lane.x < 12); assert.ok(Math.abs(w.lane.x - L[i].c[0]) >= 1.2, 'walkway must clear the station');
+    const W = deptWorld(n); const L = deptLayout(Array.from({ length: n }, (_, i) => (i % 2 ? 6 : 3))); assert.equal(L.length, n); assert.ok(W.GX >= 9.6 && W.GX <= 17);
+    L.forEach((d, i) => {
+      assert.equal(d.top, i < W.top); assert.ok(d.pad.x0 >= 0 && d.pad.x1 <= W.GX + 1e-9 && d.pad.y0 >= 0 && d.pad.y1 <= W.GY + 1e-9); assert.equal(d.rooms.length, i % 2 ? 6 : 3);
+      d.rooms.forEach((r, k) => {
+        assert.equal(r.p, k); assert.ok(r.c.every(Number.isFinite));
+        assert.ok(r.x0 >= d.pad.x0 - 1e-9 && r.x1 <= d.pad.x1 + 1e-9 && r.y0 >= d.pad.y0 - 1e-9 && r.y1 <= d.pad.y1 + 1e-9, 'room inside pad');
+        assert.ok(r.side < 0 ? r.x1 <= d.hall.x0 + 1e-9 : r.x0 >= d.hall.x1 - 1e-9, 'room is beside the hall, not in it');
+        assert.ok(d.top ? r.y0 >= d.head.y1 - 1e-9 : r.y1 <= d.head.y0 + 1e-9, 'rooms do not run into the head office');
+      });
+      assert.ok(deptStand(d.rooms[0] || { ax: 0, side: 1, c: [0, 0] }, 3).every(Number.isFinite)); assert.ok(headStand(d, 7).every(Number.isFinite));
     });
-    assert.equal(wl[0].tiles.length, 3); if (n > 1) assert.equal(wl[1].tiles.length, 6);
   }
-  assert.equal(wingLayout(lay(2), [0, 0]).every((w) => w.tiles.length === 0), true);
+  assert.deepEqual(deptLayout([0, 0]).map((d) => d.rooms.length), [0, 0]);
+});
+test('groupOf: vehicle system and FTE → general administration; HRD / EC / vaccine → quality development; tag wins', () => {
+  const G = (name, tags = []) => groupOf({ name, url: '', key: 'k', tags });
+  assert.equal(G('SAND', []), 'admin'); assert.equal(G('ระบบยานพาหนะ'), 'admin'); assert.equal(G('ระบบรายงาน FTE'), 'admin');
+  assert.equal(G('HRD training'), 'quality'); assert.equal(G('EC Sansai'), 'quality'); assert.equal(G('ห้องวัคซีน'), 'quality'); assert.equal(G('HRD', ['group:admin']), 'admin');
+  assert.deepEqual(VIEW_IDS, ['dept', 'hospital']);
+});
+test('hospitalLayout: every project gets a room inside its wing, doors face the spine, routes stay on the floor', () => {
+  const items = [{ group: 'admin', pv: 5 }, { group: 'quality', pv: 9 }, { group: 'admin', pv: 50 }, { group: 'quality', pv: 1 }, { group: 'quality', pv: 3 }, { group: 'admin', pv: 2 }];
+  const L = hospitalLayout(items); assert.equal(L.rooms.length, items.length); assert.ok(L.rooms.every(Boolean));
+  L.rooms.forEach((r, i) => {
+    const w = L.wings.find((x) => x.id === items[i].group); assert.equal(r.group, items[i].group); assert.ok(r.x0 >= w.x0 - 1e-9 && r.x1 <= w.x1 + 1e-9, 'inside its wing'); assert.ok(r.y0 >= HOSP.Y0 && r.y1 <= HOSP.GY);
+    assert.ok(hospStand(r, 4).every(Number.isFinite)); for (const q of hospRoute(L, r)) assert.ok(q[0] >= 0 && q[0] <= HOSP.GX && q[1] >= 0 && q[1] <= HOSP.GY);
+  });
+  assert.ok(L.rooms[2].c[0] > L.rooms[5].c[0], 'busiest admin room is nearest the lobby');
+  assert.equal(HG('nope').id, 'quality'); assert.equal(hospitalLayout([]).rooms.length, 0);
 });
 test('replay events carry the page: normalizeReplay → replayVisitors → asJourneys', () => {
   const rep = normalizeReplay(rawReplay({ sites: [{ key: 'a', n: 3, fresh: 2, back: 1, pgs: ['/Form.html?x=1', '/'], ev: [[600, 1, 0, 0], [605, 2, 0, 1], [700, 1, 1, 7], [710, 3, 0]] }] }));
