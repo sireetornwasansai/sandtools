@@ -112,3 +112,4 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 .s3-brand small { color: var(--muted); font-size: .74rem; }
 @media (max-width: 700px) { .s3-brand small { display: none; } }
 @media (prefers-reduced-motion: reduce) { .s3-loop[aria-pressed="true"] .icon { animation: none; } }
+.s3-lg i.s3-adm { width: .7rem; height: .7rem; border-radius: 50%; background: #7c3aed; box-shadow: 0 0 0 2px #fff inset; }
