@@ -188,3 +188,36 @@ test('history: own rows are found even deep in a busy log, odd dates/emails are 
   const a = e.post({ action: 'history', session: adm });
   assert.equal(a.data.admin, true); assert.ok(a.data.rows.length > 3 && a.data.rows.length <= 300);
 });
+
+test('projects/replay: one real day as compact events — new vs returning inside the day, busiest-day pick, scoped, no visitor hash leaves the sheet', () => {
+  const e = makeEnv(); const s = e.login('somchai@example.go.th'); const other = e.login('other@example.go.th');
+  const key = e.post({ action: 'projects', session: s, op: 'create', name: 'ระบบยานพาหนะ', url: 'https://car.example.go.th' }).data.site.key;
+  const foreign = e.post({ action: 'projects', session: other, op: 'create', name: 'ของคนอื่น', url: 'https://x.example.go.th' }).data.site.key;
+  e.post({ action: 'projects', session: s, op: 'floor', days: 7 });
+  const midnight = (back = 0) => Math.floor((Date.now() + 25200000) / 86400000) * 86400000 - 25200000 - back * 86400000; const at = (back, hh, mm) => midnight(back) + (hh * 60 + mm) * 60000;
+  const row = (t, k, vid, extra = {}) => [t, k, extra.type || 'pv', extra.page || '/index.html', '', 'TH', 'desktop', 'Chrome', 'Windows', vid ? 'v' + vid : '', 'th', '', extra.bot ? 1 : 0];
+  const hits = e.sheets.Hits.rows;
+  hits.push(row(at(0, 9, 0), key, 'aaaaaaaa1111'), row(at(0, 9, 10), key, 'aaaaaaaa1111', { page: '/check.html' }), row(at(0, 11, 0), key, 'aaaaaaaa1111'), row(at(0, 11, 5), key, 'aaaaaaaa1111'), row(at(0, 9, 30), key, 'bbbbbbbb2222'),
+    row(at(0, 9, 31), key, 'cccccccc3333', { bot: true }), row(at(0, 9, 32), key, 'dddddddd4444', { type: 'ev' }), row(at(0, 9, 33), foreign, 'eeeeeeee5555'));
+  for (const back of [5, 3]) for (let i = 0; i < 8; i++) hits.push(row(at(back, 8 + i, 0), key, 'f' + String(back) + 'ffffff' + String(i).padStart(3, '0').slice(0, 3)));
+  const t = e.post({ action: 'projects', session: s, op: 'replay', mode: 'today' }); assert.equal(t.success, true, JSON.stringify(t.error)); const d = t.data;
+  assert.equal(d.mode, 'today'); assert.equal(d.day, d.today); assert.equal(d.scale, 1); assert.equal(d.byDay.length, 90); assert.equal(d.byDay.at(-1).pv, 5);
+  assert.equal(d.sites.length, 1); const a = d.sites[0]; assert.equal(a.key, key);
+  assert.deepEqual([a.n, a.uv, a.fresh, a.back], [5, 2, 2, 1]);
+  assert.deepEqual(a.ev, [[540, 0, 0], [550, 0, 2], [570, 1, 0], [660, 0, 1], [665, 0, 2]]);
+  assert.ok(!JSON.stringify(d).includes('aaaaaaaa'), 'the daily hash never leaves the sheet');
+  const p = e.post({ action: 'projects', session: s, op: 'replay', mode: 'peak' }).data; assert.equal(p.mode, 'peak'); assert.equal(p.sites[0].n, 8); assert.equal(p.sites[0].fresh, 8); assert.equal(p.sites[0].back, 0);
+  assert.equal(p.day, d.byDay.at(-4).d, 'tie → the latest day'); assert.notEqual(p.day, p.today);
+  assert.equal(e.post({ action: 'projects', session: s, op: 'replay', mode: 'bogus' }).data.mode, 'today');
+  assert.equal(e.post({ action: 'projects', session: other, op: 'replay', mode: 'today' }).data.sites[0].key, foreign);
+});
+
+test('projects/replay: a very busy day is sampled by visitor (scale) while the real counts stay exact; an empty account is fine', () => {
+  const e = makeEnv(); const s = e.login('busy@example.go.th'); const quiet = e.login('quiet@example.go.th');
+  const key = e.post({ action: 'projects', session: s, op: 'create', name: 'busy', url: 'https://busy.example.go.th' }).data.site.key; e.post({ action: 'projects', session: s, op: 'floor', days: 7 });
+  const base = Math.floor((Date.now() + 25200000) / 86400000) * 86400000 - 25200000;
+  for (let i = 0; i < 400; i++) e.sheets.Hits.rows.push([base + (300 + i) * 60000, key, 'pv', '/', '', 'TH', 'mobile', 'Chrome', 'Android', 'v' + i.toString(16).padStart(10, '0'), 'th', '', 0]);
+  const d = e.post({ action: 'projects', session: s, op: 'replay', mode: 'today' }).data; const a = d.sites[0];
+  assert.equal(d.scale, 2); assert.equal(a.n, 400); assert.equal(a.fresh, 400); assert.equal(a.ev.length, 200); assert.ok(a.ev.every((x) => x[1] % 2 === 0 && x[2] === 0));
+  const q = e.post({ action: 'projects', session: quiet, op: 'replay', mode: 'peak' }); assert.equal(q.success, true); assert.deepEqual(q.data.sites, []); assert.equal(q.data.day, q.data.today);
+});
