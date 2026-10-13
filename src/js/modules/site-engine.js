@@ -64,9 +64,14 @@ export function fromListStats(list, statsByKey, days) {
   return { days, total: out.length, sites: out };
 }
 
-/** Busiest projects first; quiet ones last. Returns the stations to draw and how many projects did not fit. */
+/** Priority of a station = its CURRENT usage status: 0 people online now · 1 normal · 2 silent (had visitors, none now) · 3 no data yet · 4 collection paused. */
+export function usageRank(s) {
+  const st = stateOf(s);
+  return st === 'paused' ? 4 : st === 'idle' ? 3 : st === 'silent' ? 2 : num(s.realtime) > 0 ? 0 : 1;
+}
+/** Projects with people online now first, then by busiest; quiet ones last. Returns the stations to draw and how many projects did not fit. */
 export function pickSites(all) {
-  const s = all.filter((x) => x.status !== 'deleted').slice().sort((a, b) => b.pv - a.pv || a.name.localeCompare(b.name, 'th'));
+  const s = all.filter((x) => x.status !== 'deleted').slice().sort((a, b) => usageRank(a) - usageRank(b) || b.pv - a.pv || a.name.localeCompare(b.name, 'th'));
   return { sites: s.slice(0, MAX_SITES), more: Math.max(0, s.length - MAX_SITES) };
 }
 
@@ -338,4 +343,125 @@ export function makeSamplePages(s, days = 30, seed = 23) {
 }
 
 /** Site-level visitors (overview) in the same shape as page journeys, so one renderer can draw both. */
-export const asJourneys = (vis) => vis.map((v) => ({ id: v.id, enter: v.enter, stops: [{ zone: v.site, start: v.start, end: v.end }], exit: v.exit }));
+export const asJourneys = (vis) => vis.map((v) => ({ id: v.id, enter: v.enter, stops: [{ zone: v.site, start: v.start, end: v.end }], exit: v.exit, back: !!v.back }));
+
+/* ============================ replay of a REAL day (today / the busiest day) ============================ */
+
+export const MAX_DAY_FIGURES = 360;
+export const VISIT_GAP = 30;
+export const MODES = [['typical', 'วันทั่วไป (เฉลี่ย)'], ['today', 'วันนี้'], ['peak', 'วันที่คนใช้มากสุด']];
+export const MODE_IDS = MODES.map((m) => m[0]);
+export const REPLAY_PRIVACY = 'แยก “ผู้ใช้ใหม่ / ผู้ใช้เดิม” ภายในวันเดียวกันเท่านั้น — รหัสผู้เข้าชมเป็นค่าแฮชที่เปลี่ยนทุกวัน จึงไม่สามารถตามรอยคนเดิมข้ามวัน ข้ามเว็บ หรือระบุตัวบุคคลได้ (ไม่เก็บ IP ไม่ใช้คุกกี้)';
+
+/** Busiest day of `[{d:'YYYY-MM-DD', pv}]` (days without views never win; ties → the latest day). */
+export function busiestDay(byDay) {
+  let best = null;
+  for (const x of arr(byDay)) { const pv = num(x.pv); const d = String(x.d); if (pv > 0 && (!best || pv > best.pv || (pv === best.pv && d > best.d))) best = { d, pv }; }
+  return best;
+}
+
+/**
+ * Backend answer of `projects/replay`: {mode, day, today, byDay:[{d,pv}], scale, sites:[{key, n, uv, fresh, back, ev:[[minute, visitor#, f]]}]}
+ * f = 0 first view of that day · 1 return visit after > VISIT_GAP minutes · 2 another page of the same visit. visitor# is a running number, never the hash.
+ */
+export function normalizeReplay(d) {
+  if (!d || typeof d !== 'object' || !Array.isArray(d.sites) || !/^\d{4}-\d\d-\d\d$/.test(String(d.day || ''))) return null;
+  const scale = Math.max(1, num(d.scale) || 1); const sites = {};
+  for (const s of d.sites) {
+    if (!s || !s.key) continue;
+    const ev = arr(s.ev).slice(0, 2000).map((e) => ({ m: num(e[0]), v: num(e[1]), f: Math.min(2, Math.max(0, Math.round(num(e[2])))) })).filter((e) => e.m >= 0 && e.m < 1440).sort((a, b) => a.m - b.m || a.v - b.v);
+    const fresh = s.fresh === undefined ? ev.filter((e) => e.f === 0).length * scale : num(s.fresh); const back = s.back === undefined ? ev.filter((e) => e.f === 1).length * scale : num(s.back);
+    sites[String(s.key)] = { n: s.n === undefined ? ev.length * scale : num(s.n), uv: s.uv === undefined ? fresh : num(s.uv), fresh, back, ev };
+  }
+  const byDay = arr(d.byDay).map((x) => ({ d: String(x.d), pv: num(x.pv) }));
+  return { mode: d.mode === 'peak' ? 'peak' : 'today', day: String(d.day), today: String(d.today || ''), byDay, busiest: busiestDay(byDay), scale, sites };
+}
+
+export const dayLabel = (d) => { try { return new Date(`${d}T12:00:00+07:00`).toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch { return d; } };
+export const addDays = (d, n) => new Date(new Date(`${d}T12:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
+
+/** One walking person per VISIT (f=0 new, f=1 returning); pages of the same visit (f=2) only add to counters. Deterministic. */
+export function replayVisitors(rep, sites, c = DEFAULTS, seed = 57) {
+  const out = []; if (!rep) return out; let id = 0; const all = [];
+  sites.forEach((s, si) => { const r = rep.sites[s.key]; if (r) for (const e of r.ev) if (e.f !== 2) all.push({ si, e }); });
+  all.sort((a, b) => a.e.m - b.e.m || a.si - b.si || a.e.v - b.e.v);
+  for (const { si, e } of all) { const at = e.m + rng(seed + si * 977 + e.v * 13 + e.m)(); out.push({ id: ++id, site: si, v: e.v, enter: at - c.walk, start: at, end: at + c.dwell, exit: at + c.dwell + c.walk, back: e.f === 1 }); }
+  return out;
+}
+
+/** Replay window of a real day (≥ 3 h). Today stops around the current time. */
+export function replayRange(vis, rep, nowMin = 1440, c = DEFAULTS) {
+  const isToday = !!rep && rep.day === rep.today; const nowEnd = Math.min(1440, Math.ceil((nowMin + c.walk) / 60) * 60);
+  let from; let to;
+  if (vis.length) { from = Math.max(0, Math.floor(Math.min(...vis.map((v) => v.enter)) / 60) * 60); to = Math.min(1440, Math.ceil(Math.max(...vis.map((v) => v.exit)) / 60) * 60); } else { from = c.open; to = c.close; }
+  if (isToday) { to = Math.min(to, nowEnd); if (!vis.length) from = Math.max(0, nowEnd - 180); }
+  if (to - from < 180) { to = Math.min(1440, from + 180); from = Math.max(0, to - 180); }
+  return { from, to };
+}
+
+export function cumViews(rep, key, t) {
+  const s = rep && rep.sites[key]; if (!s) return 0; let n = 0; for (const e of s.ev) { if (e.m > t) break; n += 1; } return n * rep.scale;
+}
+
+export function dayStats(rep) {
+  const hourly = Array(24).fill(0); let views = 0; let uv = 0; let fresh = 0; let back = 0; const per = [];
+  for (const [key, s] of Object.entries(rep ? rep.sites : {})) {
+    views += s.n; uv += s.uv; fresh += s.fresh; back += s.back; per.push({ key, views: s.n, uv: s.uv, fresh: s.fresh, back: s.back });
+    for (const e of s.ev) hourly[Math.floor(e.m / 60)] += rep.scale;
+  }
+  const visits = fresh + back; const peakHour = views ? hourly.indexOf(Math.max(...hourly)) : -1;
+  per.sort((a, b) => b.views - a.views);
+  return { views, uv, fresh, back, visits, backPct: visits ? Math.round((back / visits) * 100) : 0, hourly, peakHour, per, top: per[0] && per[0].views ? per[0] : null };
+}
+
+export function compareToPeak(byDay, today) {
+  const peak = busiestDay(byDay); if (!peak) return null;
+  const t = arr(byDay).find((x) => String(x.d) === today); const todayPv = t ? num(t.pv) : 0;
+  return { peakDay: peak.d, peakPv: peak.pv, today, todayPv, pct: Math.round((todayPv / peak.pv) * 100), isPeak: peak.d === today };
+}
+
+export function replayInsights(rep, st, names = {}) {
+  if (!rep) return [];
+  const out = []; const cmp = compareToPeak(rep.byDay, rep.today); const isToday = rep.day === rep.today; const nm = (k) => names[k] || k;
+  if (!st.views) {
+    out.push({ tone: 'info', text: `${isToday ? 'วันนี้ (ถึงขณะนี้)' : dayLabel(rep.day)} ยังไม่มีการเปิดหน้าในโครงการที่ติดตาม` });
+  } else {
+    out.push({ tone: 'info', text: `${isToday ? 'วันนี้ (ถึงขณะนี้)' : dayLabel(rep.day)} มีการเปิดหน้า ${fmt(st.views)} ครั้ง จากผู้เข้าชม ${fmt(st.uv)} คน` });
+    out.push({ tone: st.backPct >= 30 ? 'ok' : 'info', text: `ผู้ใช้ใหม่ ${fmt(st.fresh)} ครั้งที่เข้า · ผู้ใช้เดิมที่กลับมาใหม่ในวันเดียวกัน ${fmt(st.back)} ครั้ง (${st.backPct}%)${st.backPct >= 30 ? ' — เป็นงานที่คนกลับมาใช้ซ้ำทั้งวัน ลองทำทางลัดหรือบุ๊กมาร์กให้เปิดง่ายขึ้น' : ''}` });
+    if (st.top) out.push({ tone: 'info', text: `${nm(st.top.key)} มีคนเปิดมากสุด ${fmt(st.top.views)} ครั้ง (${Math.round((st.top.views / st.views) * 100)}% ของวันนั้น)` });
+    if (st.peakHour >= 0) out.push({ tone: 'info', text: `ช่วงที่คนเข้ามากสุด ${pad(st.peakHour)}:00–${pad((st.peakHour + 1) % 24)}:00 น.` });
+  }
+  if (cmp) {
+    if (isToday) out.push(cmp.isPeak ? { tone: 'ok', text: 'วันนี้เป็นวันที่มีคนใช้มากที่สุดในช่วงที่ตรวจแล้ว' } : { tone: cmp.pct >= 100 ? 'ok' : 'info', text: `วันนี้ถึงขณะนี้ ${fmt(cmp.todayPv)} ครั้ง ≈ ${cmp.pct}% ของวันที่คนใช้มากสุด (${dayLabel(cmp.peakDay)} · ${fmt(cmp.peakPv)} ครั้ง)` });
+    else out.push({ tone: 'info', text: `วันที่คนใช้มากสุดในช่วงที่ตรวจคือ ${dayLabel(cmp.peakDay)} · วันนี้ถึงขณะนี้ ${fmt(cmp.todayPv)} ครั้ง ≈ ${cmp.pct}% ของวันนั้น` });
+  }
+  out.push({ tone: 'info', text: REPLAY_PRIVACY });
+  return out;
+}
+
+export function replayCsv(rep, all) {
+  const esc = (v) => { let t = String(v ?? ''); if (/^[=+\-@]/.test(t)) t = `'${t}`; return `"${t.replace(/"/g, '""')}"`; };
+  const rows = [['วันที่', 'โครงการ', 'เปิดหน้า', 'ผู้เข้าชม', 'ผู้ใช้ใหม่ (ครั้งแรกของวัน)', 'ผู้ใช้เดิมกลับมา (ในวันเดียวกัน)'], ...all.filter((s) => rep.sites[s.key]).map((s) => { const r = rep.sites[s.key]; return [rep.day, s.name, r.n, r.uv, r.fresh, r.back]; })];
+  return rows.map((r) => r.map(esc).join(',')).join('\r\n');
+}
+
+/** Demo replay (same seed ⇒ same day). */
+export function makeSampleReplay(all, mode = 'today', today = '2026-10-13', nowMin = 1440, seed = 29) {
+  const r = rng(seed + (mode === 'peak' ? 5 : 0)); const day = mode === 'peak' ? addDays(today, -3) : today; const limit = day === today ? Math.max(30, Math.min(1439, Math.floor(nowMin))) : 1439;
+  const prof = [1, 0, 0, 0, 1, 2, 4, 9, 16, 20, 18, 12, 9, 13, 17, 15, 11, 6, 4, 3, 2, 2, 1, 1]; const cdf = []; prof.reduce((a, w, i) => { cdf[i] = a + w; return a + w; }, 0);
+  const pickHour = () => { const x = r() * cdf[23]; return cdf.findIndex((c) => x < c); };
+  const live = all.filter((s) => stateOf(s) === 'ok' && s.pv > 0); let base = 0;
+  const sites = live.map((s) => {
+    const daily = s.pv / 30; base += daily * 0.27; const F = Math.max(2, Math.round(daily * 0.12 * (mode === 'peak' ? 1.5 : 1))); const ev = []; let back = 0; let fresh = 0;
+    for (let v = 0; v < F; v++) {
+      const m0 = Math.floor(pickHour() * 60 + r() * 60); if (m0 > limit) continue; fresh += 1; ev.push([m0, v, 0]);
+      const more = r() < 0.55 ? 1 + Math.floor(r() * 3) : 0; for (let k = 1; k <= more; k++) if (m0 + k * 2 <= limit) ev.push([m0 + k * 2, v, 2]);
+      if (r() < 0.32) { const m1 = m0 + 45 + Math.floor(r() * 255); if (m1 <= limit && m1 < 1440) { back += 1; ev.push([m1, v, 1]); if (r() < 0.4 && m1 + 2 <= limit) ev.push([m1 + 2, v, 2]); } }
+    }
+    ev.sort((a, b) => a[0] - b[0]); return { key: s.key, n: ev.length, uv: fresh, fresh, back, ev };
+  });
+  const total = sites.reduce((a, s) => a + s.n, 0); const peakDay = addDays(today, -3);
+  const byDay = Array.from({ length: 30 }, (_, i) => { const d = addDays(today, i - 29); const wk = [0.35, 0.95, 1, 0.95, 0.9, 0.85, 0.3][new Date(`${d}T12:00:00Z`).getUTCDay()]; const pv = d === peakDay ? Math.round(base * 1.6) : d === today ? (day === today ? total : Math.round(base * 0.5)) : Math.round(base * 0.9 * wk * (0.85 + 0.3 * r())); return { d, pv }; });
+  if (day === peakDay) byDay.find((x) => x.d === day).pv = Math.max(total, byDay.find((x) => x.d === day).pv);
+  return { mode: mode === 'peak' ? 'peak' : 'today', day, today, byDay, scale: 1, sites };
+}

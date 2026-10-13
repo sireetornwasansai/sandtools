@@ -8,7 +8,27 @@ import { getSession } from '../core/auth.js';
 import { backendConfigured } from '../core/api.js';
 import { loadCss } from '../core/css.js';
 import { mountProjectsPanel } from './projects.js';
-import { mountSiteFloor } from './site-sim.js';
+
+/* The 3D floor is loaded lazily so a stale/mismatched cached module can never take the whole home page down.
+ * If the import fails (typically "does not provide an export named …" after a partial deploy or an old service-worker cache)
+ * we clear the service worker + Cache Storage once and reload; if it still fails we show a readable message instead of a blank page. */
+async function healCaches() {
+  try { const regs = (await (navigator.serviceWorker && navigator.serviceWorker.getRegistrations())) || []; await Promise.all(regs.map((r) => r.unregister())); } catch { /* ignore */ }
+  try { const keys = await caches.keys(); await Promise.all(keys.filter((k) => !k.startsWith('ocr-assets-')).map((k) => caches.delete(k))); } catch { /* ignore */ }
+}
+async function mountFloorSafe(host, opts) {
+  let mod;
+  try { mod = await import('./site-sim.js'); }
+  catch (e) {
+    console.error('[site-sim] load failed', e);
+    let tried = false; try { tried = sessionStorage.getItem('sand-heal') === '1'; } catch { /* ignore */ }
+    if (!tried) { try { sessionStorage.setItem('sand-heal', '1'); } catch { /* ignore */ } await healCaches(); location.reload(); return () => {}; }
+    host.append(notice('warn', 'โหลดผัง 3 มิติไม่สำเร็จ', `ไฟล์บนเซิร์ฟเวอร์ยังเป็นคนละเวอร์ชัน — อัปโหลด site-engine.js, site-sim.js, site-rooms.js และ site3d.css ให้ครบชุดเดียวกัน แล้วกด Ctrl+Shift+R (${String(e && e.message || e).slice(0, 140)})`));
+    return () => {};
+  }
+  try { sessionStorage.removeItem('sand-heal'); } catch { /* ignore */ }
+  return mod.mountSiteFloor(host, opts);
+}
 
 /**
  * Home = 3D floor of the projects and websites you monitor.
@@ -46,12 +66,14 @@ export async function mount(root) {
   if (!logged) {
     page.append(notice('info', 'เข้าสู่ระบบเพื่อดูโครงการจริงของคุณ', backendConfigured() ? 'ผังด้านบนเป็นข้อมูลตัวอย่าง เมื่อล็อกอินแล้วจะแสดงสถิติผู้เข้าชมเว็บไซต์ของหน่วยงานคุณแบบเรียลไทม์' : 'ผังด้านบนเป็นข้อมูลตัวอย่าง — ตั้งค่า Backend (Apps Script) เพื่อดูข้อมูลจริง'),
       privacyNotice({ detail: recording() ? `เครื่องมือทำงานในเบราว์เซอร์ของคุณ · ${recordingNote()}` : 'เครื่องมือทำงานในเบราว์เซอร์ของคุณ ไฟล์ไม่ถูกอัปโหลด' }));
-    const stopDemo = mountSiteFloor(floorHost);
-    return () => { stopDemo(); };
+    let stopDemo = () => {}; let gone = false;
+    mountFloorSafe(floorHost).then((st) => { stopDemo = st; if (gone) st(); });
+    return () => { gone = true; stopDemo(); };
   }
 
   page.append(projects, privacyNotice({ detail: 'สถิติไม่ใช้คุกกี้ ไม่เก็บ IP ไม่นับบอท และไม่นับผู้ที่เปิด Do-Not-Track' }));
   const panel = mountProjectsPanel(prjHost);
-  const stopFloor = mountSiteFloor(floorHost, { onOpen: (key) => panel && panel.open(key) });
-  return () => { stopFloor(); if (panel) panel(); };
+  let stopFloor = () => {}; let gone = false;
+  mountFloorSafe(floorHost, { onOpen: (key) => panel && panel.open(key) }).then((st) => { stopFloor = st; if (gone) st(); });
+  return () => { gone = true; stopFloor(); if (panel) panel(); };
 }
