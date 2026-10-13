@@ -2,6 +2,10 @@
  *  <script defer src="https://YOUR-DOMAIN/t.js" data-site="SITE_KEY"></script>
  *  Optional attributes:  data-dnt="off" (ignore Do-Not-Track)   data-local (also count localhost)   data-api="https://…/api/collect"
  *  Custom events:        sandTrack('ดาวน์โหลดแบบฟอร์ม')
+ *  Single-file apps (one app.html / one Apps Script index.html that swaps screens): add  data-manual  and call, whenever a screen opens,
+ *      sandView('submit')            → counted as the page "/#/submit" (letters, digits, - _ only; the real address is ignored)
+ *      sandRole('staff')             → who is using it: 'admin' | 'staff' (anything else = not stated). Call it once after login. Only this word is sent — never a name or an id.
+ *      sandView('review', 'admin')   → both at once
  */
 (function () {
   'use strict';
@@ -13,6 +17,7 @@
   if (!key || l.protocol === 'file:') return;
   if (s.getAttribute('data-dnt') !== 'off' && (n.doNotTrack === '1' || w.doNotTrack === '1' || n.msDoNotTrack === '1' || n.globalPrivacyControl === true)) return;
   if (/^(localhost|127\.|\[::1\]|0\.0\.0\.0)/.test(l.hostname) && !s.hasAttribute('data-local')) return;
+  var manual = s.hasAttribute('data-manual'); var role = '';
   var api = s.getAttribute('data-api');
   if (!api) { var a = d.createElement('a'); a.href = s.src; api = a.protocol + '//' + a.host + '/api/collect'; }
 
@@ -28,18 +33,19 @@
     var r = d.createElement('a'); r.href = d.referrer;
     return r.hostname && r.hostname !== l.hostname ? r.hostname.replace(/^www\./, '') : '';
   }
-  function send(type, name, first) {
-    var body = JSON.stringify({ k: key, t: type, p: path(), e: name || '', r: first ? ref() : '', u: first ? utm() : '', w: w.innerWidth || 0, l: n.language || '' });
+  function send(type, name, first, vp) {
+    var body = JSON.stringify({ k: key, t: type, p: vp || path(), o: role, e: name || '', r: first ? ref() : '', u: first ? utm() : '', w: w.innerWidth || 0, l: n.language || '' });
     try { if (n.sendBeacon && n.sendBeacon(api, new Blob([body], { type: 'text/plain' }))) return; } catch (e) { /* fall through */ }
     try { fetch(api, { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain' }, keepalive: true, mode: 'no-cors', credentials: 'omit' }); } catch (e) { /* ignore */ }
   }
 
   var last = '', firstView = true;
   function view() {
+    if (manual) return;
     var p = path(); if (p === last) return;
     last = p; send('pv', '', firstView); firstView = false;
   }
-  function start() { if (d.visibilityState === 'prerender') { d.addEventListener('visibilitychange', start, { once: true }); return; } view(); }
+  function start() { if (manual) return; if (d.visibilityState === 'prerender') { d.addEventListener('visibilitychange', start, { once: true }); return; } view(); }
 
   ['pushState', 'replaceState'].forEach(function (m) {
     var orig = w.history && w.history[m]; if (!orig) return;
@@ -48,5 +54,7 @@
   w.addEventListener('popstate', function () { setTimeout(view, 0); });
   w.addEventListener('hashchange', function () { setTimeout(view, 0); });
   w.sandTrack = function (name) { if (name) send('ev', String(name).slice(0, 60), false); };
+  w.sandRole = function (r) { r = String(r || '').toLowerCase(); role = r === 'admin' || r === 'staff' ? r : ''; };
+  w.sandView = function (name, r) { if (r !== undefined) w.sandRole(r); var n = String(name || '').toLowerCase().replace(/[^a-z0-9_\-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); if (!n) return; var p = '/#/' + n; if (p === last) return; last = p; send('pv', '', firstView, p); firstView = false; };
   if (d.readyState === 'loading') d.addEventListener('DOMContentLoaded', start); else start();
 })();
