@@ -17,7 +17,8 @@ import { sessionCall, cacheGet, cacheSet } from '../core/ops.js';
 import { deltaChip, ago } from '../core/charts.js';
 import { THEMES, themeOf, MAX_SITES, PALETTE, IDLE_COL, DEFAULTS, hhmm, fmt, hostOf, normalizeFloor, fromListStats, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample,
   kindMeta, normalizePages, pagesFromStats, pageJourneys, nextPages, prevPages, pageInsights, pagesCsv, makeSamplePages, asJourneys,
-  MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY } from './site-engine.js';
+  MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY,
+  WING_KEY, WING_DEPTH, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext, wingLayout } from './site-engine.js';
 import { drawRoom, roomColor } from './site-rooms.js';
 
 const G = 12; const CORR = 6; const ENT = [0.6, CORR]; const EXIT = [11.4, CORR]; const CAP = 16;
@@ -71,6 +72,7 @@ export function mountSiteFloor(host, opts = {}) {
   let sites = []; let themes = []; let more = 0; let LAY = []; let vis = []; let range = { from: cfg.open, to: cfg.close }; let pf = 1; let sm = summarize([]); let hits = [];
   let started = false; let t = 0; let playing = false; let speed = 20; let raf = 0; let last = 0; let lastMin = -1; let seq = 0; let dead = false; let onScreen = true; let hover = -1;
   let jr = []; let floorRange = range; let ins = null; let ILAY = []; let focus = -1; let entering = false; let iseq = 0; const cam = { z: 1, tx: 0, ty: 0, tz: 1, ttx: 0, tty: 0 };
+  let wingOn = localStorage.getItem(WING_KEY) !== '0'; const W = { map: {}, days: 0, src: '', at: 0, busy: false }; let WL = []; let whits = []; let hoverT = null; let wseq = 0;   // wings = the pages of each system drawn behind its station
   let tw = 60; let ox = 0; let oy = 0; let dpr = 1; let pal = PAL.light; let font = 'sans-serif'; let ctx; let timer = 0;
 
   // ---------- DOM ----------
@@ -85,6 +87,7 @@ export function mountSiteFloor(host, opts = {}) {
   const csvBtn = h('button', { class: 'btn btn-sm', type: 'button', disabled: true, onclick: () => { downloadText(`\ufeff${ins ? pagesCsv(ins.units, S.days, ins.site.name) : dayOn() ? replayCsv(R.rep, sites) : sitesCsv(S.all, S.days)}`, `${ins ? `หน้าในระบบ_${ins.site.key}` : dayOn() ? `โครงการและเว็บไซต์_${R.rep.day}` : 'โครงการและเว็บไซต์'}_${dayOn() && !ins ? 'รายวัน' : `${S.days}วัน`}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`, 'text/csv'); toast('ส่งออกรายงานแล้ว', 'success'); } }, svgIcon(ICONS.download, 16), 'ส่งออก CSV');
   const playBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => (playing ? pause() : play()) });
   const loopBtn = h('button', { class: 'btn s3-loop', type: 'button', 'aria-pressed': String(loopOn), title: 'เมื่อเล่นถึงสิ้นวัน ให้เริ่มใหม่ต่อเนื่อง', onclick: () => setLoop(!loopOn) }, svgIcon(ICONS.rotate, 16), 'วนเล่นซ้ำ');
+  const wingBtn = h('button', { class: 'btn s3-toggle', type: 'button', 'aria-pressed': String(wingOn), title: 'แสดงหน้าย่อยของแต่ละระบบไว้ด้านหลังโครงการ เพื่อดูว่าคนเข้ามาแล้วไปใช้ส่วนไหน โดยไม่ต้องกดเข้าไปทีละระบบ', onclick: () => setWingsOn(!wingOn) }, svgIcon(ICONS.focus, 16), 'ส่วนย่อยหลังโครงการ');
   const modeEl = h('div', { class: 'tabs s3-mode', role: 'tablist', 'aria-label': 'โหมดการเล่นซ้ำ' }); const modeHint = h('small', { class: 's3-modehint', role: 'status', 'aria-live': 'polite' });
   const spd = h('select', { 'aria-label': 'ความเร็วการเล่น', onchange: () => { speed = Number(spd.value); } }, [[10, 'ช้า'], [20, 'ปกติ'], [40, 'เร็ว'], [80, 'เร็วมาก']].map(([v, l]) => h('option', { value: v, selected: v === 20 }, `${l} (${v} นาที/วินาที)`)));
   const legend = h('div', { class: 's3-legend', 'aria-label': 'โครงการที่แสดงในผัง' });
@@ -97,7 +100,7 @@ export function mountSiteFloor(host, opts = {}) {
   host.append(h('section', { class: 's3', 'aria-labelledby': 's3-title' },
     h('div', { class: 's3-head' }, h('div', null, backBtn, titleEl, status), h('div', { class: 's3-tools' }, rangeEl, openBtn, refreshBtn, csvBtn)),
     banner, h('div', { class: 's3-modebar' }, modeEl, modeHint), stage, h('div', { class: 's3-progress', 'aria-hidden': 'true' }, prog),
-    h('div', { class: 's3-controls' }, playBtn, loopBtn,
+    h('div', { class: 's3-controls' }, playBtn, loopBtn, wingBtn,
       h('button', { class: 'btn', type: 'button', onclick: () => { t = range.from; lastMin = -1; playing = true; sync(); } }, svgIcon(ICONS.rotate, 16), 'เล่นใหม่ตั้งแต่เช้า'),
       h('button', { class: 'btn', type: 'button', onclick: () => { t = Math.min(range.to, Math.max(range.from, bkkMinutes())); lastMin = -1; pause(); } }, svgIcon(ICONS.eye, 16), 'ไปที่เวลาปัจจุบัน'),
       h('button', { class: 'btn', type: 'button', onclick: () => { t = crowdPeak(crowd(), range); lastMin = -1; pause(); } }, svgIcon(ICONS.focus, 16), 'ไปที่ช่วงคนแน่นสุด'),
@@ -150,10 +153,11 @@ export function mountSiteFloor(host, opts = {}) {
     const pick = pickSites(S.all); sites = pick.sites; themes = sites.map(themeOf); more = pick.more; LAY = layout(sites.length); sm = summarize(S.all); pf = perFigure(sites, S.days);
     if (ins && ins.source !== source) leave();
     if (R.src !== source) { R.rep = null; R.st = null; R.src = source; }
-    rebuild(started ? 'keep' : 'start'); started = true; tip.hidden = true;
+    rebuildWL(); rebuild(started ? 'keep' : 'start'); started = true; tip.hidden = true;
     chip.textContent = source === 'sample' ? 'ข้อมูลตัวอย่าง' : 'ข้อมูลจริง'; chip.dataset.kind = source;
     if (!ins) cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`);
     csvBtn.disabled = false; drawAll();
+    if (wingOn) loadWings();
     if (mode !== 'typical') loadReplay(mode, !!R.rep);
   }
 
@@ -164,7 +168,7 @@ export function mountSiteFloor(host, opts = {}) {
   /** The people, the replay window and the playhead. how: 'start' first draw · 'keep' data refreshed · 'reset' new mode/day → play it from its first hour. */
   function rebuild(how = 'keep') {
     const day = mode !== 'typical' && !!R.rep;
-    vis = day ? replayVisitors(R.rep, sites, cfg) : visitors(sites, S.days, pf, cfg); jr = asJourneys(vis); floorRange = day ? replayRange(jr, R.rep, bkkMinutes(), cfg) : timeRange(jr, cfg);
+    vis = day ? replayVisitors(R.rep, sites, cfg) : visitors(sites, S.days, pf, cfg); jr = asJourneys(vis); floorRange = day ? replayRange(jr, R.rep, bkkMinutes(), cfg) : timeRange(jr, cfg); planWings();
     if (!ins) {
       range = floorRange; const home = () => (day ? range.from : Math.min(range.to, Math.max(range.from, bkkMinutes())));
       if (how === 'reset') { t = home(); playing = !reduced; endHold = 0; } else if (how === 'start' || t < range.from || t > range.to) t = home();
@@ -203,6 +207,66 @@ export function mountSiteFloor(host, opts = {}) {
     modeHint.textContent = mode === 'typical' ? MODE_HINT.typical : R.busy ? 'กำลังโหลดข้อมูลรายวัน…' : R.rep ? `${R.rep.day === R.rep.today ? 'วันนี้' : dayLabel(R.rep.day)}${R.rep.day === R.rep.today ? ` · ถึงเวลา ${hhmm(bkkMinutes())} น.` : ` · ${fmt(R.st.views)} ครั้ง`}${R.rep.scale > 1 ? ` · สุ่มแสดง 1 ใน ${R.rep.scale} คน` : ''}` : MODE_HINT[mode];
   }
 
+  // ---------- wings: the pages of every system, drawn behind its station (no need to click into each system) ----------
+  const wingActive = () => wingOn && !ins && WL.length > 0;
+  const W_STAY = 0.22; const W_ARR = 0.42;   // share of a visit spent at the station before walking round to its page · share at which the person has arrived there
+  const WING_NOTE = ' · แท่งด้านหลังโครงการคือหน้าย่อยของระบบนั้น (สูง = คนเปิดมาก) คนที่เข้ามาจะเดินอ้อมไปยังหน้าที่ใช้จริง — คลิกแท่งเพื่อเข้าไปดูภายในระบบ';
+  function rebuildWL() { WL = wingOn && !ins && LAY.length ? wingLayout(LAY, sites.map((s) => (W.map[s.key] ? W.map[s.key].units.length : 0)), G, WING_DEPTH) : []; }
+  /** Which page does each drawn person use? A real day knows it (pk); otherwise it is drawn in proportion to the page views. A page that is not drawn keeps the person at the station. */
+  function planWings() {
+    for (const j of jr) {
+      j.pg = -1; if (!wingActive()) continue;
+      const z = j.stops[0].zone; const w = W.map[sites[z] && sites[z].key]; if (!w || !WL[z] || !WL[z].tiles.length) continue;
+      j.pg = j.pk ? w.units.findIndex((u) => u.key === j.pk) : wingPick(w, j.id);
+    }
+  }
+  function setWingData(map) {
+    W.map = map; W.at = Date.now(); W.days = S.days; W.src = S.source; W.busy = false; rebuildWL(); planWings(); lastMin = -1; drawStatus();
+    if (!ins) { drawLegend(); drawInsights(); drawTable(); drawNote(); }
+  }
+  async function loadWings() {
+    if (dead || !sites.length) return;
+    if (W.src === S.source && W.days === S.days && Date.now() - W.at < 60000 && Object.keys(W.map).length) { rebuildWL(); planWings(); return; }
+    const my = ++wseq;
+    if (S.source === 'sample') { setWingData(makeSampleWings(sites, S.days)); return; }
+    if (!Object.keys(W.map).length || W.days !== S.days || W.src !== S.source) { const c = cacheGet(`wg:${S.days}`); const m = c && normalizeWings(c.d); if (m && Object.keys(m).length) setWingData(m); }
+    W.busy = true; drawStatus();
+    try {
+      let m = null; let fallback = false;
+      try {
+        const raw = await sessionCall('projects', 'wings', { days: S.days }); m = normalizeWings(raw);
+        if (!m) { const bad = new Error('รูปแบบข้อมูลส่วนย่อยไม่ตรงกับเวอร์ชันล่าสุด'); /** @type {any} */ (bad).code = 'UNKNOWN_ACTION'; throw bad; }
+        cacheSet(`wg:${S.days}`, raw);
+      } catch (e) {
+        if (!e || e.code !== 'UNKNOWN_ACTION') throw e;
+        fallback = true; m = {};   // older Apps Script: one `pages` call per project (slower, but it works)
+        await Promise.all(sites.map(async (s) => { try { const r = await fetchPages(s, S.days); const w = wingOf(r.d); if (w) m[s.key] = w; } catch { /* that system gets no annex */ } }));
+      }
+      if (my !== wseq || dead) return;
+      setWingData(m);
+      if (fallback) banner.append(notice('warn', 'โหลดส่วนย่อยทีละระบบ (ช้ากว่า)', 'Apps Script ยังเป็น Analytics.gs เวอร์ชันเก่า (ไม่มี op wings) — วางไฟล์ใหม่แล้ว Deploy เวอร์ชันใหม่ ผังจะโหลดหน้าย่อยของทุกระบบในครั้งเดียวและเร็วขึ้น'));
+    } catch (e) {
+      if (my !== wseq || dead) return; W.busy = false; drawStatus();
+      if (!Object.keys(W.map).length) banner.append(notice('warn', 'โหลดส่วนย่อยของระบบไม่สำเร็จ', (e && e.message) || 'เกิดข้อผิดพลาด'));
+    }
+  }
+  function setWingsOn(v) {
+    wingOn = v; try { localStorage.setItem(WING_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+    wingBtn.setAttribute('aria-pressed', String(v)); hoverT = null; tip.hidden = true;
+    if (!ins) { rebuildWL(); resize(); planWings(); }
+    if (v) loadWings();
+    lastMin = -1; drawAll(); toast(v ? 'แสดงหน้าย่อยของแต่ละระบบไว้ด้านหลังโครงการ' : 'ซ่อนส่วนย่อยหลังโครงการ');
+  }
+  const topPageTxt = (key) => { const w = W.map[key]; const u = w && w.units[0]; return u && w.tot ? `${kindMeta(u.kind).icon} ${u.name} · ${Math.round((u.pv / w.tot) * 100)}%` : '–'; };
+  function wingInsights() {
+    const out = []; const ranked = sites.map((s) => ({ s, w: W.map[s.key] })).filter((x) => x.w && x.w.tot > 0 && x.w.units.length).sort((a, b) => b.s.pv - a.s.pv).slice(0, 3);
+    for (const { s, w } of ranked) {
+      const u = w.units[0]; const nx = wingNext(w, u.key); const nu = nx ? w.units.find((x) => x.key === nx.to) : null;
+      out.push({ tone: 'info', text: `${s.name}: คนใช้หน้า “${u.name}” มากสุด (${Math.round((u.pv / w.tot) * 100)}% ของทั้งระบบ)${nu ? ` และมักไปต่อที่ “${nu.name}”` : ''}` });
+    }
+    return out;
+  }
+
   // ---------- panels ----------
   const dot = (c) => h('i', { class: 's3-dot', style: `background:${c}` });
   const colOf = (i) => { const st = stateOf(sites[i]); return st === 'ok' ? PALETTE[i % PALETTE.length] : st === 'silent' ? STATE_COL.silent : IDLE_COL; };
@@ -211,6 +275,7 @@ export function mountSiteFloor(host, opts = {}) {
     refreshBtn.disabled = S.busy; refreshBtn.classList.toggle('is-loading', S.busy);
     if (S.busy) { status.className = 's3-status is-busy'; status.replaceChildren(S.all.length ? 'กำลังอัปเดตข้อมูล…' : 'กำลังโหลดข้อมูล…'); return; }
     if (R.busy) { status.className = 's3-status is-busy'; status.replaceChildren('กำลังโหลดข้อมูลรายวัน…'); return; }
+    if (W.busy && wingOn && !ins) { status.className = 's3-status is-busy'; status.replaceChildren('กำลังโหลดหน้าย่อยของแต่ละระบบ…'); return; }
     if (S.source === 'sample') { status.className = 's3-status'; status.replaceChildren('ตัวอย่างการทำงานของผัง'); return; }
     if (S.err) { status.className = 's3-status is-err'; status.replaceChildren(dot('#ef4444'), 'อัปเดตล่าสุดไม่สำเร็จ · แสดงข้อมูลเดิม'); return; }
     status.className = 's3-status is-ok'; status.replaceChildren(dot('#16a34a'), `อัปเดต ${ago(S.at)}${S.fromCache ? ' · จากข้อมูลที่จำไว้' : ''} · ${dayOn() ? (R.rep.day === R.rep.today ? 'วันนี้' : dayLabel(R.rep.day)) : `ย้อนหลัง ${S.days} วัน`}`);
@@ -247,6 +312,7 @@ export function mountSiteFloor(host, opts = {}) {
     let list;
     if (ins) list = pageInsights(ins.units, ins.flows, S.days);
     else if (dayOn()) { const base = replayInsights(R.rep, R.st, Object.fromEntries(S.all.map((x) => [x.key, x.name]))); const priv = base.pop(); list = [...base, ...insights(S.all, S.days, S.extra).filter((x) => x.tone === 'warn'), priv]; } else list = insights(S.all, S.days, S.extra);
+    if (!ins && wingOn) list = [...list, ...wingInsights()];
     insightBox.replaceChildren(h('ul', { class: 's3-ilist' }, list.map((x) => h('li', { class: `tone-${x.tone}` }, svgIcon(x.tone === 'warn' ? ICONS.alert : x.tone === 'ok' ? ICONS.check : ICONS.eye, 18), h('span', null, x.text)))));
   }
   function drawLegend() { if (ins) legendIn(); else legendFloor(); }
@@ -254,18 +320,20 @@ export function mountSiteFloor(host, opts = {}) {
     legend.replaceChildren(...sites.map((s, i) => h('button', { type: 'button', class: `s3-lg${usageRank(s) === 0 ? ' is-live' : ''}`, title: `${stTxt(s)} · เปิดรายละเอียด`, onclick: () => open(s.key) }, h('i', { style: `background:${colOf(i)}` }), `${THEMES[themes[i]].icon} ${s.name}`, usageRank(s) === 0 ? h('em', { class: 's3-livetag' }, `● ${fmt(s.realtime)}`) : null)),
       ...(more ? [h('span', { class: 's3-lg more' }, `+${more} โครงการในตารางด้านล่าง`)] : []),
       ...(dayOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-new' }), 'ผู้ใช้ใหม่ (ครั้งแรกของวัน)'), h('span', { class: 's3-lg' }, h('i', { class: 's3-ring' }), 'ผู้ใช้เดิมที่กลับมาในวันเดียวกัน')] : []),
+      ...(wingActive() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-wing' }), 'แท่งหลังโครงการ = หน้าย่อยของระบบ (ยิ่งสูงยิ่งมีคนเปิดมาก)')] : []),
       h('span', { class: 's3-lg' }, h('i', { style: `background:${WALK}` }), 'กำลังเดินเข้า/ออก'), h('span', { class: 's3-lg' }, h('i', { style: `background:${STATE_COL.silent}` }), 'เงียบผิดปกติ'));
   }
   function drawTable() { if (ins) tableIn(); else tableFloor(); }
   function tableFloor() {
     const dd = dayOn(); const rows = S.all.filter((x) => x.status !== 'deleted').slice().sort((x, y) => usageRank(x) - usageRank(y) || y.pv - x.pv);
-    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, (dd ? ['โครงการ', 'เว็บไซต์', 'เปิดหน้า (วันนั้น)', 'ผู้ใช้ใหม่', 'ผู้ใช้เดิมกลับมา', 'ออนไลน์', 'สถานะ'] : ['โครงการ', 'เว็บไซต์', 'เปิดหน้า', 'เทียบก่อนหน้า', 'ผู้เข้าชม', 'ออนไลน์', 'สถานะ']).map((x) => h('th', null, x)))),
+    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, (dd ? ['โครงการ', 'เว็บไซต์', 'เปิดหน้า (วันนั้น)', 'ผู้ใช้ใหม่', 'ผู้ใช้เดิมกลับมา', 'ออนไลน์', 'หน้าที่ใช้มากสุด', 'สถานะ'] : ['โครงการ', 'เว็บไซต์', 'เปิดหน้า', 'เทียบก่อนหน้า', 'ผู้เข้าชม', 'ออนไลน์', 'หน้าที่ใช้มากสุด', 'สถานะ']).map((x) => h('th', null, x)))),
       h('tbody', null, rows.map((s2) => { const tr = trendOf(s2); const dr = dd ? R.rep.sites[s2.key] : null;
         return h('tr', null, h('td', null, h('button', { type: 'button', class: 'rowbtn', onclick: () => open(s2.key), title: 'เปิดรายละเอียด' }, `${THEMES[themeOf(s2)].icon} ${s2.name}`), sites.some((x) => x.key === s2.key) ? h('button', { type: 'button', class: 'rowbtn s3-enter', onclick: () => enterSite(sites.findIndex((x) => x.key === s2.key)), title: 'ซูมเข้าไปดูหน้าต่างๆ ภายในระบบ' }, 'เข้าไปดูภายใน ›') : null), h('td', { class: 's3-cut', title: s2.url }, hostOf(s2.url) || '–'),
           dd ? [h('td', null, fmt(dr ? dr.n : 0)), h('td', null, fmt(dr ? dr.fresh : 0)), h('td', null, fmt(dr ? dr.back : 0))] : [h('td', null, fmt(s2.pv)), h('td', null, s2.prev === null ? '–' : tr === null ? '0%' : deltaChip(s2.pv, s2.prev)), h('td', null, fmt(s2.uv))],
-          h('td', null, s2.realtime === null ? '–' : fmt(s2.realtime)), h('td', null, h('span', { class: `s3-pill st-${stCls(s2)}` }, stTxt(s2)))); }))));
+          h('td', null, s2.realtime === null ? '–' : fmt(s2.realtime)), h('td', { class: 's3-cut', title: 'หน้าที่คนเปิดมากสุดในระบบนี้' }, topPageTxt(s2.key)), h('td', null, h('span', { class: `s3-pill st-${stCls(s2)}` }, stTxt(s2)))); }))));
   }
-  function drawNote() {
+  function drawNote() { drawNoteBase(); if (!ins && wingActive()) note.textContent += WING_NOTE; }
+  function drawNoteBase() {
     if (ins) { note.textContent = `ห้องหนึ่ง = หนึ่งหน้าของระบบ · คน 1 คนในภาพ ≈ ${fmt(ins.pf)} การเปิดหน้า · เส้นทางเดินระหว่างห้องนับจากผู้เข้าชมคนเดียวกันในวันเดียวกัน (ไม่ระบุตัวตน) · ภาพเป็น "วันทั่วไป" ที่เฉลี่ยจากช่วง ${S.days} วัน (เวลาไทย) · เวลาเดินและเวลาอยู่ในห้องเป็นเวลาสมมติเพื่อให้มองเห็นได้`; return; }
     if (dayOn()) { note.textContent = `${S.source === 'sample' ? 'ข้อมูลตัวอย่างเพื่อแสดงการทำงานของผัง · ' : ''}คน 1 คนในภาพ = การเข้าใช้จริง 1 ครั้ง${R.rep.scale > 1 ? ` (สุ่มแสดง 1 ใน ${R.rep.scale} คน ตัวเลขด้านบนเป็นค่าจริงทั้งหมด)` : ''} · คนที่มีวงแหวนสีทองคือผู้ใช้เดิมที่กลับมาใหม่ภายในวันเดียวกัน (ห่างจากการเปิดครั้งก่อนเกิน 30 นาที) · ${REPLAY_PRIVACY} · เวลาเดินเข้า–ออกและเวลาอยู่ที่สถานีเป็นเวลาสมมติเพื่อให้มองเห็นได้ · ไม่นับบอท`; return; }
     note.textContent = `${S.source === 'sample' ? 'ข้อมูลตัวอย่างเพื่อแสดงการทำงานของผัง · ' : ''}คน 1 คนในภาพ ≈ ${fmt(pf)} การเปิดหน้า · ภาพเป็น "วันทั่วไป" ที่เฉลี่ยจากช่วง ${S.days} วัน (เวลาไทย) ไม่ใช่ตัวเลขของวันใดวันหนึ่ง · เวลาเดินเข้า–ออกและเวลาอยู่ที่สถานีเป็นเวลาสมมติเพื่อให้มองเห็นได้ · สถิติไม่ใช้คุกกี้ ไม่เก็บ IP และไม่นับบอท`;
@@ -283,8 +351,8 @@ export function mountSiteFloor(host, opts = {}) {
   const Z = (u) => u * tw * 0.5;
   function resize() {
     const r = scroller.getBoundingClientRect(); const avail = Math.max(280, Math.round(r.width)); const w = Math.max(avail, 600);
-    const hgt = Math.round(w * 0.58); dpr = Math.min(2, devicePixelRatio || 1);
-    cv.width = w * dpr; cv.height = hgt * dpr; cv.style.width = `${w}px`; cv.style.height = `${hgt}px`; tw = Math.min(w / 12.6, (hgt * 0.8) / 6); ox = w / 2; oy = hgt * 0.14;
+    const wd = !ins && wingOn ? WING_DEPTH : 0; const hgt = Math.round(w * (wd ? 0.66 : 0.58)); dpr = Math.min(2, devicePixelRatio || 1);
+    cv.width = w * dpr; cv.height = hgt * dpr; cv.style.width = `${w}px`; cv.style.height = `${hgt}px`; tw = Math.min(w / (12.6 + wd), (hgt * 0.8) / ((G + wd) / 2)); ox = w / 2; oy = wd ? tw * (wd / 4 + 1.35) : hgt * 0.14;
     scroller.scrollLeft = (w - avail) / 2; lastMin = -1; if (ins && focus >= 0) setCam(FOCUS_ZOOM, center(focus, ILAY)); else setCam(1, [0, 0]);
   }
 
@@ -325,6 +393,56 @@ export function mountSiteFloor(host, opts = {}) {
     const pulse = reduced ? 0.85 : 0.75 + 0.15 * Math.sin(now / 600); ctx.globalAlpha = pulse;   // medical cross emblem painted on the corridor
     poly([P(G / 2 - 0.55, CORR - 0.15), P(G / 2 + 0.55, CORR - 0.15), P(G / 2 + 0.55, CORR + 0.15), P(G / 2 - 0.55, CORR + 0.15)], pal.brand); poly([P(G / 2 - 0.15, CORR - 0.55), P(G / 2 + 0.15, CORR - 0.55), P(G / 2 + 0.15, CORR + 0.55), P(G / 2 - 0.15, CORR + 0.55)], pal.brand); ctx.globalAlpha = 1;
     poly([P(0, 0), P(G, 0), P(G, G), P(0, G)], null, pal.brand, 2);   // building outline
+  }
+
+  // ---------- wings: annex slabs, walkways, page pillars ----------
+  /** Slab of each annex (behind the wall when `back`, in front of it otherwise) with a ground pad under every page. */
+  function wingGround(back) {
+    WL.forEach((w, i) => {
+      if ((w.out === -1) !== back) return; const q = w.slab; const col = colOf(i); const th = Z(0.22); const a = P(q.x1, q.y0); const b = P(q.x1, q.y1); const c = P(q.x0, q.y1);
+      poly([a, b, [b[0], b[1] + th], [a[0], a[1] + th]], shade(pal.slab, 0.72)); poly([c, b, [b[0], b[1] + th], [c[0], c[1] + th]], shade(pal.slab, 0.9));
+      const top = [P(q.x0, q.y0), P(q.x1, q.y0), P(q.x1, q.y1), P(q.x0, q.y1)]; poly(top, pal.floor); ctx.globalAlpha = 0.12; poly(top, col); ctx.globalAlpha = 1; poly(top, null, col, 1.3);
+      const wg = W.map[sites[i].key]; if (!wg) return; const mxw = Math.max(1, ...wg.units.map((u) => u.pv));
+      w.tiles.forEach((t, p) => {
+        const u = wg.units[p]; if (!u) return; const hs = w.size / 2 + 0.07; const rc = roomColor(u.kind); const hov = hoverT && hoverT.i === i && hoverT.p === p;
+        const pad = [P(t.c[0] - hs, t.c[1] - hs), P(t.c[0] + hs, t.c[1] - hs), P(t.c[0] + hs, t.c[1] + hs), P(t.c[0] - hs, t.c[1] + hs)];
+        ctx.globalAlpha = 0.14 + 0.5 * (u.pv / mxw); poly(pad, rc); ctx.globalAlpha = 1; poly(pad, null, hov ? pal.ink : rc, hov ? 2.4 : 1.2);
+      });
+    });
+  }
+  /** The walkway between two stations that leads to each annex; its dashes flow away from the station. */
+  function wingLanes(now) {
+    ctx.save();
+    WL.forEach((w, i) => {
+      const l = w.lane; const y0 = Math.min(l.y0, l.y1); const y1 = Math.max(l.y0, l.y1); const col = colOf(i);
+      ctx.globalAlpha = 0.55; poly([P(l.x - 0.17, y0), P(l.x + 0.17, y0), P(l.x + 0.17, y1), P(l.x - 0.17, y1)], pal.corr); ctx.globalAlpha = 1;
+      ctx.strokeStyle = col; ctx.globalAlpha = 0.6; ctx.lineWidth = Math.max(1.5, tw * 0.022); ctx.lineCap = 'round'; ctx.setLineDash([tw * 0.07, tw * 0.09]); ctx.lineDashOffset = reduced ? 0 : (now / 55) * (w.out === -1 ? 1 : -1) * (tw / 60);
+      const A = P(l.x, l.y0); const B = P(l.x, l.y1); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); ctx.setLineDash([]);
+    });
+    ctx.restore();
+  }
+  /** Page pillars (height = page views of that system, glowing while someone stands there) and their hit boxes. Returns the labels to draw on top. */
+  function wingItems(items, F, now) {
+    const labels = [];
+    WL.forEach((w, i) => {
+      const wg = W.map[sites[i].key]; if (!wg) return; const mxw = Math.max(1, ...wg.units.map((u) => u.pv));
+      w.tiles.forEach((t, p) => {
+        const u = wg.units[p]; if (!u) return; const [tx, ty] = t.c; const rc = roomColor(u.kind); const hu = 0.12 + 0.55 * (u.pv / mxw); const hot = F.ww[i][p].length > 0; const bw = w.size * 0.56; const hs = w.size / 2; const up = w.out === -1 ? 100 : 0;   // back annexes are drawn above the neighbouring stations' walls, never hidden by them
+        items.push({ d: tx + ty + up + 0.02, f: () => {
+          ctx.globalAlpha = u.pv ? 1 : 0.55; box(tx, ty, bw, bw, hu, hot && !reduced ? shade(rc, 1 + 0.12 * Math.sin(now / 260 + p)) : rc); ctx.globalAlpha = 1;
+          const [ix, iy] = P(tx, ty, Z(hu) + tw * 0.13); ctx.font = `${Math.max(10, tw * 0.19)}px ${font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = pal.ink; ctx.fillText(kindMeta(u.kind).icon, ix, iy);
+          if (u.realtime > 0) { ctx.fillStyle = STATE_COL.ok; ctx.globalAlpha = reduced ? 1 : 0.6 + 0.4 * Math.sin(now / 350 + p); ctx.beginPath(); ctx.arc(ix + tw * 0.12, iy - tw * 0.1, Math.max(2.5, tw * 0.035), 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
+        } });
+        const pts = [P(tx - hs, ty - hs), P(tx + hs, ty - hs), P(tx + hs, ty + hs), P(tx - hs, ty + hs), P(tx, ty, Z(hu) + tw * 0.32)];
+        whits.push({ i, p, key: u.key, d: tx + ty, x0: Math.min(...pts.map((q) => q[0])), x1: Math.max(...pts.map((q) => q[0])), y0: Math.min(...pts.map((q) => q[1])), y1: Math.max(...pts.map((q) => q[1])) });
+        const hov = hoverT && hoverT.i === i && hoverT.p === p; const busiest = F.ww[i][p].length > 0 && F.ww[i].every((a2, q) => q === p || a2.length < F.ww[i][p].length || (a2.length === F.ww[i][p].length && q > p));
+        if (hov || busiest) {   // one label per station at most: the hovered page, else the page where most people stand right now
+          const [lx, ly] = P(tx, ty, Z(hu) + tw * 0.4); const n = F.wcum[i][p] * pfNow();
+          labels.push({ x: lx, y: ly, text: `${short(u.name, hov ? 18 : 9)} · ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(n)}`, col: rc });
+        }
+      });
+    });
+    return labels;
   }
 
   // ---------- gates: เข้าสู่ระบบ (teal) / ออกสู่ระบบ (rose) — a glass portal with a neon frame, a scan band and chevrons that flow the way people walk ----------
@@ -415,14 +533,24 @@ export function mountSiteFloor(host, opts = {}) {
   const curLay = () => (ins ? ILAY : LAY);
   function frameState(tt) {
     const n = curLay().length; const work = Array.from({ length: n }, () => []); const cum = Array(n).fill(0);
-    for (const j of crowd()) j.stops.forEach((s, k) => { if (tt >= s.start) cum[s.zone] += 1; if (tt >= s.start && tt < s.end) work[s.zone].push({ s, id: j.id, key: j.id * 8 + k }); });
-    const rank = new Map(); work.forEach((a) => a.sort((x, y) => x.s.start - y.s.start || x.id - y.id).forEach((w, i) => rank.set(w.key, i)));
+    const wk = wingActive(); const ww = wk ? WL.map((l) => l.tiles.map(() => [])) : []; const wcum = wk ? WL.map((l) => l.tiles.map(() => 0)) : [];
+    for (const j of crowd()) {
+      j.stops.forEach((s, k) => {
+        if (tt >= s.start) cum[s.zone] += 1;
+        const wp = wk && j.pg >= 0 && j.stops.length === 1 && !!(WL[s.zone] && WL[s.zone].tiles[j.pg]); const dur = s.end - s.start;
+        if (tt >= s.start && tt < (wp ? s.start + W_STAY * dur : s.end)) work[s.zone].push({ s, id: j.id, key: j.id * 8 + k });   // a person who goes on to a page leaves the station's queue early
+        if (wp && tt >= s.start + W_ARR * dur) { wcum[s.zone][j.pg] += 1; if (tt < s.end) ww[s.zone][j.pg].push({ id: j.id, key: j.id * 8 + k, t: s.start + W_ARR * dur }); }
+      });
+    }
+    const rank = new Map(); work.forEach((a2) => a2.sort((x, y) => x.s.start - y.s.start || x.id - y.id).forEach((w, i) => rank.set(w.key, i)));
+    const wrank = new Map(); ww.forEach((zs) => zs.forEach((a2) => a2.sort((x, y) => x.t - y.t || x.id - y.id).forEach((w, i) => wrank.set(w.key, i))));
     if (dayOn()) sites.forEach((s2, i) => { cum[i] = cumViews(R.rep, s2.key, tt); });   // a replayed day counts its real page views, not the drawn people
-    return { work, cum, rank };
+    return { work, cum, rank, ww, wcum, wrank };
   }
   /** Where a visitor is at minute `tt`: walking in → at a station/room → (walking to the next room) → walking out. */
   function place(j, tt, F) {
     if (tt < j.enter || tt >= j.exit) return null;
+    if (!ins && j.pg >= 0 && j.stops.length === 1 && WL[j.stops[0].zone] && WL[j.stops[0].zone].tiles[j.pg]) return placeWing(j, tt, F);
     const L = curLay(); const st = j.stops; const door = (z) => [L[z].door[0], CORR]; const rk = (k) => F.rank.get(j.id * 8 + k) ?? 0; const q = (z) => slot(L[z], F.work[z].length);
     if (tt < st[0].start) return { pos: along([ENT, door(st[0].zone), q(st[0].zone)], (tt - j.enter) / Math.max(1, st[0].start - j.enter)), state: 'walk', zone: st[0].zone, rank: 0 };
     for (let k = 0; k < st.length; k++) {
@@ -433,6 +561,20 @@ export function mountSiteFloor(host, opts = {}) {
     }
     const l = st[st.length - 1];
     return { pos: along([slot(L[l.zone], 0), door(l.zone), EXIT], (tt - l.end) / Math.max(1, j.exit - l.end)), state: 'walk', zone: l.zone, rank: 0 };
+  }
+
+  /** A visit that goes on to a page: queue at the station → walk round through the gap between two stations → stand on the page's tile → walk out the same way. */
+  function placeWing(j, tt, F) {
+    const s = j.stops[0]; const z = s.zone; const L = LAY[z]; const wl = WL[z]; const tile = wl.tiles[j.pg]; const dur = s.end - s.start; const a = s.start + W_STAY * dur; const b = s.start + W_ARR * dur;
+    const rk = F.rank.get(j.id * 8) ?? 0; const wr = F.wrank.get(j.id * 8) ?? 0; const lx = wl.lane.x;
+    const tp = [tile.c[0] + ((wr % 3) - 1) * 0.26, tile.c[1] + 0.5 + Math.floor(wr / 3) * 0.22];   // in front of the pillar, on the viewer's side
+    if (tt < s.start) return { pos: along([ENT, [L.door[0], CORR], slot(L, F.work[z].length)], (tt - j.enter) / Math.max(1, s.start - j.enter)), state: 'walk', zone: z, rank: 0 };
+    if (tt < a) return { pos: slot(L, rk), state: 'work', zone: z, rank: rk };
+    const s0 = slot(L, rk);
+    if (tt < b) return { pos: along([s0, [lx, s0[1]], [lx, tp[1]], tp], (tt - a) / Math.max(1, b - a)), state: 'walk', zone: z, rank: 0 };
+    const w = W.map[sites[z].key]; const col = roomColor(w.units[j.pg].kind);
+    if (tt < s.end) return { pos: tp, state: 'wing', zone: z, rank: wr, col };
+    return { pos: along([tp, [lx, tp[1]], [lx, CORR], EXIT], (tt - s.end) / Math.max(1, j.exit - s.end)), state: 'walk', zone: z, rank: 0 };
   }
 
   /** What to draw in each cell: stations (projects) on the floor, rooms (pages) inside a system. */
@@ -471,9 +613,12 @@ export function mountSiteFloor(host, opts = {}) {
   function draw(now) {
     const w = cv.width / dpr; const hgt = cv.height / dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, hgt); ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.tx, dpr * cam.ty);
-    const L = curLay(); const Zs = zones(); const F = frameState(t); const items = []; const mx = Math.max(1, ...Zs.map((z) => z.pv)); const Hz = Z(1.4); hits = [];
+    const L = curLay(); const Zs = zones(); const F = frameState(t); const items = []; const mx = Math.max(1, ...Zs.map((z) => z.pv)); const Hz = Z(1.4); hits = []; whits = []; const wk = wingActive();
     const kit = { ctx, P, Z, tw, pal, reduced, box, faceX, faceY, disc, poly, shade };
-    hospitalBase(now); gatePad('in', now); gatePad('out', now);
+    if (wk) wingGround(true);
+    hospitalBase(now);
+    if (wk) { wingGround(false); wingLanes(now); }
+    gatePad('in', now); gatePad('out', now);
     const lanes = ins ? flowLanes(Zs, L) : [];
     Zs.forEach((z, i) => {
       const l = L[i]; const [cx, cy] = l.c; const x0 = cx - l.hx; const x1 = cx + l.hx; const y0 = cy - l.hy; const y1 = cy + l.hy; const col = z.col; const dim = focus >= 0 && focus !== i ? 0.4 : 1;
@@ -490,19 +635,21 @@ export function mountSiteFloor(host, opts = {}) {
       const ph = z.pv ? 0.2 + 0.8 * (z.pv / mx) : 0.08; items.push({ d: cx + cy + 0.3, f: () => { ctx.globalAlpha = dim; box(x1 - 0.22, cy + l.dir * 0.05, 0.24, 0.24, ph, col); ctx.globalAlpha = 1; } });   // data pillar: height = page views
     });
     items.push(...gateItems('in', now), ...gateItems('out', now));
+    const wlabels = wk ? wingItems(items, F, now) : [];
     let here = 0; let entered = 0; let enteredBack = 0; let left = 0;
     for (const j of crowd()) {
       if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
       const r = place(j, t, F); if (!r) continue; here += 1;
-      if (r.state === 'work' && r.rank >= CAP) continue;
-      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK, !!j.back, now) });
+      if (r.state === 'work' && r.rank >= CAP) continue; if (r.state === 'wing' && r.rank >= 6) continue;
+      items.push({ d: r.pos[0] + r.pos[1] + 0.01 + (r.state === 'wing' && WL[r.zone] && WL[r.zone].out === -1 ? 100 : 0), f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : r.state === 'wing' ? r.col : WALK, !!j.back, now) });
     }
     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
+    wlabels.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.78));
     Zs.forEach((z, i) => {
       const l = L[i]; const [lx, ly] = l.top ? P(l.c[0], l.c[1] - l.hy, Hz) : P(l.c[0], l.c[1] + l.hy, 0); const sc = ins && L.length > 6 ? 0.82 : 1; const kz = Math.pow(cam.z, -0.6) * sc;
       const off = (l.top ? -tw * 0.22 : tw * 0.24) * kz; const hh = Math.max(16, tw * 0.27 * kz);
-      pill(`${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : 20)}`, lx, ly + off, !ins && z.dot === STATE_COL.silent ? STATE_COL.silent : null, sc);
-      pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
+      pill(`${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : wk ? 16 : 20)}`, lx, ly + off, !ins && z.dot === STATE_COL.silent ? STATE_COL.silent : null, sc);
+      if (wk && WL[i]) { const q = WL[i].slab; const [nx, ny] = P((q.x0 + q.x1) / 2, WL[i].out === -1 ? q.y0 - 0.1 : q.y1 + 0.1); pill(z.line(F, i), nx, ny + (WL[i].out === -1 ? -tw * 0.12 : tw * 0.14), z.lineCol(F, i), 0.9); } else pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
     });
     lanes.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.8));
     gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`);
@@ -537,11 +684,11 @@ export function mountSiteFloor(host, opts = {}) {
       const st = await sessionCall('projects', 'stats', { key: s.key, days }); return { d: normalizePages(pagesFromStats(st, days)), approx: true };
     }
   }
-  async function enterSite(i) {
+  async function enterSite(i, focusKey = '') {
     if (!idle()) return; const s = sites[i]; if (!s) return; entering = true; tip.hidden = true; const my = ++iseq; setCam(1.9, center(i, LAY));
     try {
       const [res] = await Promise.all([fetchPages(s, S.days), new Promise((r) => { setTimeout(r, reduced ? 0 : 340); })]); if (my !== iseq || dead) return;
-      openInside(s, i, res.d, res.approx);
+      openInside(s, i, res.d, res.approx); if (focusKey) { const k = roomIdx(focusKey); if (k >= 0) focusRoom(k); }
     } catch (e) { if (my !== iseq || dead) return; toast(`เปิดมุมมองภายในระบบไม่สำเร็จ — ${e.message || e}`, 'error', 5000); setCam(1, [0, 0]); } finally { if (my === iseq) entering = false; }
   }
   function openInside(s, i, d, approx) {
@@ -549,12 +696,12 @@ export function mountSiteFloor(host, opts = {}) {
     const tot = units.reduce((a, u) => a + u.pv, 0); const top = units.filter((u) => u.kind !== 'p:other').sort((a, b) => b.pv - a.pv)[0];
     ins = { site: s, idx: i, d, units, flows: d.flows, journeys, pf: pf2, hourly, peak: tot ? hourly.indexOf(Math.max(...hourly)) : -1, tot, top: top && top.pv ? top.key : '', next: nextPages(units, d.flows), prev: prevPages(units, d.flows), approx, source: S.source };
     ILAY = layout(units.length); focus = -1; range = timeRange(journeys, cfg); t = Math.min(range.to, Math.max(range.from, bkkMinutes())); lastMin = -1; hover = -1;
-    fadeSwap(); setCam(1, [0, 0]); banner.replaceChildren(...(approx ? [notice('warn', 'ยังไม่เห็นเส้นทางเดินระหว่างหน้า', 'Apps Script ยังเป็นเวอร์ชันเก่า (ไม่มี op pages) — ตัวเลขรายหน้าเป็นค่าประมาณและไม่มีเส้นทางเดิน วางไฟล์ Analytics.gs ใหม่แล้ว Deploy เวอร์ชันใหม่')] : units.length ? [] : [notice('info', 'ยังไม่มีข้อมูลรายหน้า', 'วางโค้ดติดตามในทุกหน้าของเว็บไซต์นี้')]));
+    rebuildWL(); resize(); fadeSwap(); setCam(1, [0, 0]); banner.replaceChildren(...(approx ? [notice('warn', 'ยังไม่เห็นเส้นทางเดินระหว่างหน้า', 'Apps Script ยังเป็นเวอร์ชันเก่า (ไม่มี op pages) — ตัวเลขรายหน้าเป็นค่าประมาณและไม่มีเส้นทางเดิน วางไฟล์ Analytics.gs ใหม่แล้ว Deploy เวอร์ชันใหม่')] : units.length ? [] : [notice('info', 'ยังไม่มีข้อมูลรายหน้า', 'วางโค้ดติดตามในทุกหน้าของเว็บไซต์นี้')]));
     cv.setAttribute('aria-label', `ภายในระบบ ${s.name}: ${units.length} หน้า · เปิดหน้ารวม ${fmt(tot)} ครั้งใน ${S.days} วัน`); playing = !reduced; drawAll();
   }
   function leave() {
     if (!ins) return; ins = null; ILAY = []; focus = -1; range = floorRange; t = Math.min(range.to, Math.max(range.from, t)); lastMin = -1; hover = -1; tip.hidden = true;
-    banner.replaceChildren(); fadeSwap(); setCam(1, [0, 0]); cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`); drawAll();
+    banner.replaceChildren(); rebuildWL(); resize(); planWings(); fadeSwap(); setCam(1, [0, 0]); cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`); drawAll();
   }
   function focusRoom(i) {
     if (!ins) return; if (i === focus || i < 0) { focus = -1; setCam(1, [0, 0]); } else { focus = i; setCam(FOCUS_ZOOM, center(i, ILAY)); }
@@ -598,6 +745,18 @@ export function mountSiteFloor(host, opts = {}) {
     const hit = hits.filter((q) => x >= q.x0 && x <= q.x1 && y >= q.y0 - tw * 0.55 && y <= q.y1 + tw * 0.2).sort((a2, b2) => (L[b2.i].c[0] + L[b2.i].c[1]) - (L[a2.i].c[0] + L[a2.i].c[1]))[0];
     return hit ? hit.i : -1;
   }
+  function tileAt(ev) {
+    if (ins || !whits.length) return null;
+    const r = cv.getBoundingClientRect(); const x = (ev.clientX - r.left - cam.tx) / cam.z; const y = (ev.clientY - r.top - cam.ty) / cam.z;
+    return whits.filter((q) => x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1).sort((a2, b2) => b2.d - a2.d)[0] || null;
+  }
+  function showTileTip(tl, ev) {
+    const w = W.map[sites[tl.i].key]; const u = w && w.units[tl.p]; if (!u) { tip.hidden = true; return; }
+    const sr = stage.getBoundingClientRect(); const km = kindMeta(u.kind); const nx = wingNext(w, u.key); const nu = nx ? w.units.find((x) => x.key === nx.to) : null;
+    tip.replaceChildren(h('b', null, `${km.icon} ${u.name}`), h('small', null, `${sites[tl.i].name} · ${km.label} · ${u.path}`), h('span', null, `${fmt(u.pv)} ครั้ง (${Math.round((u.pv / (w.tot || 1)) * 100)}% ของระบบนี้) · ผู้เข้าชม ${fmt(u.uv)}${u.realtime ? ` · ออนไลน์ ${fmt(u.realtime)}` : ''}`),
+      nu ? h('small', null, `มักไปต่อ → ${nu.name} (${fmt(nx.n)})`) : null, h('small', null, 'คลิกเพื่อเข้าไปดูภายในระบบและซูมที่หน้านี้'));
+    tip.hidden = false; const px = ev.clientX - sr.left; tip.style.left = `${Math.min(Math.max(8, px + 14), Math.max(8, sr.width - 230))}px`; tip.style.top = `${Math.max(8, ev.clientY - sr.top + 14)}px`;
+  }
   function showTip(i, ev) {
     if (i < 0 || entering) { tip.hidden = true; return; }
     const sr = stage.getBoundingClientRect();
@@ -611,9 +770,12 @@ export function mountSiteFloor(host, opts = {}) {
     }
     tip.hidden = false; const px = ev.clientX - sr.left; tip.style.left = `${Math.min(Math.max(8, px + 14), Math.max(8, sr.width - 230))}px`; tip.style.top = `${Math.max(8, ev.clientY - sr.top + 14)}px`;
   }
-  cv.addEventListener('pointermove', (ev) => { const i = stationAt(ev); if (i !== hover) { hover = i; cv.style.cursor = i >= 0 || (ins && focus >= 0) ? 'pointer' : 'default'; } showTip(i, ev); });
-  cv.addEventListener('pointerleave', () => { hover = -1; tip.hidden = true; });
-  cv.addEventListener('click', (ev) => { const i = stationAt(ev); if (ins) { if (i >= 0) focusRoom(i); else if (focus >= 0) focusRoom(focus); } else if (i >= 0) enterSite(i); });
+  cv.addEventListener('pointermove', (ev) => {
+    const tl = tileAt(ev); const i = tl ? -1 : stationAt(ev); hoverT = tl; if (i !== hover) hover = i; cv.style.cursor = tl || i >= 0 || (ins && focus >= 0) ? 'pointer' : 'default';
+    if (tl && !entering) showTileTip(tl, ev); else showTip(i, ev);
+  });
+  cv.addEventListener('pointerleave', () => { hover = -1; hoverT = null; tip.hidden = true; });
+  cv.addEventListener('click', (ev) => { const tl = tileAt(ev); if (tl) { enterSite(tl.i, tl.key); return; } const i = stationAt(ev); if (ins) { if (i >= 0) focusRoom(i); else if (focus >= 0) focusRoom(focus); } else if (i >= 0) enterSite(i); });
   const onKey = (ev) => { if (ev.key === 'Escape' && ins) { if (focus >= 0) focusRoom(focus); else leave(); } };
   document.addEventListener('keydown', onKey);
 
