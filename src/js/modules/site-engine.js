@@ -343,7 +343,7 @@ export function makeSamplePages(s, days = 30, seed = 23) {
 }
 
 /** Site-level visitors (overview) in the same shape as page journeys, so one renderer can draw both. */
-export const asJourneys = (vis) => vis.map((v) => ({ id: v.id, enter: v.enter, stops: [{ zone: v.site, start: v.start, end: v.end }], exit: v.exit, back: !!v.back }));
+export const asJourneys = (vis) => vis.map((v) => ({ id: v.id, enter: v.enter, stops: [{ zone: v.site, start: v.start, end: v.end }], exit: v.exit, back: !!v.back, pk: v.pk || '' }));
 
 /* ============================ replay of a REAL day (today / the busiest day) ============================ */
 
@@ -369,9 +369,9 @@ export function normalizeReplay(d) {
   const scale = Math.max(1, num(d.scale) || 1); const sites = {};
   for (const s of d.sites) {
     if (!s || !s.key) continue;
-    const ev = arr(s.ev).slice(0, 2000).map((e) => ({ m: num(e[0]), v: num(e[1]), f: Math.min(2, Math.max(0, Math.round(num(e[2])))) })).filter((e) => e.m >= 0 && e.m < 1440).sort((a, b) => a.m - b.m || a.v - b.v);
+    const ev = arr(s.ev).slice(0, 2000).map((e) => ({ m: num(e[0]), v: num(e[1]), f: Math.min(2, Math.max(0, Math.round(num(e[2])))), p: e.length > 3 && e[3] !== null && e[3] !== '' ? Math.round(num(e[3])) : -1 })).filter((e) => e.m >= 0 && e.m < 1440).sort((a, b) => a.m - b.m || a.v - b.v);
     const fresh = s.fresh === undefined ? ev.filter((e) => e.f === 0).length * scale : num(s.fresh); const back = s.back === undefined ? ev.filter((e) => e.f === 1).length * scale : num(s.back);
-    sites[String(s.key)] = { n: s.n === undefined ? ev.length * scale : num(s.n), uv: s.uv === undefined ? fresh : num(s.uv), fresh, back, ev };
+    sites[String(s.key)] = { n: s.n === undefined ? ev.length * scale : num(s.n), uv: s.uv === undefined ? fresh : num(s.uv), fresh, back, ev, pg: arr(s.pgs).slice(0, 16).map((x) => pageKey(String(x))) };
   }
   const byDay = arr(d.byDay).map((x) => ({ d: String(x.d), pv: num(x.pv) }));
   return { mode: d.mode === 'peak' ? 'peak' : 'today', day: String(d.day), today: String(d.today || ''), byDay, busiest: busiestDay(byDay), scale, sites };
@@ -385,7 +385,7 @@ export function replayVisitors(rep, sites, c = DEFAULTS, seed = 57) {
   const out = []; if (!rep) return out; let id = 0; const all = [];
   sites.forEach((s, si) => { const r = rep.sites[s.key]; if (r) for (const e of r.ev) if (e.f !== 2) all.push({ si, e }); });
   all.sort((a, b) => a.e.m - b.e.m || a.si - b.si || a.e.v - b.e.v);
-  for (const { si, e } of all) { const at = e.m + rng(seed + si * 977 + e.v * 13 + e.m)(); out.push({ id: ++id, site: si, v: e.v, enter: at - c.walk, start: at, end: at + c.dwell, exit: at + c.dwell + c.walk, back: e.f === 1 }); }
+  for (const { si, e } of all) { const at = e.m + rng(seed + si * 977 + e.v * 13 + e.m)(); out.push({ id: ++id, site: si, v: e.v, enter: at - c.walk, start: at, end: at + c.dwell, exit: at + c.dwell + c.walk, back: e.f === 1, pk: e.p >= 0 ? (rep.sites[sites[si].key].pg[e.p] || '') : '' }); }
   return out;
 }
 
@@ -464,4 +464,56 @@ export function makeSampleReplay(all, mode = 'today', today = '2026-10-13', nowM
   const byDay = Array.from({ length: 30 }, (_, i) => { const d = addDays(today, i - 29); const wk = [0.35, 0.95, 1, 0.95, 0.9, 0.85, 0.3][new Date(`${d}T12:00:00Z`).getUTCDay()]; const pv = d === peakDay ? Math.round(base * 1.6) : d === today ? (day === today ? total : Math.round(base * 0.5)) : Math.round(base * 0.9 * wk * (0.85 + 0.3 * r())); return { d, pv }; });
   if (day === peakDay) byDay.find((x) => x.d === day).pv = Math.max(total, byDay.find((x) => x.d === day).pv);
   return { mode: mode === 'peak' ? 'peak' : 'today', day, today, byDay, scale: 1, sites };
+}
+
+/* ============================ wings: the pages of each system, drawn behind its station ============================ */
+
+export const WING_MAX = 6;          // pages drawn behind one station (3 x 2 tiles)
+export const WING_DEPTH = 2.6;      // how far the annex reaches behind / in front of the building wall (floor units)
+export const WING_KEY = 'sand:home3d:wings';
+
+/** One system's page answer (normalizePages result) → what is drawn behind its station: the busiest pages (never the "other pages" bucket) and the walks between them. */
+export function wingOf(pg) {
+  if (!pg || !Array.isArray(pg.units)) return null;
+  const units = pg.units.filter((u) => u.kind !== 'p:other').sort((a, b) => b.pv - a.pv).slice(0, WING_MAX); const keys = new Set(units.map((u) => u.key));
+  const tot = pg.units.reduce((a, u) => a + u.pv, 0); const shown = units.reduce((a, u) => a + u.pv, 0);
+  return { units, tot, shown, hasMore: pg.units.length > units.length, flows: pg.flows.filter((f) => keys.has(f.from) && keys.has(f.to)), uv: pg.uv, realtime: pg.realtime };
+}
+
+/** Backend answer of `projects/wings` ({days, sites:[<one `pages` answer each>]}) → { [siteKey]: wing } or null when it is not that answer. */
+export function normalizeWings(d) {
+  if (!d || typeof d !== 'object' || !Array.isArray(d.sites)) return null;
+  const out = {};
+  for (const e of d.sites) { const pg = normalizePages({ days: d.days, ...e }); const k = pg && pg.site.key; const w = k ? wingOf(pg) : null; if (w) out[k] = w; }
+  return out;
+}
+
+export function makeSampleWings(sites, days = 30) { const out = {}; for (const s of sites) { const w = wingOf(normalizePages(makeSamplePages(s, days))); if (w) out[s.key] = w; } return out; }
+
+/** Which page of a system does figure `id` use? Deterministic and in proportion to page views. -1 when there is nothing to pick. */
+export function wingPick(w, id, seed = 83) {
+  const us = w && w.units; if (!us || !us.length) return -1; const tot = us.reduce((a, u) => a + Math.max(0, u.pv), 0); if (!tot) return -1;
+  let x = rng(seed + id * 7919)() * tot; for (let i = 0; i < us.length; i++) { x -= Math.max(0, us[i].pv); if (x < 0) return i; }
+  return us.length - 1;
+}
+
+/** Where people usually go next from page `key` of a wing: {to, n} or null. */
+export function wingNext(w, key) { const f = (w ? w.flows : []).filter((x) => x.from === key).sort((a, b) => b.n - a.n)[0]; return f ? { to: f.to, n: f.n } : null; }
+
+/**
+ * Geometry of the annexes. Back-row stations get theirs behind the building (y < 0), front-row stations in front of it (y > G).
+ * For each station: up to WING_MAX tiles (3 per row, busiest nearest the station), the side walkway people use to get there (the gap between two stations) and the slab.
+ * @param lay layout(n) of the stations · @param counts pages per station
+ */
+export function wingLayout(lay, counts, G = 12, depth = WING_DEPTH) {
+  const nTop = lay.filter((l) => l.top).length; const nBot = lay.length - nTop;
+  return lay.map((l, i) => {
+    const cnt = l.top ? nTop : nBot; const cw = G / Math.max(1, cnt); const cx = l.c[0]; const out = l.top ? -1 : 1; const near = l.top ? 0.12 : G - 0.12;
+    const k = lay.slice(0, i).filter((q) => q.top === l.top).length; const lx = cx + (k < cnt - 1 ? 1 : -1) * Math.min(cw / 2, 2);
+    const n = Math.min(WING_MAX, Math.max(0, counts[i] || 0)); const TS = Math.min(0.98, (cw - 0.4) / 3); const size = Math.max(0.4, Math.min(0.8, TS - 0.1));
+    const tiles = []; for (let p = 0; p < n; p++) { const r = Math.floor(p / 3); const inRow = Math.min(3, n - r * 3); tiles.push({ c: [cx + ((p % 3) - (inRow - 1) / 2) * TS, near + out * (0.62 + r * 1.02)], row: r }); }
+    const gw = Math.min(cw - 0.35, 3.2); const far = near + out * (depth - 0.2);
+    return { out, near, size, tiles, lane: { x: lx, y0: l.door[1], y1: near + out * 0.45 },
+      slab: { x0: Math.min(cx - gw / 2, lx - 0.25), x1: Math.max(cx + gw / 2, lx + 0.25), y0: Math.min(near, far), y1: Math.max(near, far) } };
+  });
 }
