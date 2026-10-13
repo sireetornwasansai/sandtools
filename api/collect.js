@@ -7,6 +7,7 @@ import { parseUa } from './go.js';
 export const config = { runtime: 'edge' };
 
 const KEY_RE = /^p[a-z0-9]{9}$/;
+const ROLE_OK = new Set(['admin', 'head', 'officer', 'committee', 'researcher', 'user']);   // role WORDS a website may report; never a name or an id
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'POST, GET, OPTIONS', 'access-control-allow-headers': 'content-type', 'access-control-max-age': '86400' };
 const GIF = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), (c) => c.charCodeAt(0));
 
@@ -32,7 +33,7 @@ export async function buildHit(request, f, secret) {
   const type = f.t === 'ev' ? 'ev' : 'pv';
   return {
     action: 'hit', secret, k: f.k, t: type, p: path || '/', e: type === 'ev' ? str(f.e, 60) : '', host, src: request.method === 'GET' ? 'px' : 'js',
-    role: f.o === 'admin' || f.o === 'staff' ? f.o : '', ref: str(f.r, 80).toLowerCase().replace(/^www\./, ''), utm: str(f.u, 40), lang: str(f.l, 12).slice(0, 12), w: Number(f.w) || 0,
+    role: ROLE_OK.has(f.o) ? f.o : '', ref: str(f.r, 80).toLowerCase().replace(/^www\./, ''), utm: str(f.u, 40), lang: str(f.l, 12).slice(0, 12), w: Number(f.w) || 0,
     country: /^[A-Z]{2}$/.test(country) ? country : '', device: p.device, browser: p.browser, os: p.os, bot: p.bot,
     vid: ip || ua ? await sha(`${secret}|${bangkokDay()}|${f.k}|${ip}|${ua}`) : ''
   };
