@@ -18,7 +18,7 @@ import { deltaChip, ago } from '../core/charts.js';
 import { THEMES, themeOf, MAX_SITES, PALETTE, IDLE_COL, DEFAULTS, hhmm, fmt, hostOf, normalizeFloor, fromListStats, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample,
   kindMeta, normalizePages, pagesFromStats, pageJourneys, nextPages, prevPages, pageInsights, pagesCsv, makeSamplePages, asJourneys,
   MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY,
-  WING_KEY, WING_DEPTH, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext, wingLayout } from './site-engine.js';
+  VIEW_KEY, VIEWS, VIEW_IDS, DEPT, HOSP, HOSP_GROUPS, HG, groupOf, deptWorld, deptLayout, deptStand, headStand, hospitalLayout, hospStand, hospRoute, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext } from './site-engine.js';
 import { drawRoom, roomColor } from './site-rooms.js';
 
 const G = 12; const CORR = 6; const ENT = [0.6, CORR]; const EXIT = [11.4, CORR]; const CAP = 16;
@@ -36,8 +36,8 @@ const GATE = { in: { col: '#14b8a6', label: 'เข้าสู่ระบบ',
 const GATE_H = 1.3; const GATE_W = 0.56;
 const MODE_HINT = { typical: 'ภาพเฉลี่ยของ “วันทั่วไป” จากช่วงที่เลือก', today: 'ย้อนดูการเข้าใช้งานจริงของวันนี้ ตั้งแต่ต้นวันถึงขณะนี้', peak: 'ย้อนดูวันที่มีคนใช้มากที่สุดในรอบ 90 วัน' };
 const PAL = {
-  light: { floor: '#e9eef3', grid: '#d3dbe3', ink: '#1f2937', pill: 'rgba(255,255,255,.95)', pillLine: '#cfd8e1', desk: '#b08968', screen: '#334155', frame: '#334155', corr: '#f6f9fb', slab: '#c3ccd6', brand: '#0f766e' },
-  dark: { floor: '#1c2535', grid: '#2b374b', ink: '#e5e7eb', pill: 'rgba(17,24,39,.93)', pillLine: '#374357', desk: '#8a6a4f', screen: '#0f172a', frame: '#94a3b8', corr: '#243149', slab: '#0f1623', brand: '#2dd4bf' },
+  light: { floor: '#e9eef3', wk: 1.55, tower: '#e2e8f0', grid: '#d3dbe3', ink: '#1f2937', pill: 'rgba(255,255,255,.95)', pillLine: '#cfd8e1', desk: '#b08968', screen: '#334155', frame: '#334155', corr: '#f6f9fb', slab: '#c3ccd6', brand: '#0f766e' },
+  dark: { floor: '#1c2535', wk: 0.56, tower: '#334155', grid: '#2b374b', ink: '#e5e7eb', pill: 'rgba(17,24,39,.93)', pillLine: '#374357', desk: '#8a6a4f', screen: '#0f172a', frame: '#94a3b8', corr: '#243149', slab: '#0f1623', brand: '#2dd4bf' },
 };
 const TITLE_FLOOR = 'โรงพยาบาลสันทราย · โครงการและเว็บไซต์ที่ดูแล';
 const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
@@ -72,7 +72,8 @@ export function mountSiteFloor(host, opts = {}) {
   let sites = []; let themes = []; let more = 0; let LAY = []; let vis = []; let range = { from: cfg.open, to: cfg.close }; let pf = 1; let sm = summarize([]); let hits = [];
   let started = false; let t = 0; let playing = false; let speed = 20; let raf = 0; let last = 0; let lastMin = -1; let seq = 0; let dead = false; let onScreen = true; let hover = -1;
   let jr = []; let floorRange = range; let ins = null; let ILAY = []; let focus = -1; let entering = false; let iseq = 0; const cam = { z: 1, tx: 0, ty: 0, tz: 1, ttx: 0, tty: 0 };
-  let wingOn = localStorage.getItem(WING_KEY) !== '0'; const W = { map: {}, days: 0, src: '', at: 0, busy: false }; let WL = []; let whits = []; let hoverT = null; let wseq = 0;   // wings = the pages of each system drawn behind its station
+  let view = VIEW_IDS.includes(localStorage.getItem(VIEW_KEY)) ? localStorage.getItem(VIEW_KEY) : 'dept'; const W = { map: {}, days: 0, src: '', at: 0, busy: false }; let DL = []; let HL = null; let PW = []; let whits = []; let hoverT = null; let wseq = 0;   // view: 'dept' = department plan (rooms = pages) · 'hospital' = whole-hospital plan (rooms = systems)
+  let WX = 12; let WY = 12; let CYc = CORR; let corrH = 0.5;   // size of the floor being drawn · y of its main corridor / road · half width of it
   let tw = 60; let ox = 0; let oy = 0; let dpr = 1; let pal = PAL.light; let font = 'sans-serif'; let ctx; let timer = 0;
 
   // ---------- DOM ----------
@@ -87,7 +88,7 @@ export function mountSiteFloor(host, opts = {}) {
   const csvBtn = h('button', { class: 'btn btn-sm', type: 'button', disabled: true, onclick: () => { downloadText(`\ufeff${ins ? pagesCsv(ins.units, S.days, ins.site.name) : dayOn() ? replayCsv(R.rep, sites) : sitesCsv(S.all, S.days)}`, `${ins ? `หน้าในระบบ_${ins.site.key}` : dayOn() ? `โครงการและเว็บไซต์_${R.rep.day}` : 'โครงการและเว็บไซต์'}_${dayOn() && !ins ? 'รายวัน' : `${S.days}วัน`}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`, 'text/csv'); toast('ส่งออกรายงานแล้ว', 'success'); } }, svgIcon(ICONS.download, 16), 'ส่งออก CSV');
   const playBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => (playing ? pause() : play()) });
   const loopBtn = h('button', { class: 'btn s3-loop', type: 'button', 'aria-pressed': String(loopOn), title: 'เมื่อเล่นถึงสิ้นวัน ให้เริ่มใหม่ต่อเนื่อง', onclick: () => setLoop(!loopOn) }, svgIcon(ICONS.rotate, 16), 'วนเล่นซ้ำ');
-  const wingBtn = h('button', { class: 'btn s3-toggle', type: 'button', 'aria-pressed': String(wingOn), title: 'แสดงหน้าย่อยของแต่ละระบบไว้ด้านหลังโครงการ เพื่อดูว่าคนเข้ามาแล้วไปใช้ส่วนไหน โดยไม่ต้องกดเข้าไปทีละระบบ', onclick: () => setWingsOn(!wingOn) }, svgIcon(ICONS.focus, 16), 'ส่วนย่อยหลังโครงการ');
+  const viewEl = h('div', { class: 'tabs s3-view', role: 'tablist', 'aria-label': 'มุมมองผัง' }); const viewHint = h('small', { class: 's3-modehint', role: 'status', 'aria-live': 'polite' });
   const modeEl = h('div', { class: 'tabs s3-mode', role: 'tablist', 'aria-label': 'โหมดการเล่นซ้ำ' }); const modeHint = h('small', { class: 's3-modehint', role: 'status', 'aria-live': 'polite' });
   const spd = h('select', { 'aria-label': 'ความเร็วการเล่น', onchange: () => { speed = Number(spd.value); } }, [[10, 'ช้า'], [20, 'ปกติ'], [40, 'เร็ว'], [80, 'เร็วมาก']].map(([v, l]) => h('option', { value: v, selected: v === 20 }, `${l} (${v} นาที/วินาที)`)));
   const legend = h('div', { class: 's3-legend', 'aria-label': 'โครงการที่แสดงในผัง' });
@@ -99,8 +100,8 @@ export function mountSiteFloor(host, opts = {}) {
   const insightBox = h('div', { class: 's3-insights' }); const tableBox = h('div', { class: 's3-table-wrap' }); const note = h('p', { class: 's3-note' });
   host.append(h('section', { class: 's3', 'aria-labelledby': 's3-title' },
     h('div', { class: 's3-head' }, h('div', null, backBtn, titleEl, status), h('div', { class: 's3-tools' }, rangeEl, openBtn, refreshBtn, csvBtn)),
-    banner, h('div', { class: 's3-modebar' }, modeEl, modeHint), stage, h('div', { class: 's3-progress', 'aria-hidden': 'true' }, prog),
-    h('div', { class: 's3-controls' }, playBtn, loopBtn, wingBtn,
+    banner, h('div', { class: 's3-viewbar' }, viewEl, viewHint), h('div', { class: 's3-modebar' }, modeEl, modeHint), stage,
+    h('div', { class: 's3-controls' }, playBtn, loopBtn,
       h('button', { class: 'btn', type: 'button', onclick: () => { t = range.from; lastMin = -1; playing = true; sync(); } }, svgIcon(ICONS.rotate, 16), 'เล่นใหม่ตั้งแต่เช้า'),
       h('button', { class: 'btn', type: 'button', onclick: () => { t = Math.min(range.to, Math.max(range.from, bkkMinutes())); lastMin = -1; pause(); } }, svgIcon(ICONS.eye, 16), 'ไปที่เวลาปัจจุบัน'),
       h('button', { class: 'btn', type: 'button', onclick: () => { t = crowdPeak(crowd(), range); lastMin = -1; pause(); } }, svgIcon(ICONS.focus, 16), 'ไปที่ช่วงคนแน่นสุด'),
@@ -153,11 +154,11 @@ export function mountSiteFloor(host, opts = {}) {
     const pick = pickSites(S.all); sites = pick.sites; themes = sites.map(themeOf); more = pick.more; LAY = layout(sites.length); sm = summarize(S.all); pf = perFigure(sites, S.days);
     if (ins && ins.source !== source) leave();
     if (R.src !== source) { R.rep = null; R.st = null; R.src = source; }
-    rebuildWL(); rebuild(started ? 'keep' : 'start'); started = true; tip.hidden = true;
+    rebuildPlan(); resize(); rebuild(started ? 'keep' : 'start'); started = true; tip.hidden = true;
     chip.textContent = source === 'sample' ? 'ข้อมูลตัวอย่าง' : 'ข้อมูลจริง'; chip.dataset.kind = source;
     if (!ins) cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`);
     csvBtn.disabled = false; drawAll();
-    if (wingOn) loadWings();
+    if (view === 'dept') loadWings();
     if (mode !== 'typical') loadReplay(mode, !!R.rep);
   }
 
@@ -208,25 +209,66 @@ export function mountSiteFloor(host, opts = {}) {
   }
 
   // ---------- wings: the pages of every system, drawn behind its station (no need to click into each system) ----------
-  const wingActive = () => wingOn && !ins && WL.length > 0;
-  const W_STAY = 0.22; const W_ARR = 0.42;   // share of a visit spent at the station before walking round to its page · share at which the person has arrived there
-  const WING_NOTE = ' · แท่งด้านหลังโครงการคือหน้าย่อยของระบบนั้น (สูง = คนเปิดมาก) คนที่เข้ามาจะเดินอ้อมไปยังหน้าที่ใช้จริง — คลิกแท่งเพื่อเข้าไปดูภายในระบบ';
-  function rebuildWL() { WL = wingOn && !ins && LAY.length ? wingLayout(LAY, sites.map((s) => (W.map[s.key] ? W.map[s.key].units.length : 0)), G, WING_DEPTH) : []; }
-  /** Which page does each drawn person use? A real day knows it (pk); otherwise it is drawn in proportion to the page views. A page that is not drawn keeps the person at the station. */
+  const deptOn = () => !ins && view === 'dept' && DL.length > 0;
+  const hospOn = () => !ins && view === 'hospital' && !!HL;
+  const VIEW_HINT = { dept: 'เดินเข้าแผนกตามทางเดิน แล้วแยกเข้าห้องส่วนย่อย (หน้าของระบบ) ทั้งสองข้าง — เห็นทันทีว่าคนใช้ส่วนไหน ไม่ต้องกดเข้าไปทีละระบบ', hospital: 'ตึกโรงพยาบาลรวมทุกระบบ แบ่งเป็นปีกบริหารทั่วไป และปีกพัฒนาคุณภาพ — หนึ่งห้อง = หนึ่งระบบ' };
+  /** Size of the floor + the corridor / road that the gates stand on. Inside a system the old square floor is used. */
+  function setWorld() {
+    if (ins || !sites.length) { WX = G; WY = G; CYc = CORR; corrH = 0.5; }
+    else if (view === 'dept') { const w = deptWorld(sites.length); WX = w.GX; WY = w.GY; CYc = w.CY; corrH = DEPT.CORR / 2; }
+    else { WX = HOSP.GX; WY = HOSP.GY; CYc = HOSP.CY; corrH = 0.5; }
+    ENT[0] = 0.6; ENT[1] = CYc; EXIT[0] = WX - 0.6; EXIT[1] = CYc;
+  }
+  function rebuildPlan() {
+    DL = []; HL = null; PW = [];
+    if (!ins && sites.length) {
+      if (view === 'dept') DL = deptLayout(sites.map((s) => (W.map[s.key] ? W.map[s.key].units.length : 0)));
+      else HL = hospitalLayout(sites.map((s, i) => ({ group: groupOf(s, themes[i]), pv: s.pv })));
+      PW = buildWalls();
+    }
+    setWorld();
+  }
+  /** Walls as short segments (so a person is hidden by a wall only when really behind it). k 'y' = wall along x at y=c · 'x' = wall along y at x=c · gap = doorway. */
+  function buildWalls() {
+    const out = []; const T = 0.34; const EXT = '#94a3b8';
+    const seg = (k, a, b, c, hh, col, gap) => { for (let u = a; u < b - 1e-6; u += 0.4) { const v = Math.min(b, u + 0.4); const m = (u + v) / 2; if (gap && m > gap[0] && m < gap[1]) continue; out.push({ k, a: u, b: v, c, h: hh, col, d: c + m }); } };
+    if (!ins && view === 'dept') {
+      DL.forEach((d, i) => {
+        const col = colOf(i); const hy = d.top ? 1.15 : T; const hd = d.head; const gapH = [d.hall.x0, d.hall.x1];
+        seg('y', hd.x0, hd.x1, d.top ? hd.y0 : hd.y1, hy, col); seg('y', hd.x0, hd.x1, d.top ? hd.y1 : hd.y0, T, col, gapH); seg('x', hd.y0, hd.y1, hd.x0, hy, col); seg('x', hd.y0, hd.y1, hd.x1, T, col);
+        d.rooms.forEach((r) => {
+          const gd = [r.c[1] - 0.28, r.c[1] + 0.28];
+          seg('y', r.x0, r.x1, r.y0, T, col); seg('y', r.x0, r.x1, r.y1, T, col); seg('x', r.y0, r.y1, r.x0, T, col, r.side > 0 ? gd : null); seg('x', r.y0, r.y1, r.x1, T, col, r.side < 0 ? gd : null);
+        });
+      });
+    } else if (!ins && HL) {
+      const wl = HL.wings[0]; const wr = HL.wings[1]; const xa = wl.x0; const xb = wr.x1; const yf = HL.lobby.y1; const gx = HL.gate[0];
+      seg('y', xa, xb, HOSP.Y0, 1.25, EXT); seg('y', xa, xb, yf, T, EXT, [gx - 0.6, gx + 0.6]); seg('x', HOSP.Y0, yf, xa, 1.25, EXT); seg('x', HOSP.Y0, yf, xb, T, EXT);
+      HL.rooms.forEach((r) => {
+        if (!r) return; const col = HG(r.group).col; const gd = [r.door[0] - 0.4, r.door[0] + 0.4];
+        seg('x', r.y0, r.y1, r.x0, T, col); seg('x', r.y0, r.y1, r.x1, T, col); seg('y', r.x0, r.x1, r.front ? r.y0 : r.y1, T, col, gd);
+      });
+    }
+    return out;
+  }
+  const W_NOTE_DEPT = ' · ห้องในแผนก = หน้าย่อยของระบบนั้น (สีผนัง = แผนก) คนที่เข้ามาจะเดินตามทางเดินไปยังห้องที่ใช้จริง — คลิกห้องเพื่อเข้าไปดูภายในระบบ';
+  const W_NOTE_HOSP = ' · ตึกโรงพยาบาล: ปีกซ้าย = บริหารทั่วไป ปีกขวา = พัฒนาคุณภาพ หนึ่งห้องคือหนึ่งระบบ คนเดินเข้าทางประตูหน้าตึกไปยังห้องของระบบที่ใช้จริง — คลิกห้องเพื่อเข้าไปดูภายในระบบ';
+  /** Which page does each drawn person use? A real day knows it (pk); otherwise it is drawn in proportion to the page views. */
   function planWings() {
     for (const j of jr) {
-      j.pg = -1; if (!wingActive()) continue;
-      const z = j.stops[0].zone; const w = W.map[sites[z] && sites[z].key]; if (!w || !WL[z] || !WL[z].tiles.length) continue;
-      j.pg = j.pk ? w.units.findIndex((u) => u.key === j.pk) : wingPick(w, j.id);
+      j.pg = -1; if (view !== 'dept' || ins || !DL.length) continue;
+      const z = j.stops[0].zone; const w = W.map[sites[z] && sites[z].key]; if (!w || !DL[z] || !DL[z].rooms.length) continue;
+      const g = j.pk ? w.units.findIndex((u) => u.key === j.pk) : wingPick(w, j.id); j.pg = g >= 0 && g < DL[z].rooms.length ? g : -1;
     }
   }
   function setWingData(map) {
-    W.map = map; W.at = Date.now(); W.days = S.days; W.src = S.source; W.busy = false; rebuildWL(); planWings(); lastMin = -1; drawStatus();
+    W.map = map; W.at = Date.now(); W.days = S.days; W.src = S.source; W.busy = false; rebuildPlan(); resize(); planWings(); lastMin = -1; drawStatus();
     if (!ins) { drawLegend(); drawInsights(); drawTable(); drawNote(); }
   }
+
   async function loadWings() {
     if (dead || !sites.length) return;
-    if (W.src === S.source && W.days === S.days && Date.now() - W.at < 60000 && Object.keys(W.map).length) { rebuildWL(); planWings(); return; }
+    if (W.src === S.source && W.days === S.days && Date.now() - W.at < 60000 && Object.keys(W.map).length) { rebuildPlan(); planWings(); return; }
     const my = ++wseq;
     if (S.source === 'sample') { setWingData(makeSampleWings(sites, S.days)); return; }
     if (!Object.keys(W.map).length || W.days !== S.days || W.src !== S.source) { const c = cacheGet(`wg:${S.days}`); const m = c && normalizeWings(c.d); if (m && Object.keys(m).length) setWingData(m); }
@@ -250,12 +292,13 @@ export function mountSiteFloor(host, opts = {}) {
       if (!Object.keys(W.map).length) banner.append(notice('warn', 'โหลดส่วนย่อยของระบบไม่สำเร็จ', (e && e.message) || 'เกิดข้อผิดพลาด'));
     }
   }
-  function setWingsOn(v) {
-    wingOn = v; try { localStorage.setItem(WING_KEY, v ? '1' : '0'); } catch { /* ignore */ }
-    wingBtn.setAttribute('aria-pressed', String(v)); hoverT = null; tip.hidden = true;
-    if (!ins) { rebuildWL(); resize(); planWings(); }
-    if (v) loadWings();
-    lastMin = -1; drawAll(); toast(v ? 'แสดงหน้าย่อยของแต่ละระบบไว้ด้านหลังโครงการ' : 'ซ่อนส่วนย่อยหลังโครงการ');
+  function setView(v) {
+    if (!VIEW_IDS.includes(v) || v === view) return; if (ins) leave(); view = v; try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ }
+    hoverT = null; hover = -1; tip.hidden = true; rebuildPlan(); resize(); planWings(); lastMin = -1; if (v === 'dept') loadWings(); drawAll();
+  }
+  function drawViews() {
+    viewEl.replaceChildren(...VIEWS.map(([id, l]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(view === id), onclick: () => setView(id) }, l)));
+    viewEl.parentElement.hidden = !!ins; viewHint.textContent = VIEW_HINT[view];
   }
   const topPageTxt = (key) => { const w = W.map[key]; const u = w && w.units[0]; return u && w.tot ? `${kindMeta(u.kind).icon} ${u.name} · ${Math.round((u.pv / w.tot) * 100)}%` : '–'; };
   function wingInsights() {
@@ -267,6 +310,11 @@ export function mountSiteFloor(host, opts = {}) {
     return out;
   }
 
+  function hospInsights() {
+    const tot = sites.reduce((a, s) => a + s.pv, 0) || 1;
+    return HOSP_GROUPS.map((g) => { const m = sites.filter((s, i) => groupOf(s, themes[i]) === g.id); const pv = m.reduce((a, s) => a + s.pv, 0); return { tone: 'info', text: `${g.icon} ปีก${g.name}: ${fmt(m.length)} ระบบ${m.length ? ` (${m.map((x) => x.name).join(', ')})` : ''} · เปิดหน้า ${fmt(pv)} ครั้ง (${Math.round((pv / tot) * 100)}% ของทั้งหมด)` }; });
+  }
+
   // ---------- panels ----------
   const dot = (c) => h('i', { class: 's3-dot', style: `background:${c}` });
   const colOf = (i) => { const st = stateOf(sites[i]); return st === 'ok' ? PALETTE[i % PALETTE.length] : st === 'silent' ? STATE_COL.silent : IDLE_COL; };
@@ -275,7 +323,7 @@ export function mountSiteFloor(host, opts = {}) {
     refreshBtn.disabled = S.busy; refreshBtn.classList.toggle('is-loading', S.busy);
     if (S.busy) { status.className = 's3-status is-busy'; status.replaceChildren(S.all.length ? 'กำลังอัปเดตข้อมูล…' : 'กำลังโหลดข้อมูล…'); return; }
     if (R.busy) { status.className = 's3-status is-busy'; status.replaceChildren('กำลังโหลดข้อมูลรายวัน…'); return; }
-    if (W.busy && wingOn && !ins) { status.className = 's3-status is-busy'; status.replaceChildren('กำลังโหลดหน้าย่อยของแต่ละระบบ…'); return; }
+    if (W.busy && view === 'dept' && !ins) { status.className = 's3-status is-busy'; status.replaceChildren('กำลังโหลดหน้าย่อยของแต่ละระบบ…'); return; }
     if (S.source === 'sample') { status.className = 's3-status'; status.replaceChildren('ตัวอย่างการทำงานของผัง'); return; }
     if (S.err) { status.className = 's3-status is-err'; status.replaceChildren(dot('#ef4444'), 'อัปเดตล่าสุดไม่สำเร็จ · แสดงข้อมูลเดิม'); return; }
     status.className = 's3-status is-ok'; status.replaceChildren(dot('#16a34a'), `อัปเดต ${ago(S.at)}${S.fromCache ? ' · จากข้อมูลที่จำไว้' : ''} · ${dayOn() ? (R.rep.day === R.rep.today ? 'วันนี้' : dayLabel(R.rep.day)) : `ย้อนหลัง ${S.days} วัน`}`);
@@ -312,7 +360,7 @@ export function mountSiteFloor(host, opts = {}) {
     let list;
     if (ins) list = pageInsights(ins.units, ins.flows, S.days);
     else if (dayOn()) { const base = replayInsights(R.rep, R.st, Object.fromEntries(S.all.map((x) => [x.key, x.name]))); const priv = base.pop(); list = [...base, ...insights(S.all, S.days, S.extra).filter((x) => x.tone === 'warn'), priv]; } else list = insights(S.all, S.days, S.extra);
-    if (!ins && wingOn) list = [...list, ...wingInsights()];
+    if (!ins && view === 'dept') list = [...list, ...wingInsights()]; else if (!ins && view === 'hospital') list = [...list, ...hospInsights()];
     insightBox.replaceChildren(h('ul', { class: 's3-ilist' }, list.map((x) => h('li', { class: `tone-${x.tone}` }, svgIcon(x.tone === 'warn' ? ICONS.alert : x.tone === 'ok' ? ICONS.check : ICONS.eye, 18), h('span', null, x.text)))));
   }
   function drawLegend() { if (ins) legendIn(); else legendFloor(); }
@@ -320,7 +368,8 @@ export function mountSiteFloor(host, opts = {}) {
     legend.replaceChildren(...sites.map((s, i) => h('button', { type: 'button', class: `s3-lg${usageRank(s) === 0 ? ' is-live' : ''}`, title: `${stTxt(s)} · เปิดรายละเอียด`, onclick: () => open(s.key) }, h('i', { style: `background:${colOf(i)}` }), `${THEMES[themes[i]].icon} ${s.name}`, usageRank(s) === 0 ? h('em', { class: 's3-livetag' }, `● ${fmt(s.realtime)}`) : null)),
       ...(more ? [h('span', { class: 's3-lg more' }, `+${more} โครงการในตารางด้านล่าง`)] : []),
       ...(dayOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-new' }), 'ผู้ใช้ใหม่ (ครั้งแรกของวัน)'), h('span', { class: 's3-lg' }, h('i', { class: 's3-ring' }), 'ผู้ใช้เดิมที่กลับมาในวันเดียวกัน')] : []),
-      ...(wingActive() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-wing' }), 'แท่งหลังโครงการ = หน้าย่อยของระบบ (ยิ่งสูงยิ่งมีคนเปิดมาก)')] : []),
+      ...(deptOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-wing' }), 'ห้องในแผนก = หน้าย่อยของระบบ (ยิ่งสีเข้มยิ่งมีคนเปิดมาก)')] : []),
+      ...(hospOn() ? HOSP_GROUPS.map((g) => h('span', { class: 's3-lg' }, h('i', { style: `background:${g.col}` }), `${g.icon} ${g.name} · ${fmt(HL.wings.find((x) => x.id === g.id).count)} ระบบ`)) : []),
       h('span', { class: 's3-lg' }, h('i', { style: `background:${WALK}` }), 'กำลังเดินเข้า/ออก'), h('span', { class: 's3-lg' }, h('i', { style: `background:${STATE_COL.silent}` }), 'เงียบผิดปกติ'));
   }
   function drawTable() { if (ins) tableIn(); else tableFloor(); }
@@ -332,14 +381,14 @@ export function mountSiteFloor(host, opts = {}) {
           dd ? [h('td', null, fmt(dr ? dr.n : 0)), h('td', null, fmt(dr ? dr.fresh : 0)), h('td', null, fmt(dr ? dr.back : 0))] : [h('td', null, fmt(s2.pv)), h('td', null, s2.prev === null ? '–' : tr === null ? '0%' : deltaChip(s2.pv, s2.prev)), h('td', null, fmt(s2.uv))],
           h('td', null, s2.realtime === null ? '–' : fmt(s2.realtime)), h('td', { class: 's3-cut', title: 'หน้าที่คนเปิดมากสุดในระบบนี้' }, topPageTxt(s2.key)), h('td', null, h('span', { class: `s3-pill st-${stCls(s2)}` }, stTxt(s2)))); }))));
   }
-  function drawNote() { drawNoteBase(); if (!ins && wingActive()) note.textContent += WING_NOTE; }
+  function drawNote() { drawNoteBase(); if (deptOn()) note.textContent += W_NOTE_DEPT; else if (hospOn()) note.textContent += W_NOTE_HOSP; }
   function drawNoteBase() {
     if (ins) { note.textContent = `ห้องหนึ่ง = หนึ่งหน้าของระบบ · คน 1 คนในภาพ ≈ ${fmt(ins.pf)} การเปิดหน้า · เส้นทางเดินระหว่างห้องนับจากผู้เข้าชมคนเดียวกันในวันเดียวกัน (ไม่ระบุตัวตน) · ภาพเป็น "วันทั่วไป" ที่เฉลี่ยจากช่วง ${S.days} วัน (เวลาไทย) · เวลาเดินและเวลาอยู่ในห้องเป็นเวลาสมมติเพื่อให้มองเห็นได้`; return; }
     if (dayOn()) { note.textContent = `${S.source === 'sample' ? 'ข้อมูลตัวอย่างเพื่อแสดงการทำงานของผัง · ' : ''}คน 1 คนในภาพ = การเข้าใช้จริง 1 ครั้ง${R.rep.scale > 1 ? ` (สุ่มแสดง 1 ใน ${R.rep.scale} คน ตัวเลขด้านบนเป็นค่าจริงทั้งหมด)` : ''} · คนที่มีวงแหวนสีทองคือผู้ใช้เดิมที่กลับมาใหม่ภายในวันเดียวกัน (ห่างจากการเปิดครั้งก่อนเกิน 30 นาที) · ${REPLAY_PRIVACY} · เวลาเดินเข้า–ออกและเวลาอยู่ที่สถานีเป็นเวลาสมมติเพื่อให้มองเห็นได้ · ไม่นับบอท`; return; }
     note.textContent = `${S.source === 'sample' ? 'ข้อมูลตัวอย่างเพื่อแสดงการทำงานของผัง · ' : ''}คน 1 คนในภาพ ≈ ${fmt(pf)} การเปิดหน้า · ภาพเป็น "วันทั่วไป" ที่เฉลี่ยจากช่วง ${S.days} วัน (เวลาไทย) ไม่ใช่ตัวเลขของวันใดวันหนึ่ง · เวลาเดินเข้า–ออกและเวลาอยู่ที่สถานีเป็นเวลาสมมติเพื่อให้มองเห็นได้ · สถิติไม่ใช้คุกกี้ ไม่เก็บ IP และไม่นับบอท`;
   }
-  function drawTitle() { titleEl.textContent = ins ? `${ins.site.name} · ภายในระบบ` : TITLE_FLOOR; tblTitle.textContent = ins ? 'ทุกหน้าในระบบนี้' : 'ทุกโครงการ'; backBtn.hidden = !ins; openBtn.hidden = !(ins && S.source === 'real' && opts.onOpen); }
-  function drawAll() { drawTitle(); drawRange(); drawModes(); drawStatus(); drawKpis(); drawHours(); drawInsights(); drawLegend(); drawTable(); drawRoomCard(); drawNote(); sync(); }
+  function drawTitle() { titleEl.textContent = ins ? `${ins.site.name} · ภายในระบบ` : view === 'hospital' ? 'โรงพยาบาลสันทราย · ภาพรวมทุกระบบ' : TITLE_FLOOR; tblTitle.textContent = ins ? 'ทุกหน้าในระบบนี้' : 'ทุกโครงการ'; backBtn.hidden = !ins; openBtn.hidden = !(ins && S.source === 'real' && opts.onOpen); }
+  function drawAll() { drawTitle(); drawRange(); drawViews(); drawModes(); drawStatus(); drawKpis(); drawHours(); drawInsights(); drawLegend(); drawTable(); drawRoomCard(); drawNote(); sync(); }
 
   // ---------- control ----------
   function play() { if (t >= range.to - 1) t = range.from; playing = true; sync(); }
@@ -350,9 +399,10 @@ export function mountSiteFloor(host, opts = {}) {
   const P = (x, y, z = 0) => [ox + ((x - y) * tw) / 2, oy + ((x + y) * tw) / 4 - z];
   const Z = (u) => u * tw * 0.5;
   function resize() {
-    const r = scroller.getBoundingClientRect(); const avail = Math.max(280, Math.round(r.width)); const w = Math.max(avail, 600);
-    const wd = !ins && wingOn ? WING_DEPTH : 0; const hgt = Math.round(w * (wd ? 0.66 : 0.58)); dpr = Math.min(2, devicePixelRatio || 1);
-    cv.width = w * dpr; cv.height = hgt * dpr; cv.style.width = `${w}px`; cv.style.height = `${hgt}px`; tw = Math.min(w / (12.6 + wd), (hgt * 0.8) / ((G + wd) / 2)); ox = w / 2; oy = wd ? tw * (wd / 4 + 1.35) : hgt * 0.14;
+    const r = scroller.getBoundingClientRect(); const avail = Math.max(280, Math.round(r.width)); const w = Math.max(avail, 600); let hgt; dpr = Math.min(2, devicePixelRatio || 1);
+    if (ins || !sites.length) { hgt = Math.round(w * 0.58); tw = Math.min(w / 12.6, (hgt * 0.8) / (G / 2)); ox = w / 2; oy = hgt * 0.14; }
+    else { const sum = WX + WY; tw = (1.8 * w) / sum; oy = tw * (view === 'hospital' ? 1.15 : 1.1); ox = w / 2 + ((WY - WX) * tw) / 4; hgt = Math.round(oy + (sum * tw) / 4 + tw * 0.95); }
+    cv.width = w * dpr; cv.height = hgt * dpr; cv.style.width = `${w}px`; cv.style.height = `${hgt}px`;
     scroller.scrollLeft = (w - avail) / 2; lastMin = -1; if (ins && focus >= 0) setCam(FOCUS_ZOOM, center(focus, ILAY)); else setCam(1, [0, 0]);
   }
 
@@ -363,8 +413,8 @@ export function mountSiteFloor(host, opts = {}) {
     poly([P(x0, y1, a), P(x1, y1, a), P(x1, y1, b), P(x0, y1, b)], shade(col, 0.82)); poly([P(x1, y0, a), P(x1, y1, a), P(x1, y1, b), P(x1, y0, b)], shade(col, 0.66));
     poly([P(x0, y0, b), P(x1, y0, b), P(x1, y1, b), P(x0, y1, b)], shade(col, 1.08));
   }
-  function person(x, y, col, back = false, now = 0) {
-    const [sx, sy] = P(x, y); const s = tw * 0.075;
+  function person(x, y, col, back = false, now = 0, sc = 1) {
+    const [sx, sy] = P(x, y); const s = tw * 0.075 * sc;
     if (back) {   // came back the same day: gold halo on the floor, dark outline on the body, gold ring round the head
       const k = reduced ? 1 : 0.9 + 0.1 * Math.sin(now / 280 + x * 3);
       ctx.fillStyle = 'rgba(245,158,11,.30)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 2.1 * k, s * 0.98 * k, 0, 0, 7); ctx.fill();
@@ -383,66 +433,15 @@ export function mountSiteFloor(host, opts = {}) {
   }
   // ---------- hospital building: floor slab, service corridor, emblem ----------
   function hospitalBase(now) {
-    const th = Z(0.32); const A = P(0, G); const B = P(G, G); const C = P(G, 0);
-    poly([A, B, [B[0], B[1] + th], [A[0], A[1] + th]], shade(pal.slab, 0.9)); poly([B, C, [C[0], C[1] + th], [B[0], B[1] + th]], shade(pal.slab, 0.72));   // building slab (visible sides)
-    poly([P(0, 0), P(G, 0), P(G, G), P(0, G)], pal.floor);
-    ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.beginPath(); for (let i = 0; i <= G; i++) { const a = P(i, 0); const b = P(i, G); const c = P(0, i); const d = P(G, i); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.moveTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); } ctx.stroke();
-    ctx.globalAlpha = 0.9; poly([P(0.2, CORR - 0.5), P(G - 0.2, CORR - 0.5), P(G - 0.2, CORR + 0.5), P(0.2, CORR + 0.5)], pal.corr); ctx.globalAlpha = 1;
-    poly([P(0.2, CORR - 0.5), P(G - 0.2, CORR - 0.5), P(G - 0.2, CORR + 0.5), P(0.2, CORR + 0.5)], null, pal.grid, 1.5);
-    ctx.save(); ctx.strokeStyle = pal.brand; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1.5, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); ctx.beginPath(); const l0 = P(1.7, CORR); const l1 = P(G - 1.7, CORR); ctx.moveTo(l0[0], l0[1]); ctx.lineTo(l1[0], l1[1]); ctx.stroke(); ctx.restore();
-    const pulse = reduced ? 0.85 : 0.75 + 0.15 * Math.sin(now / 600); ctx.globalAlpha = pulse;   // medical cross emblem painted on the corridor
-    poly([P(G / 2 - 0.55, CORR - 0.15), P(G / 2 + 0.55, CORR - 0.15), P(G / 2 + 0.55, CORR + 0.15), P(G / 2 - 0.55, CORR + 0.15)], pal.brand); poly([P(G / 2 - 0.15, CORR - 0.55), P(G / 2 + 0.15, CORR - 0.55), P(G / 2 + 0.15, CORR + 0.55), P(G / 2 - 0.15, CORR + 0.55)], pal.brand); ctx.globalAlpha = 1;
-    poly([P(0, 0), P(G, 0), P(G, G), P(0, G)], null, pal.brand, 2);   // building outline
-  }
-
-  // ---------- wings: annex slabs, walkways, page pillars ----------
-  /** Slab of each annex (behind the wall when `back`, in front of it otherwise) with a ground pad under every page. */
-  function wingGround(back) {
-    WL.forEach((w, i) => {
-      if ((w.out === -1) !== back) return; const q = w.slab; const col = colOf(i); const th = Z(0.22); const a = P(q.x1, q.y0); const b = P(q.x1, q.y1); const c = P(q.x0, q.y1);
-      poly([a, b, [b[0], b[1] + th], [a[0], a[1] + th]], shade(pal.slab, 0.72)); poly([c, b, [b[0], b[1] + th], [c[0], c[1] + th]], shade(pal.slab, 0.9));
-      const top = [P(q.x0, q.y0), P(q.x1, q.y0), P(q.x1, q.y1), P(q.x0, q.y1)]; poly(top, pal.floor); ctx.globalAlpha = 0.12; poly(top, col); ctx.globalAlpha = 1; poly(top, null, col, 1.3);
-      const wg = W.map[sites[i].key]; if (!wg) return; const mxw = Math.max(1, ...wg.units.map((u) => u.pv));
-      w.tiles.forEach((t, p) => {
-        const u = wg.units[p]; if (!u) return; const hs = w.size / 2 + 0.07; const rc = roomColor(u.kind); const hov = hoverT && hoverT.i === i && hoverT.p === p;
-        const pad = [P(t.c[0] - hs, t.c[1] - hs), P(t.c[0] + hs, t.c[1] - hs), P(t.c[0] + hs, t.c[1] + hs), P(t.c[0] - hs, t.c[1] + hs)];
-        ctx.globalAlpha = 0.14 + 0.5 * (u.pv / mxw); poly(pad, rc); ctx.globalAlpha = 1; poly(pad, null, hov ? pal.ink : rc, hov ? 2.4 : 1.2);
-      });
-    });
-  }
-  /** The walkway between two stations that leads to each annex; its dashes flow away from the station. */
-  function wingLanes(now) {
-    ctx.save();
-    WL.forEach((w, i) => {
-      const l = w.lane; const y0 = Math.min(l.y0, l.y1); const y1 = Math.max(l.y0, l.y1); const col = colOf(i);
-      ctx.globalAlpha = 0.55; poly([P(l.x - 0.17, y0), P(l.x + 0.17, y0), P(l.x + 0.17, y1), P(l.x - 0.17, y1)], pal.corr); ctx.globalAlpha = 1;
-      ctx.strokeStyle = col; ctx.globalAlpha = 0.6; ctx.lineWidth = Math.max(1.5, tw * 0.022); ctx.lineCap = 'round'; ctx.setLineDash([tw * 0.07, tw * 0.09]); ctx.lineDashOffset = reduced ? 0 : (now / 55) * (w.out === -1 ? 1 : -1) * (tw / 60);
-      const A = P(l.x, l.y0); const B = P(l.x, l.y1); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); ctx.setLineDash([]);
-    });
-    ctx.restore();
-  }
-  /** Page pillars (height = page views of that system, glowing while someone stands there) and their hit boxes. Returns the labels to draw on top. */
-  function wingItems(items, F, now) {
-    const labels = [];
-    WL.forEach((w, i) => {
-      const wg = W.map[sites[i].key]; if (!wg) return; const mxw = Math.max(1, ...wg.units.map((u) => u.pv));
-      w.tiles.forEach((t, p) => {
-        const u = wg.units[p]; if (!u) return; const [tx, ty] = t.c; const rc = roomColor(u.kind); const hu = 0.12 + 0.55 * (u.pv / mxw); const hot = F.ww[i][p].length > 0; const bw = w.size * 0.56; const hs = w.size / 2; const up = w.out === -1 ? 100 : 0;   // back annexes are drawn above the neighbouring stations' walls, never hidden by them
-        items.push({ d: tx + ty + up + 0.02, f: () => {
-          ctx.globalAlpha = u.pv ? 1 : 0.55; box(tx, ty, bw, bw, hu, hot && !reduced ? shade(rc, 1 + 0.12 * Math.sin(now / 260 + p)) : rc); ctx.globalAlpha = 1;
-          const [ix, iy] = P(tx, ty, Z(hu) + tw * 0.13); ctx.font = `${Math.max(10, tw * 0.19)}px ${font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = pal.ink; ctx.fillText(kindMeta(u.kind).icon, ix, iy);
-          if (u.realtime > 0) { ctx.fillStyle = STATE_COL.ok; ctx.globalAlpha = reduced ? 1 : 0.6 + 0.4 * Math.sin(now / 350 + p); ctx.beginPath(); ctx.arc(ix + tw * 0.12, iy - tw * 0.1, Math.max(2.5, tw * 0.035), 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
-        } });
-        const pts = [P(tx - hs, ty - hs), P(tx + hs, ty - hs), P(tx + hs, ty + hs), P(tx - hs, ty + hs), P(tx, ty, Z(hu) + tw * 0.32)];
-        whits.push({ i, p, key: u.key, d: tx + ty, x0: Math.min(...pts.map((q) => q[0])), x1: Math.max(...pts.map((q) => q[0])), y0: Math.min(...pts.map((q) => q[1])), y1: Math.max(...pts.map((q) => q[1])) });
-        const hov = hoverT && hoverT.i === i && hoverT.p === p; const busiest = F.ww[i][p].length > 0 && F.ww[i].every((a2, q) => q === p || a2.length < F.ww[i][p].length || (a2.length === F.ww[i][p].length && q > p));
-        if (hov || busiest) {   // one label per station at most: the hovered page, else the page where most people stand right now
-          const [lx, ly] = P(tx, ty, Z(hu) + tw * 0.4); const n = F.wcum[i][p] * pfNow();
-          labels.push({ x: lx, y: ly, text: `${short(u.name, hov ? 18 : 9)} · ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(n)}`, col: rc });
-        }
-      });
-    });
-    return labels;
+    const th = Z(0.32); const A = P(0, WY); const B = P(WX, WY); const C = P(WX, 0); const ch = corrH; const rect = (y0, y1, x0 = 0.2, x1 = WX - 0.2) => [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)];
+    poly([A, B, [B[0], B[1] + th], [A[0], A[1] + th]], shade(pal.slab, 0.9)); poly([B, C, [C[0], C[1] + th], [B[0], B[1] + th]], shade(pal.slab, 0.72));
+    poly([P(0, 0), P(WX, 0), P(WX, WY), P(0, WY)], pal.floor);
+    ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.beginPath(); for (let i = 0; i <= Math.floor(WX); i++) { const a2 = P(i, 0); const b2 = P(i, WY); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); } for (let i = 0; i <= Math.floor(WY); i++) { const c2 = P(0, i); const d2 = P(WX, i); ctx.moveTo(c2[0], c2[1]); ctx.lineTo(d2[0], d2[1]); } ctx.stroke();
+    ctx.globalAlpha = 0.9; poly(rect(CYc - ch, CYc + ch), pal.corr); ctx.globalAlpha = 1; poly(rect(CYc - ch, CYc + ch), null, pal.grid, 1.5);
+    ctx.save(); ctx.strokeStyle = pal.brand; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1.5, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); ctx.beginPath(); const l0 = P(1.7, CYc); const l1 = P(WX - 1.7, CYc); ctx.moveTo(l0[0], l0[1]); ctx.lineTo(l1[0], l1[1]); ctx.stroke(); ctx.restore();
+    const pulse = reduced ? 0.85 : 0.75 + 0.15 * Math.sin(now / 600); ctx.globalAlpha = pulse;
+    const mx = WX / 2; poly([P(mx - 0.55, CYc - 0.15), P(mx + 0.55, CYc - 0.15), P(mx + 0.55, CYc + 0.15), P(mx - 0.55, CYc + 0.15)], pal.brand); poly([P(mx - 0.15, CYc - ch + 0.05), P(mx + 0.15, CYc - ch + 0.05), P(mx + 0.15, CYc + ch - 0.05), P(mx - 0.15, CYc + ch - 0.05)], pal.brand); ctx.globalAlpha = 1;
+    poly([P(0, 0), P(WX, 0), P(WX, WY), P(0, WY)], null, pal.brand, 2);
   }
 
   // ---------- gates: เข้าสู่ระบบ (teal) / ออกสู่ระบบ (rose) — a glass portal with a neon frame, a scan band and chevrons that flow the way people walk ----------
@@ -528,29 +527,140 @@ export function mountSiteFloor(host, opts = {}) {
     }
   }
 
+  // ---------- plan views: department (rooms = pages) · hospital (rooms = systems) ----------
+  const shm = new Map();
+  const wsh = (c, f) => { const k = `${c}|${f}`; let v = shm.get(k); if (!v) { v = shade(c, f); shm.set(k, v); } return v; };
+  const rectPts = (x0, y0, x1, y1) => [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)];
+  const bbox = (pts) => ({ x0: Math.min(...pts.map((q) => q[0])), x1: Math.max(...pts.map((q) => q[0])), y0: Math.min(...pts.map((q) => q[1])), y1: Math.max(...pts.map((q) => q[1])) });
+  /** Draw `fn` (a model built for a 2 x 2 cell) at scale k around its centre (cx, cy). */
+  function scaled(k, cx, cy, fn) {
+    const t0 = tw; const x0 = ox; const y0 = oy; const nt = t0 * k; ox = x0 + ((cx - cy) * (t0 - nt)) / 2; oy = y0 + ((cx + cy) * (t0 - nt)) / 4; tw = nt;
+    try { fn(); } finally { tw = t0; ox = x0; oy = y0; }
+  }
+  function wallDraw(q) {
+    const fill = wsh(q.col, pal.wk * (q.k === 'x' ? 0.9 : 1)); const cap = wsh(q.col, pal.wk * 1.12); const e = 0.035;
+    if (q.k === 'y') { faceY(q.a, q.b, q.c, 0, q.h, fill); poly([P(q.a, q.c - e, Z(q.h)), P(q.b, q.c - e, Z(q.h)), P(q.b, q.c + e, Z(q.h)), P(q.a, q.c + e, Z(q.h))], cap); }
+    else { faceX(q.c, q.a, q.b, 0, q.h, fill); poly([P(q.c - e, q.a, Z(q.h)), P(q.c + e, q.a, Z(q.h)), P(q.c + e, q.b, Z(q.h)), P(q.c - e, q.b, Z(q.h))], cap); }
+  }
+  /** Who is where at minute `tt`: people at a system's reception (`at`) or in one of its rooms (`rm`), numbered by arrival so they take the standing places in order. */
+  function planState(tt) {
+    const n = sites.length; const cum = Array(n).fill(0); const at = sites.map(() => []); const rm = deptOn() ? DL.map((d) => d.rooms.map(() => [])) : [];
+    for (const j of jr) {
+      const s0 = j.stops[0]; const z = s0.zone; const pg = deptOn() && j.pg >= 0 && DL[z] && DL[z].rooms[j.pg] ? j.pg : -1;
+      if (tt >= s0.start) cum[z] += 1;
+      if (tt >= s0.start && tt < s0.end) (pg >= 0 ? rm[z][pg] : at[z]).push({ id: j.id, st: s0.start });
+    }
+    const rank = new Map(); const rk = (a2) => a2.sort((x, y) => x.st - y.st || x.id - y.id).forEach((w, i) => rank.set(w.id, i)); at.forEach(rk); rm.forEach((zs) => zs.forEach(rk));
+    if (dayOn()) sites.forEach((s2, i) => { cum[i] = cumViews(R.rep, s2.key, tt); });   // a replayed day counts its real page views, not the drawn people
+    return { cum, rank, at, rm };
+  }
+  /** Walk in from the gate → along the corridor (hall / lobby) → stand in the room → walk out to the exit gate. */
+  function planPlace(j, tt, F) {
+    if (tt < j.enter || tt >= j.exit) return null;
+    const s0 = j.stops[0]; const z = s0.zone; const rank = F.rank.get(j.id) ?? 0; let route; let stand; let col = null; let state = 'work';
+    if (deptOn()) {
+      const d = DL[z]; const r = j.pg >= 0 && d ? d.rooms[j.pg] : null; const cx = d.hall.cx;
+      if (r) { stand = deptStand(r, rank); route = [[cx, CYc], [cx, r.c[1]], r.door]; const u = (W.map[sites[z].key] || { units: [] }).units[j.pg]; col = u ? roomColor(u.kind) : colOf(z); state = 'room'; }
+      else { stand = headStand(d, rank); route = [[cx, CYc]]; }
+    } else { const r = HL.rooms[z]; stand = hospStand(r, rank); route = hospRoute(HL, r); }
+    if (tt < s0.start) return { pos: along([ENT, ...route, stand], (tt - j.enter) / Math.max(1, s0.start - j.enter)), state: 'walk', zone: z, rank: 0 };
+    if (tt < s0.end) return { pos: stand, state, zone: z, rank, col };
+    return { pos: along([stand, ...route.slice().reverse(), EXIT], (tt - s0.end) / Math.max(1, j.exit - s0.end)), state: 'walk', zone: z, rank: 0 };
+  }
+  const lineOf = (i, F) => { const s = sites[i]; const st = stateOf(s); return st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]; };
+  const busyAt = (i, F) => F.at[i].length > 0 || (F.rm[i] || []).some((a2) => a2.length > 0);
+  const dotAt = (x, y, z, c, blink, now, i) => { const [bx, by] = P(x, y, Z(z)); ctx.fillStyle = c; ctx.globalAlpha = blink ? 0.55 + (reduced ? 0.45 : 0.45 * Math.sin(now / 350 + i)) : 1; ctx.beginPath(); ctx.arc(bx, by, Math.max(3, tw * 0.05), 0, 7); ctx.fill(); ctx.globalAlpha = 1; };
+
+  function deptScene(items, labels, F, now, kit) {
+    const mx = Math.max(1, ...sites.map((s) => s.pv)); const topKey = sm.top && sm.top.pv > 0 ? sm.top.key : ''; const kz = Math.pow(cam.z, -0.6); const hh = Math.max(16, tw * 0.27 * kz);
+    DL.forEach((d, i) => {
+      const s = sites[i]; const st = stateOf(s); const lit = st === 'ok'; const col = colOf(i); const hov = hover === i; const pd = d.pad; const hd = d.head; const hc = d.c; const hall = d.hall;
+      ctx.globalAlpha = 0.1 + 0.3 * (s.pv / mx); poly(rectPts(pd.x0, pd.y0, pd.x1, pd.y1), col); ctx.globalAlpha = 1; poly(rectPts(pd.x0, pd.y0, pd.x1, pd.y1), null, hov ? pal.ink : col, hov ? 2.4 : 1.2);
+      if (s.key === topKey) { ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * Math.sin(now / 300); poly(rectPts(pd.x0 + 0.06, pd.y0 + 0.06, pd.x1 - 0.06, pd.y1 - 0.06), null, '#f59e0b', 2.5); ctx.globalAlpha = 1; }
+      ctx.globalAlpha = 0.95; poly(rectPts(hall.x0, hall.y0, hall.x1, hall.y1), pal.corr); ctx.globalAlpha = 0.3; poly(rectPts(hd.x0, hd.y0, hd.x1, hd.y1), col); ctx.globalAlpha = 1;
+      ctx.save(); ctx.strokeStyle = col; ctx.globalAlpha = 0.65; ctx.lineWidth = Math.max(1.5, tw * 0.022); ctx.lineCap = 'round'; ctx.setLineDash([tw * 0.07, tw * 0.09]); ctx.lineDashOffset = reduced ? 0 : (now / 55) * (d.top ? 1 : -1) * (tw / 60);
+      const a2 = P(hall.cx, d.mouth[1]); const b2 = P(hall.cx, d.top ? hd.y1 : hd.y0); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); ctx.restore();
+      items.push({ d: hc[0] + hc[1], f: () => { ctx.globalAlpha = st === 'paused' || st === 'idle' ? 0.6 : 1; scaled(0.82, hc[0], hc[1], () => prop(themes[i], hc[0], hc[1], col, lit && (s.realtime > 0 || s.key === topKey), st, now, i)); ctx.globalAlpha = 1; dotAt(hc[0], hc[1], 1.25, STATE_COL[st], lit || st === 'silent', now, i); } });
+      hits.push({ i, d: hc[0] + hc[1], ...bbox([...rectPts(hd.x0, hd.y0, hd.x1, hd.y1), P(hd.x0, hd.y0, Z(1.2)), P(hd.x1, hd.y0, Z(1.2))]) });
+      const [lx, ly] = d.top ? P(hall.cx, hd.y0, Z(1.15)) : P(hall.cx, hd.y1, 0); const off = d.top ? -tw * 0.2 : tw * 0.22;
+      labels.push({ x: lx, y: ly + off, text: `${THEMES[themes[i]].icon} ${short(s.name, 20)}`, col: !lit && st === 'silent' ? STATE_COL.silent : null, sc: 1 });
+      labels.push({ x: lx, y: ly + off + hh + 3, text: lineOf(i, F), col: lit ? (busyAt(i, F) ? col : null) : STATE_COL[st], sc: 1 });
+      const wg = W.map[s.key]; const mxw = wg ? Math.max(1, ...wg.units.map((u) => u.pv)) : 1;
+      d.rooms.forEach((r) => {
+        const u = wg && wg.units[r.p]; if (!u) return; const rc = roomColor(u.kind); const hot = F.rm[i][r.p].length > 0; const hv = !!hoverT && hoverT.i === i && hoverT.p === r.p; const k = Math.max(0.34, Math.min(0.62, r.w / 2.7));
+        ctx.globalAlpha = 0.12 + 0.42 * (u.pv / mxw); poly(rectPts(r.x0, r.y0, r.x1, r.y1), rc); ctx.globalAlpha = 1; poly(rectPts(r.x0, r.y0, r.x1, r.y1), null, hv ? pal.ink : rc, hv ? 2.4 : 1);
+        items.push({ d: r.c[0] + r.c[1] + 0.02, f: () => { ctx.globalAlpha = u.pv ? 1 : 0.55; scaled(k, r.px, r.c[1], () => drawRoom(kit, u.kind, r.px, r.c[1], rc, hot, now)); ctx.globalAlpha = 1; if (u.realtime > 0) dotAt(r.px, r.c[1], 0.95 * k + 0.5, STATE_COL.ok, true, now, r.p); } });
+        whits.push({ i, p: r.p, key: u.key, d: r.c[0] + r.c[1], ...bbox([...rectPts(r.x0, r.y0, r.x1, r.y1), P(r.x0, r.y0, Z(0.8))]) });
+        const [qx, qy] = P(r.c[0], r.y1 - 0.14, 0); labels.push({ x: qx, y: qy, text: `${kindMeta(u.kind).icon} ${short(u.name, hv ? 18 : 6)}`, col: hv ? rc : null, sc: 0.66 });
+      });
+    });
+  }
+
+  function hospScene(items, labels, F, now, kit) {
+    const { Y0, RD, SP } = HOSP; const yf = HL.lobby.y1; const xa = HL.wings[0].x0; const xb = HL.wings[1].x1; const gx = HL.gate[0];
+    poly(rectPts(xa, Y0, xb, yf), pal.corr); HOSP_GROUPS.forEach((g, gi) => { const wg = HL.wings[gi]; if (wg.count) { ctx.globalAlpha = 0.1; poly(rectPts(wg.x0, Y0, wg.x1, yf), g.col); ctx.globalAlpha = 1; } });
+    ctx.globalAlpha = 0.55; poly(rectPts(xa, Y0 + RD, xb, Y0 + RD + SP), pal.grid); ctx.globalAlpha = 0.14; poly(rectPts(HL.lobby.x0, Y0, HL.lobby.x1, yf), pal.brand); ctx.globalAlpha = 1; poly(rectPts(xa, Y0, xb, yf), null, pal.brand, 2);
+    const mx = Math.max(1, ...sites.map((s) => s.pv)); const topKey = sm.top && sm.top.pv > 0 ? sm.top.key : '';
+    HL.rooms.forEach((r, i) => {
+      if (!r) return; const s = sites[i]; const st = stateOf(s); const lit = st === 'ok'; const col = colOf(i); const hov = hover === i; const k = Math.max(0.5, Math.min(0.9, r.w / 2.2, r.d / 2.7));
+      ctx.globalAlpha = 0.1 + 0.34 * (s.pv / mx); poly(rectPts(r.x0, r.y0, r.x1, r.y1), col); ctx.globalAlpha = 1; poly(rectPts(r.x0, r.y0, r.x1, r.y1), null, hov ? pal.ink : col, hov ? 2.4 : 1.2);
+      if (s.key === topKey) { ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * Math.sin(now / 300); poly(rectPts(r.x0 + 0.07, r.y0 + 0.07, r.x1 - 0.07, r.y1 - 0.07), null, '#f59e0b', 2.5); ctx.globalAlpha = 1; }
+      ctx.globalAlpha = 0.9; poly(r.front ? rectPts(r.door[0] - 0.3, r.y0 - 0.02, r.door[0] + 0.3, r.y0 + 0.14) : rectPts(r.door[0] - 0.3, r.y1 - 0.14, r.door[0] + 0.3, r.y1 + 0.02), col); ctx.globalAlpha = 1;   // doorstep
+      items.push({ d: r.c[0] + r.c[1] + 0.02, f: () => { ctx.globalAlpha = st === 'paused' || st === 'idle' ? 0.6 : 1; scaled(k, r.px, r.c[1], () => prop(themes[i], r.px, r.c[1], col, lit && (s.realtime > 0 || s.key === topKey), st, now, i)); ctx.globalAlpha = 1; dotAt(r.px, r.c[1], 0.9 * k + 0.6, STATE_COL[st], lit || st === 'silent', now, i); } });
+      hits.push({ i, d: r.c[0] + r.c[1], ...bbox([...rectPts(r.x0, r.y0, r.x1, r.y1), P(r.x0, r.y0, Z(1.1)), P(r.x1, r.y0, Z(1.1))]) });
+      const [lx, ly] = r.front ? P(r.c[0], r.y1, 0) : P(r.c[0], r.y0, Z(1.25)); const cnt = st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())}` : STATE_TXT[st];
+      labels.push({ x: lx, y: r.front ? ly + tw * 0.2 : ly - tw * 0.2, text: `${THEMES[themes[i]].icon} ${short(s.name, 9)} · ${cnt}`, col: !lit ? STATE_COL[st] : busyAt(i, F) ? col : null, sc: 0.8 });
+    });
+    // wing banners: painted on the plaza in front of each wing
+    HOSP_GROUPS.forEach((g, gi) => { const wg = HL.wings[gi]; if (!wg.count) return; const [bx, by] = P(wg.side > 0 ? wg.x0 + (wg.x1 - wg.x0) * 0.3 : (wg.x0 + wg.x1) / 2, yf + 2.4, 0); labels.push({ x: bx, y: by, text: `${g.icon} ปีก${g.name} · ${wg.count} ระบบ`, col: g.col, sc: 1.15 }); });
+    const [dx, dy] = P(gx, yf, Z(0.5)); labels.push({ x: dx, y: dy + tw * 0.34, text: 'ทางเข้าหลัก', col: pal.brand, sc: 0.8 });
+    // lobby tower with the billboard, reception desk, trees
+    const tx = gx; items.push({ d: tx + 1.05 + 0.5, f: () => {
+      box(tx, 1.0, 2.0, 1.2, 3.6, pal.tower); for (const wx of [-0.55, 0, 0.55]) for (const wz of [0.55, 1.15, 1.75, 2.35, 2.95]) faceY(tx + wx - 0.14, tx + wx + 0.14, 1.601, wz, wz + 0.3, '#7dd3fc');
+      faceY(tx - 0.2, tx + 0.2, 1.602, 0, 0.55, '#475569');
+      box(tx, 1.0, 3.3, 0.16, 0.95, pal.brand, 3.6); const [sx, sy] = P(tx - 1.65, 1.081, Z(3.6)); const u = tw / 2;
+      ctx.save(); ctx.translate(sx, sy); ctx.transform(1, 0.5, 0, 1, 0, 0);
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0.45 * u, -0.48 * u, 0.3 * u, 0, 7); ctx.fill(); ctx.fillStyle = '#dc2626'; ctx.fillRect(0.45 * u - 0.07 * u, -0.48 * u - 0.19 * u, 0.14 * u, 0.38 * u); ctx.fillRect(0.45 * u - 0.19 * u, -0.48 * u - 0.07 * u, 0.38 * u, 0.14 * u);
+      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const cxs = 2.0 * u; const l2 = 'กลุ่มงานพัฒนาคุณภาพและระบบบริการ';
+      ctx.font = `700 ${0.27 * u}px ${font}`; ctx.fillText('โรงพยาบาลสันทราย', cxs, -0.64 * u); let fs = 0.17 * u; ctx.font = `600 ${fs}px ${font}`; const mw = ctx.measureText(l2).width; if (mw > 2.5 * u) { fs *= (2.5 * u) / mw; ctx.font = `600 ${fs}px ${font}`; } ctx.fillText(l2, cxs, -0.3 * u);
+      ctx.restore();
+    } });
+    items.push({ d: 8.3 + 5.2, f: () => { box(8.3, 5.1, 1.0, 0.4, 0.3, pal.desk); box(8.3, 5.1, 0.5, 0.06, 0.2, '#334155', 0.3); } });
+    for (const [x, y] of [[1.6, 8.4], [4.6, 12.3], [11.2, 12.3], [13.7, 8.4]]) items.push({ d: x + y, f: () => { box(x, y, 0.12, 0.12, 0.35, '#7c5a3a'); box(x, y, 0.62, 0.62, 0.42, '#22a35a', 0.35); box(x, y, 0.4, 0.4, 0.32, '#34c26f', 0.77); } });
+  }
+
+  function drawPlan(now) {
+    const F = planState(t); const items = []; const labels = []; hits = []; whits = [];
+    const kit = { ctx, P, Z, get tw() { return tw; }, pal, reduced, box, faceX, faceY, disc, poly, shade };
+    hospitalBase(now); gatePad('in', now); gatePad('out', now);
+    if (deptOn()) deptScene(items, labels, F, now, kit); else if (hospOn()) hospScene(items, labels, F, now, kit);
+    items.push(...gateItems('in', now), ...gateItems('out', now)); for (const q of PW) items.push({ d: q.d + 0.001, f: () => wallDraw(q) });
+    const psc = deptOn() ? 0.82 : 0.95; let here = 0; let entered = 0; let enteredBack = 0; let left = 0;
+    for (const j of jr) {
+      if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
+      const r = planPlace(j, t, F); if (!r) continue; here += 1; if (r.state !== 'walk' && r.rank >= 6) continue;
+      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc) });
+    }
+    items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
+    labels.forEach((q) => pill(q.text, q.x, q.y, q.col, q.sc));
+    gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`);
+    hud(F, here);
+  }
+
   // ---------- frame state: floor visitors and page journeys are drawn by the same code ----------
   const crowd = () => (ins ? ins.journeys : jr);
   const curLay = () => (ins ? ILAY : LAY);
   function frameState(tt) {
     const n = curLay().length; const work = Array.from({ length: n }, () => []); const cum = Array(n).fill(0);
-    const wk = wingActive(); const ww = wk ? WL.map((l) => l.tiles.map(() => [])) : []; const wcum = wk ? WL.map((l) => l.tiles.map(() => 0)) : [];
     for (const j of crowd()) {
-      j.stops.forEach((s, k) => {
-        if (tt >= s.start) cum[s.zone] += 1;
-        const wp = wk && j.pg >= 0 && j.stops.length === 1 && !!(WL[s.zone] && WL[s.zone].tiles[j.pg]); const dur = s.end - s.start;
-        if (tt >= s.start && tt < (wp ? s.start + W_STAY * dur : s.end)) work[s.zone].push({ s, id: j.id, key: j.id * 8 + k });   // a person who goes on to a page leaves the station's queue early
-        if (wp && tt >= s.start + W_ARR * dur) { wcum[s.zone][j.pg] += 1; if (tt < s.end) ww[s.zone][j.pg].push({ id: j.id, key: j.id * 8 + k, t: s.start + W_ARR * dur }); }
-      });
+      j.stops.forEach((st, k) => { if (tt >= st.start) cum[st.zone] += 1; if (tt >= st.start && tt < st.end) work[st.zone].push({ s: st, id: j.id, key: j.id * 8 + k }); });
     }
     const rank = new Map(); work.forEach((a2) => a2.sort((x, y) => x.s.start - y.s.start || x.id - y.id).forEach((w, i) => rank.set(w.key, i)));
-    const wrank = new Map(); ww.forEach((zs) => zs.forEach((a2) => a2.sort((x, y) => x.t - y.t || x.id - y.id).forEach((w, i) => wrank.set(w.key, i))));
-    if (dayOn()) sites.forEach((s2, i) => { cum[i] = cumViews(R.rep, s2.key, tt); });   // a replayed day counts its real page views, not the drawn people
-    return { work, cum, rank, ww, wcum, wrank };
+    return { work, cum, rank };
   }
   /** Where a visitor is at minute `tt`: walking in → at a station/room → (walking to the next room) → walking out. */
   function place(j, tt, F) {
     if (tt < j.enter || tt >= j.exit) return null;
-    if (!ins && j.pg >= 0 && j.stops.length === 1 && WL[j.stops[0].zone] && WL[j.stops[0].zone].tiles[j.pg]) return placeWing(j, tt, F);
     const L = curLay(); const st = j.stops; const door = (z) => [L[z].door[0], CORR]; const rk = (k) => F.rank.get(j.id * 8 + k) ?? 0; const q = (z) => slot(L[z], F.work[z].length);
     if (tt < st[0].start) return { pos: along([ENT, door(st[0].zone), q(st[0].zone)], (tt - j.enter) / Math.max(1, st[0].start - j.enter)), state: 'walk', zone: st[0].zone, rank: 0 };
     for (let k = 0; k < st.length; k++) {
@@ -561,20 +671,6 @@ export function mountSiteFloor(host, opts = {}) {
     }
     const l = st[st.length - 1];
     return { pos: along([slot(L[l.zone], 0), door(l.zone), EXIT], (tt - l.end) / Math.max(1, j.exit - l.end)), state: 'walk', zone: l.zone, rank: 0 };
-  }
-
-  /** A visit that goes on to a page: queue at the station → walk round through the gap between two stations → stand on the page's tile → walk out the same way. */
-  function placeWing(j, tt, F) {
-    const s = j.stops[0]; const z = s.zone; const L = LAY[z]; const wl = WL[z]; const tile = wl.tiles[j.pg]; const dur = s.end - s.start; const a = s.start + W_STAY * dur; const b = s.start + W_ARR * dur;
-    const rk = F.rank.get(j.id * 8) ?? 0; const wr = F.wrank.get(j.id * 8) ?? 0; const lx = wl.lane.x;
-    const tp = [tile.c[0] + ((wr % 3) - 1) * 0.26, tile.c[1] + 0.5 + Math.floor(wr / 3) * 0.22];   // in front of the pillar, on the viewer's side
-    if (tt < s.start) return { pos: along([ENT, [L.door[0], CORR], slot(L, F.work[z].length)], (tt - j.enter) / Math.max(1, s.start - j.enter)), state: 'walk', zone: z, rank: 0 };
-    if (tt < a) return { pos: slot(L, rk), state: 'work', zone: z, rank: rk };
-    const s0 = slot(L, rk);
-    if (tt < b) return { pos: along([s0, [lx, s0[1]], [lx, tp[1]], tp], (tt - a) / Math.max(1, b - a)), state: 'walk', zone: z, rank: 0 };
-    const w = W.map[sites[z].key]; const col = roomColor(w.units[j.pg].kind);
-    if (tt < s.end) return { pos: tp, state: 'wing', zone: z, rank: wr, col };
-    return { pos: along([tp, [lx, tp[1]], [lx, CORR], EXIT], (tt - s.end) / Math.max(1, j.exit - s.end)), state: 'walk', zone: z, rank: 0 };
   }
 
   /** What to draw in each cell: stations (projects) on the floor, rooms (pages) inside a system. */
@@ -613,11 +709,10 @@ export function mountSiteFloor(host, opts = {}) {
   function draw(now) {
     const w = cv.width / dpr; const hgt = cv.height / dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, hgt); ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.tx, dpr * cam.ty);
-    const L = curLay(); const Zs = zones(); const F = frameState(t); const items = []; const mx = Math.max(1, ...Zs.map((z) => z.pv)); const Hz = Z(1.4); hits = []; whits = []; const wk = wingActive();
-    const kit = { ctx, P, Z, tw, pal, reduced, box, faceX, faceY, disc, poly, shade };
-    if (wk) wingGround(true);
+    if (!ins) { drawPlan(now); return; }
+    const L = curLay(); const Zs = zones(); const F = frameState(t); const items = []; const mx = Math.max(1, ...Zs.map((z) => z.pv)); const Hz = Z(1.4); hits = []; whits = [];
+    const kit = { ctx, P, Z, get tw() { return tw; }, pal, reduced, box, faceX, faceY, disc, poly, shade };
     hospitalBase(now);
-    if (wk) { wingGround(false); wingLanes(now); }
     gatePad('in', now); gatePad('out', now);
     const lanes = ins ? flowLanes(Zs, L) : [];
     Zs.forEach((z, i) => {
@@ -626,7 +721,7 @@ export function mountSiteFloor(host, opts = {}) {
       poly([P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)], null, hover === i || focus === i ? pal.ink : col, hover === i || focus === i ? 2.4 : 1.2);
       if (z.top) { ctx.globalAlpha = reduced ? 1 : 0.55 + 0.45 * Math.sin(now / 300); poly([P(x0 - 0.25, y0 - 0.25), P(x1 + 0.25, y0 - 0.25), P(x1 + 0.25, y1 + 0.25), P(x0 - 0.25, y1 + 0.25)], null, '#f59e0b', 2.5); ctx.globalAlpha = 1; }
       if (ins) { ctx.globalAlpha = 0.9; poly([P(cx - 0.3, l.door[1] - l.dir * 0.12), P(cx + 0.3, l.door[1] - l.dir * 0.12), P(cx + 0.3, l.door[1] + l.dir * 0.12), P(cx - 0.3, l.door[1] + l.dir * 0.12)], col); ctx.globalAlpha = 1; }   // doorstep
-      const pts = [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1), P(x0, y0, Hz), P(x1, y0, Hz)]; hits.push({ i, x0: Math.min(...pts.map((p) => p[0])), x1: Math.max(...pts.map((p) => p[0])), y0: Math.min(...pts.map((p) => p[1])), y1: Math.max(...pts.map((p) => p[1])) });
+      const pts = [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1), P(x0, y0, Hz), P(x1, y0, Hz)]; hits.push({ i, d: cx + cy, x0: Math.min(...pts.map((p) => p[0])), x1: Math.max(...pts.map((p) => p[0])), y0: Math.min(...pts.map((p) => p[1])), y1: Math.max(...pts.map((p) => p[1])) });
       items.push({ d: cx + cy - l.hx - l.hy, f: () => { ctx.globalAlpha = dim; if (l.top) poly([P(x0, y0), P(x1, y0), P(x1, y0, Hz), P(x0, y0, Hz)], shade(col, 1)); const Hl = ins ? Z(0.6) : Hz; poly([P(x0, y0), P(x0, y1), P(x0, y1, Hl), P(x0, y0, Hl)], shade(col, 0.78)); ctx.globalAlpha = 1; } });   // inside: low side walls so neighbouring rooms never hide each other
       items.push({ d: cx + cy, f: () => {
         ctx.globalAlpha = z.alpha * dim; z.prop(kit, cx, cy, col, z.live, now); ctx.globalAlpha = 1;
@@ -635,24 +730,26 @@ export function mountSiteFloor(host, opts = {}) {
       const ph = z.pv ? 0.2 + 0.8 * (z.pv / mx) : 0.08; items.push({ d: cx + cy + 0.3, f: () => { ctx.globalAlpha = dim; box(x1 - 0.22, cy + l.dir * 0.05, 0.24, 0.24, ph, col); ctx.globalAlpha = 1; } });   // data pillar: height = page views
     });
     items.push(...gateItems('in', now), ...gateItems('out', now));
-    const wlabels = wk ? wingItems(items, F, now) : [];
     let here = 0; let entered = 0; let enteredBack = 0; let left = 0;
     for (const j of crowd()) {
       if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
       const r = place(j, t, F); if (!r) continue; here += 1;
-      if (r.state === 'work' && r.rank >= CAP) continue; if (r.state === 'wing' && r.rank >= 6) continue;
-      items.push({ d: r.pos[0] + r.pos[1] + 0.01 + (r.state === 'wing' && WL[r.zone] && WL[r.zone].out === -1 ? 100 : 0), f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : r.state === 'wing' ? r.col : WALK, !!j.back, now) });
+      if (r.state === 'work' && r.rank >= CAP) continue;
+      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK, !!j.back, now) });
     }
     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
-    wlabels.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.78));
     Zs.forEach((z, i) => {
       const l = L[i]; const [lx, ly] = l.top ? P(l.c[0], l.c[1] - l.hy, Hz) : P(l.c[0], l.c[1] + l.hy, 0); const sc = ins && L.length > 6 ? 0.82 : 1; const kz = Math.pow(cam.z, -0.6) * sc;
       const off = (l.top ? -tw * 0.22 : tw * 0.24) * kz; const hh = Math.max(16, tw * 0.27 * kz);
-      pill(`${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : wk ? 16 : 20)}`, lx, ly + off, !ins && z.dot === STATE_COL.silent ? STATE_COL.silent : null, sc);
-      if (wk && WL[i]) { const q = WL[i].slab; const [nx, ny] = P((q.x0 + q.x1) / 2, WL[i].out === -1 ? q.y0 - 0.1 : q.y1 + 0.1); pill(z.line(F, i), nx, ny + (WL[i].out === -1 ? -tw * 0.12 : tw * 0.14), z.lineCol(F, i), 0.9); } else pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
+      pill(`${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : 20)}`, lx, ly + off, !ins && z.dot === STATE_COL.silent ? STATE_COL.silent : null, sc);
+      pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
     });
     lanes.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.8));
     gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`);
+    hud(F, here);
+  }
+  /** Clock, counters, progress bar and the hour strip (once per drawn minute). */
+  function hud(F, here) {
     const min = Math.floor(t);
     if (min !== lastMin) {
       lastMin = min; clock.textContent = hhmm(t); sub.textContent = ins ? `${ins.site.name} · ภายในระบบ · วันทั่วไป` : dayOn() ? `${R.rep.day === R.rep.today ? 'วันนี้' : 'วันที่คนใช้มากสุด'} · ${dayLabel(R.rep.day)}` : 'วันทั่วไป · เฉลี่ยจากช่วงที่เลือก';
@@ -666,6 +763,7 @@ export function mountSiteFloor(host, opts = {}) {
   const FOCUS_ZOOM = 2.3;
   const idle = () => (!ins && !entering);
   const center = (i, lay) => P(lay[i].c[0], lay[i].c[1], Z(0.5));
+  const planCenter = (i) => { const c = deptOn() && DL[i] ? DL[i].c : hospOn() && HL.rooms[i] ? HL.rooms[i].c : LAY[i].c; return P(c[0], c[1], Z(0.5)); };
   function setCam(zv, p) {
     const w = cv.width / dpr; const hg = cv.height / dpr; cam.tz = zv; cam.ttx = zv === 1 ? 0 : w / 2 - zv * p[0]; cam.tty = zv === 1 ? 0 : hg / 2 - zv * p[1];
     if (reduced) { cam.z = cam.tz; cam.tx = cam.ttx; cam.ty = cam.tty; }
@@ -685,7 +783,7 @@ export function mountSiteFloor(host, opts = {}) {
     }
   }
   async function enterSite(i, focusKey = '') {
-    if (!idle()) return; const s = sites[i]; if (!s) return; entering = true; tip.hidden = true; const my = ++iseq; setCam(1.9, center(i, LAY));
+    if (!idle()) return; const s = sites[i]; if (!s) return; entering = true; tip.hidden = true; const my = ++iseq; setCam(1.9, planCenter(i));
     try {
       const [res] = await Promise.all([fetchPages(s, S.days), new Promise((r) => { setTimeout(r, reduced ? 0 : 340); })]); if (my !== iseq || dead) return;
       openInside(s, i, res.d, res.approx); if (focusKey) { const k = roomIdx(focusKey); if (k >= 0) focusRoom(k); }
@@ -696,12 +794,12 @@ export function mountSiteFloor(host, opts = {}) {
     const tot = units.reduce((a, u) => a + u.pv, 0); const top = units.filter((u) => u.kind !== 'p:other').sort((a, b) => b.pv - a.pv)[0];
     ins = { site: s, idx: i, d, units, flows: d.flows, journeys, pf: pf2, hourly, peak: tot ? hourly.indexOf(Math.max(...hourly)) : -1, tot, top: top && top.pv ? top.key : '', next: nextPages(units, d.flows), prev: prevPages(units, d.flows), approx, source: S.source };
     ILAY = layout(units.length); focus = -1; range = timeRange(journeys, cfg); t = Math.min(range.to, Math.max(range.from, bkkMinutes())); lastMin = -1; hover = -1;
-    rebuildWL(); resize(); fadeSwap(); setCam(1, [0, 0]); banner.replaceChildren(...(approx ? [notice('warn', 'ยังไม่เห็นเส้นทางเดินระหว่างหน้า', 'Apps Script ยังเป็นเวอร์ชันเก่า (ไม่มี op pages) — ตัวเลขรายหน้าเป็นค่าประมาณและไม่มีเส้นทางเดิน วางไฟล์ Analytics.gs ใหม่แล้ว Deploy เวอร์ชันใหม่')] : units.length ? [] : [notice('info', 'ยังไม่มีข้อมูลรายหน้า', 'วางโค้ดติดตามในทุกหน้าของเว็บไซต์นี้')]));
+    rebuildPlan(); resize(); fadeSwap(); setCam(1, [0, 0]); banner.replaceChildren(...(approx ? [notice('warn', 'ยังไม่เห็นเส้นทางเดินระหว่างหน้า', 'Apps Script ยังเป็นเวอร์ชันเก่า (ไม่มี op pages) — ตัวเลขรายหน้าเป็นค่าประมาณและไม่มีเส้นทางเดิน วางไฟล์ Analytics.gs ใหม่แล้ว Deploy เวอร์ชันใหม่')] : units.length ? [] : [notice('info', 'ยังไม่มีข้อมูลรายหน้า', 'วางโค้ดติดตามในทุกหน้าของเว็บไซต์นี้')]));
     cv.setAttribute('aria-label', `ภายในระบบ ${s.name}: ${units.length} หน้า · เปิดหน้ารวม ${fmt(tot)} ครั้งใน ${S.days} วัน`); playing = !reduced; drawAll();
   }
   function leave() {
     if (!ins) return; ins = null; ILAY = []; focus = -1; range = floorRange; t = Math.min(range.to, Math.max(range.from, t)); lastMin = -1; hover = -1; tip.hidden = true;
-    banner.replaceChildren(); rebuildWL(); resize(); planWings(); fadeSwap(); setCam(1, [0, 0]); cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`); drawAll();
+    banner.replaceChildren(); rebuildPlan(); resize(); planWings(); fadeSwap(); setCam(1, [0, 0]); cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`); drawAll();
   }
   function focusRoom(i) {
     if (!ins) return; if (i === focus || i < 0) { focus = -1; setCam(1, [0, 0]); } else { focus = i; setCam(FOCUS_ZOOM, center(i, ILAY)); }
@@ -742,7 +840,7 @@ export function mountSiteFloor(host, opts = {}) {
   // ---------- pointer ----------
   function stationAt(ev) {
     const r = cv.getBoundingClientRect(); const x = (ev.clientX - r.left - cam.tx) / cam.z; const y = (ev.clientY - r.top - cam.ty) / cam.z; const L = curLay();
-    const hit = hits.filter((q) => x >= q.x0 && x <= q.x1 && y >= q.y0 - tw * 0.55 && y <= q.y1 + tw * 0.2).sort((a2, b2) => (L[b2.i].c[0] + L[b2.i].c[1]) - (L[a2.i].c[0] + L[a2.i].c[1]))[0];
+    const hit = hits.filter((q) => x >= q.x0 && x <= q.x1 && y >= q.y0 - tw * 0.55 && y <= q.y1 + tw * 0.2).sort((a2, b2) => b2.d - a2.d)[0];
     return hit ? hit.i : -1;
   }
   function tileAt(ev) {
