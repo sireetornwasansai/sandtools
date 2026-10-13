@@ -18,7 +18,7 @@ import { deltaChip, ago } from '../core/charts.js';
 import { THEMES, themeOf, MAX_SITES, PALETTE, IDLE_COL, DEFAULTS, hhmm, fmt, hostOf, normalizeFloor, fromListStats, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample,
   kindMeta, normalizePages, pagesFromStats, pageJourneys, nextPages, prevPages, pageInsights, pagesCsv, makeSamplePages, asJourneys,
   MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY,
-  VIEW_KEY, VIEWS, VIEW_IDS, DEPT, HOSP, HOSP_GROUPS, HG, groupOf, deptWorld, deptLayout, deptStand, headStand, hospitalLayout, hospStand, hospRoute, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext, ROLES, roleOf, roleText } from './site-engine.js';
+  VIEW_KEY, VIEWS, VIEW_IDS, DEPT, HOSP, HOSP_GROUPS, HG, groupOf, deptWorld, deptLayout, deptStand, headStand, hospitalLayout, hospStand, hospRoute, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext, ROLES, ROLE_IDS, roleOf, roleText } from './site-engine.js';
 import { drawRoom, roomColor } from './site-rooms.js';
 
 const G = 12; const CORR = 6; const ENT = [0.6, CORR]; const EXIT = [11.4, CORR]; const CAP = 16;
@@ -263,7 +263,7 @@ export function mountSiteFloor(host, opts = {}) {
       j.pg = -1; j.role = ''; if (view !== 'dept' || ins || !DL.length) continue;
       const z = j.stops[0].zone; const w = W.map[sites[z] && sites[z].key]; if (!w || !DL[z] || !DL[z].rooms.length) continue;
       const g = j.pk ? w.units.findIndex((u) => u.key === j.pk) : wingPick(w, j.id); j.pg = g >= 0 && g < DL[z].rooms.length ? g : -1;
-      if (j.pg >= 0) { const q = roleOf(w.units[j.pg]); const x = ((j.id * 2654435761) >>> 0) / 4294967296; const pv = Math.max(1, q.adm + q.stf + q.none); j.role = x < q.adm / pv ? 'admin' : x < (q.adm + q.stf) / pv ? 'staff' : ''; }   // who stands in the room, in proportion to the roles the website reported
+      if (j.pg >= 0) { const q = roleOf(w.units[j.pg]); const x = ((j.id * 2654435761) >>> 0) / 4294967296; const tt = Math.max(1, q.known + q.none); let acc = 0; for (const id of ROLE_IDS) { acc += (q.by[id] || 0) / tt; if (x < acc) { j.role = id; break; } } }   // who stands in the room, in proportion to the roles the website reported
     }
   }
   function setWingData(map) {
@@ -374,7 +374,7 @@ export function mountSiteFloor(host, opts = {}) {
       ...(more ? [h('span', { class: 's3-lg more' }, `+${more} โครงการในตารางด้านล่าง`)] : []),
       ...(dayOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-new' }), 'ผู้ใช้ใหม่ (ครั้งแรกของวัน)'), h('span', { class: 's3-lg' }, h('i', { class: 's3-ring' }), 'ผู้ใช้เดิมที่กลับมาในวันเดียวกัน')] : []),
       ...(deptOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-wing' }), 'ห้องในแผนก = หน้าย่อยของระบบ (ยิ่งสีเข้มยิ่งมีคนเปิดมาก)')] : []),
-      ...(deptOn() && hasRoles() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-adm' }), 'จุดม่วงเหนือหัว = แอดมิน/เจ้าหน้าที่ผู้ดูแล (คนอื่นคือบุคลากร)')] : []),
+      ...(deptOn() && hasRoles() ? ROLE_IDS.filter((id) => id !== 'user' && Object.values(W.map).some((w) => w && w.units.some((u) => roleOf(u).by[id]))).map((id) => h('span', { class: 's3-lg' }, h('i', { class: `s3-adm s3-r-${id}` }), `จุดสีเหนือหัว = ${ROLES[id].short}`)) : []),
       ...(hospOn() ? HOSP_GROUPS.map((g) => h('span', { class: 's3-lg' }, h('i', { style: `background:${g.col}` }), `${g.icon} ${g.name} · ${fmt(HL.wings.find((x) => x.id === g.id).count)} ระบบ`)) : []),
       h('span', { class: 's3-lg' }, h('i', { style: `background:${WALK}` }), 'กำลังเดินเข้า/ออก'), h('span', { class: 's3-lg' }, h('i', { style: `background:${STATE_COL.silent}` }), 'เงียบผิดปกติ'));
   }
@@ -431,7 +431,7 @@ export function mountSiteFloor(host, opts = {}) {
     if (back) { ctx.strokeStyle = pal.ink; ctx.lineWidth = Math.max(1.5, s * 0.4); ctx.stroke(); }
     ctx.fillStyle = '#f1c9a5'; ctx.beginPath(); ctx.arc(sx, sy - s * 4, s * 0.85, 0, 7); ctx.fill();
     if (back) { ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.5, s * 0.42); ctx.stroke(); }
-    if (role === 'admin') { ctx.fillStyle = ROLES.admin.col; ctx.beginPath(); ctx.arc(sx, sy - s * 5.6, s * 0.75, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, s * 0.25); ctx.stroke(); }   // purple dot over the head = admin
+    if (role && role !== 'user' && ROLES[role]) { ctx.fillStyle = ROLES[role].col; ctx.beginPath(); ctx.arc(sx, sy - s * 5.6, s * 0.75, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, s * 0.25); ctx.stroke(); }   // coloured dot over the head = role (admin purple, head orange, officer cyan, committee green, researcher pink; general users have none)
   }
   function pill(text, x, y, color, sc = 1) {
     const kz = Math.pow(cam.z, -0.6) * sc;   // labels grow only a little when the camera zooms in
@@ -858,11 +858,11 @@ export function mountSiteFloor(host, opts = {}) {
   }
   function tableIn() {
     const I = ins; const tot = I.tot || 1;
-    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, ['หน้า', 'พาธ', 'เปิดหน้า', 'สัดส่วน', 'ผู้เข้าชม', 'ออนไลน์', 'แอดมิน / บุคลากร', 'คนมักไปต่อที่'].map((x) => h('th', null, x)))),
+    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, ['หน้า', 'พาธ', 'เปิดหน้า', 'สัดส่วน', 'ผู้เข้าชม', 'ออนไลน์', 'บทบาทผู้ใช้', 'คนมักไปต่อที่'].map((x) => h('th', null, x)))),
       h('tbody', null, I.units.map((u, i) => { const nx = (I.next[u.key] || [])[0];
         return h('tr', { class: focus === i ? 'is-on' : '' }, h('td', null, h('button', { type: 'button', class: 'rowbtn', onclick: () => focusRoom(i), title: 'ซูมไปที่ห้องนี้' }, `${kindMeta(u.kind).icon} ${u.name}`)), h('td', { class: 's3-cut', title: u.path }, u.path === '*other' ? '–' : u.path), h('td', null, fmt(u.pv)),
           h('td', null, h('span', { class: 's3-bar', title: `${Math.round((u.pv / tot) * 100)}%` }, h('i', { style: `width:${Math.max(2, (u.pv / tot) * 100)}%;background:${roomColor(u.kind)}` }), h('em', null, `${Math.round((u.pv / tot) * 100)}%`))),
-          h('td', null, fmt(u.uv)), h('td', null, fmt(u.realtime)), h('td', { title: roleText(u) }, roleOf(u).known ? `${roleOf(u).admPct}% / ${roleOf(u).stfPct}%` : '–'), h('td', null, nx ? `${unitName(nx.to)} (${fmt(nx.n)})` : '–')); }))));
+          h('td', null, fmt(u.uv)), h('td', null, fmt(u.realtime)), h('td', { title: roleText(u) }, roleOf(u).known ? roleOf(u).list.slice(0, 2).map((x) => `${ROLES[x.id].short} ${x.pct}%`).join(' / ') : '–'), h('td', null, nx ? `${unitName(nx.to)} (${fmt(nx.n)})` : '–')); }))));
   }
   function drawRoomCard() {
     roomCard.hidden = !ins; if (!ins) return; const I = ins; const u = focus >= 0 ? I.units[focus] : null;
