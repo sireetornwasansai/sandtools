@@ -3,6 +3,7 @@
 // Pure functions, no DOM → unit-testable. Insights are simple arithmetic computed in the browser (no language model, nothing leaves the device).
 
 export const MAX_SITES = 8;       // stations on the floor (the rest are listed below)
+export const MAX_PAGES = 10;      // rooms inside one system (the rest are folded into "other pages")
 export const MAX_FIGURES = 140;   // upper bound of people drawn in a typical day
 export const PALETTE = ['#3758f9', '#0b7a7c', '#c2410c', '#7c3aed', '#be185d', '#4d7c0f', '#0891b2', '#b45309'];
 export const IDLE_COL = '#94a3b8';
@@ -24,8 +25,28 @@ const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const arr = (v) => (Array.isArray(v) ? v : []);
 function site(s) {
   const byHour = arr(s.byHour).length === 24 ? s.byHour.map(num) : Array(24).fill(0);
-  return { key: String(s.key || ''), name: String(s.name || s.key || '-'), url: String(s.url || ''), status: String(s.status || 'active'), track: s.track !== false, pv: num(s.pv), prev: s.prev === undefined || s.prev === null ? null : num(s.prev),
+  return { tags: Array.isArray(s.tags) ? s.tags.map(String) : String(s.tags || '').split(/[,\s]+/).filter(Boolean), key: String(s.key || ''), name: String(s.name || s.key || '-'), url: String(s.url || ''), status: String(s.status || 'active'), track: s.track !== false, pv: num(s.pv), prev: s.prev === undefined || s.prev === null ? null : num(s.prev),
     uv: num(s.uv), realtime: s.realtime === null || s.realtime === undefined ? null : num(s.realtime), last: s.last || '', byHour };
+}
+
+/** Station "model" per kind of system. Picked from a `theme:<id>` tag (override) or by keywords in the project's name / address (Thai + English). */
+export const THEMES = {
+  ems: { icon: '🚑', label: 'ยานพาหนะ / รถพยาบาล' }, hrd: { icon: '🎓', label: 'ห้องอบรมบุคลากร' }, ec: { icon: '🔬', label: 'ห้องวิจัย / จริยธรรมการวิจัย' }, vaccine: { icon: '💉', label: 'ห้องวัคซีน' },
+  dental: { icon: '🦷', label: 'ห้องทันตกรรม' }, pt: { icon: '🩺', label: 'ห้องกายภาพบำบัด' }, plan: { icon: '📊', label: 'ห้องแผนงาน / ยุทธศาสตร์' }, doc: { icon: '🗂️', label: 'ห้องสารบรรณ' },
+  visit: { icon: '🏠', label: 'เยี่ยมบ้าน / แผนที่' }, web: { icon: '🌐', label: 'เว็บไซต์ / ระบบทั่วไป' },
+};
+const RULES = [
+  ['vaccine', /vaccin|วัคซีน|\bepi\b|immuniz/], ['dental', /dental|ทันต|ฟัน/], ['pt', /physio|กายภาพ|\bpt\b|pt-?station/],
+  ['ems', /ยานพาหนะ|พาหนะ|ขอใช้รถ|จองรถ|รถพยาบาล|รถ|ambulance|\bems\b|fleet|vehicle|carsystem/], ['hrd', /hrd|อบรม|training|บุคลากร|ทรัพยากรบุคคล/],
+  ['ec', /\bec\b|จริยธรรม|วิจัย|ethic|research|\birb\b/], ['visit', /เยี่ยมบ้าน|home-?visit|แผนที่|\bmap\b/], ['doc', /สารบรรณ|เอกสาร|document|\bdocs?\b/], ['plan', /แผนงาน|ยุทธศาสตร์|strategy|\bplan\b|kpi|ตัวชี้วัด/],
+];
+/** @returns {keyof typeof THEMES} */
+export function themeOf(s) {
+  const tag = (s.tags || []).map((t) => String(t).toLowerCase()).find((t) => t.startsWith('theme:')); if (tag && THEMES[tag.slice(6)]) return tag.slice(6);
+  const text = `${(s.tags || []).join(' ')} ${s.name} ${hostOf(s.url)} ${s.key}`.toLowerCase();
+  if (/\bsand\b/.test(text) && !/office|tool/.test(text)) return 'ems';   // SAND = fleet system (not "SAND Office Tools")
+  for (const [id, re] of RULES) if (re.test(text)) return id;
+  return 'web';
 }
 
 /** Backend answer of `projects/floor` → safe shape (or null when it is not that answer, e.g. an older Apps Script). */
@@ -38,7 +59,7 @@ export function normalizeFloor(d) {
 export function fromListStats(list, statsByKey, days) {
   const items = arr(list && list.items); const out = items.map((p) => {
     const st = statsByKey[p.key];
-    return site({ key: p.key, name: p.name, url: p.url, status: p.status, track: p.track, pv: st ? st.pv : p.pv7, uv: st ? st.uv : p.uv7, prev: undefined, realtime: st ? st.realtime : null, byHour: st ? st.byHour : [], last: st ? st.last : p.last ? new Date(p.last).toISOString() : '' });
+    return site({ key: p.key, tags: p.tags, name: p.name, url: p.url, status: p.status, track: p.track, pv: st ? st.pv : p.pv7, uv: st ? st.uv : p.uv7, prev: undefined, realtime: st ? st.realtime : null, byHour: st ? st.byHour : [], last: st ? st.last : p.last ? new Date(p.last).toISOString() : '' });
   });
   return { days, total: out.length, sites: out };
 }
@@ -71,10 +92,10 @@ export function visitors(sites, days, perFig, c = DEFAULTS, seed = 43) {
 }
 
 /** Replay window (minutes from midnight), widened to fit everyone and clamped to the day. */
-export function timeRange(vis, c = DEFAULTS) {
+export function timeRange(vis, c = DEFAULTS) {   // works with single-stop visitors and multi-stop journeys (uses enter / exit)
   if (!vis.length) return { from: c.open, to: c.close };
-  const first = Math.min(...vis.map((v) => v.start)); const last = Math.max(...vis.map((v) => v.start));
-  return { from: Math.max(0, Math.min(c.open, Math.floor((first - c.walk) / 60) * 60)), to: Math.min(1440, Math.max(c.close, Math.ceil((last + c.dwell + c.walk) / 60) * 60)) };
+  const first = Math.min(...vis.map((v) => v.enter)); const last = Math.max(...vis.map((v) => v.exit));
+  return { from: Math.max(0, Math.min(c.open, Math.floor(first / 60) * 60)), to: Math.min(1440, Math.max(c.close, Math.ceil(last / 60) * 60)) };
 }
 
 /** Minute with the most people on the floor (opening frame of the replay). */
@@ -131,8 +152,9 @@ export function sitesCsv(all, days) {
 /** Demo data so the home page is useful before anything is attached. Same seed ⇒ same data. */
 export function makeSample(days = 30, seed = 11) {
   const r = rng(seed); const prof = [1, 0, 0, 0, 1, 2, 4, 9, 16, 20, 18, 12, 9, 13, 17, 15, 11, 6, 4, 3, 2, 2, 1, 1];
-  const defs = [['เว็บไซต์โรงพยาบาล', 'https://hospital.example.org', 420, 1.0, 'ok'], ['ระบบนัดหมายออนไลน์', 'https://appoint.example.org', 300, 1.2, 'ok'], ['ระบบรายงานตัวชี้วัด', 'https://kpi.example.org', 150, 0.8, 'ok'],
-    ['แบบประเมินความพึงพอใจ', 'https://survey.example.org', 90, 0.7, 'ok'], ['ข่าวประชาสัมพันธ์', 'https://news.example.org', 60, 0, 'silent'], ['คู่มือผู้ป่วย (ฉบับร่าง)', 'https://guide.example.org', 0, 0, 'idle']];
+  const defs = [['ระบบยานพาหนะ (SAND)', 'https://sand.example.org', 420, 1.0, 'ok'], ['ระบบพัฒนาบุคลากร HRD', 'https://hrd.example.org', 300, 1.2, 'ok'], ['จริยธรรมการวิจัย (EC)', 'https://ec.example.org', 150, 0.8, 'ok'],
+    ['ห้องวัคซีน', 'https://vaccine.example.org', 90, 0.7, 'ok'], ['เว็บไซต์โรงพยาบาล', 'https://hospital.example.org', 260, 1.1, 'ok'], ['ระบบสารบรรณ', 'https://doc.example.org', 120, 0.9, 'ok'],
+    ['ระบบทันตกรรม', 'https://dental.example.org', 60, 0, 'silent'], ['ระบบกายภาพบำบัด', 'https://pt.example.org', 0, 0, 'idle']];
   const sites = defs.map(([name, url, perDay, trend, kind], i) => {
     const byHour = prof.map((w) => (kind === 'silent' ? (r(), 0) : Math.round(((w * perDay * days) / 160) * (0.8 + 0.4 * r())))); const pv = byHour.reduce((a, b) => a + b, 0);
     const prev = kind === 'silent' ? 120 : kind === 'idle' ? 0 : Math.round(pv / (trend === 0 ? 1 : trend)); return site({ key: `demo${i}`, name, url, status: 'active', track: true, pv, prev, uv: Math.round(pv * 0.42), realtime: pv ? Math.round(r() * 4) : 0, last: '', byHour });
@@ -140,3 +162,180 @@ export function makeSample(days = 30, seed = 11) {
   return { days, total: sites.length, sites, extra: { devices: [{ name: 'mobile', n: 520 }, { name: 'desktop', n: 330 }], referrers: [{ name: '', n: 410 }, { name: 'facebook.com', n: 160 }],
     byDay: Array.from({ length: Math.min(days, 14) }, (_, i) => ({ d: String(i), pv: Math.round(300 + 120 * Math.sin(i / 2) + r() * 60) })) } };
 }
+
+/* ============================ inside one system: pages as rooms ============================ */
+
+/** Kind of page → icon + label. The kind is guessed from the file name (Thai or English). Extend PAGE_LABELS / PAGE_RULES for your own pages. */
+export const PAGE_KINDS = {
+  'p:home': { icon: '🏠', label: 'หน้าแรก / ต้อนรับ' }, 'p:dash': { icon: '📊', label: 'แดชบอร์ด' }, 'p:map': { icon: '🗺️', label: 'แผนที่ / เส้นทาง' },
+  'p:ems': { icon: '🚑', label: 'ตรวจรถ EMS' }, 'p:check': { icon: '✅', label: 'ตรวจสอบ / เช็คลิสต์' }, 'p:mile': { icon: '⏱️', label: 'เลขไมล์' },
+  'p:cal': { icon: '📅', label: 'ตาราง / ปฏิทิน' }, 'p:swap': { icon: '🔄', label: 'สลับ / แลกเปลี่ยน' }, 'p:report': { icon: '🖨️', label: 'รายงาน' },
+  'p:admin': { icon: '🛠️', label: 'ผู้ดูแลระบบ' }, 'p:form': { icon: '📝', label: 'แบบฟอร์ม / ขอใช้' }, 'p:login': { icon: '🔑', label: 'เข้าสู่ระบบ' },
+  'p:page': { icon: '📄', label: 'หน้าทั่วไป' }, 'p:other': { icon: '📦', label: 'หน้าอื่นๆ รวมกัน' },
+};
+export const kindMeta = (k) => THEMES[k] || PAGE_KINDS[k] || PAGE_KINDS['p:page'];
+
+// Order matters: the first rule that matches the last path segment wins. "ems" must not match inside words such as "carsystemsansai".
+const PAGE_RULES = [
+  ['p:login', /login|signin|เข้าสู่ระบบ|auth/], ['p:ems', /(^|[^a-z])ems/], ['p:dash', /dashboard|summary|overview|สรุป|แดชบอร์ด/], ['p:map', /map|route|แผนที่|เส้นทาง/],
+  ['p:mile', /mile|odometer|ไมล์/], ['p:check', /check|inspect|ตรวจ/], ['p:cal', /table|schedule|calendar|roster|ตาราง|ปฏิทิน/], ['p:swap', /swap|exchange|แลก|สลับ/],
+  ['p:report', /report|export|print|รายงาน/], ['p:admin', /admin|setting|manage|config|ตั้งค่า|จัดการ/], ['p:form', /form|request|booking|register|submit|new|ขอ|จอง|ลงทะเบียน|บันทึก/],
+  ['p:home', /^(|index|home|main|default|หน้าแรก)$/],
+];
+
+/** Friendly Thai names for common file names (lower-case, without extension). Add your own here. */
+export const PAGE_LABELS = {
+  '': 'หน้าแรก', index: 'หน้าแรก', home: 'หน้าแรก', dashboard: 'แดชบอร์ด', startmile: 'บันทึกไมล์เริ่มต้น', endmile: 'บันทึกไมล์สิ้นสุด', editmile: 'แก้ไขเลขไมล์', check: 'ตรวจสภาพรถ',
+  emscheck: 'ตรวจรถ EMS', worktable: 'ตารางงาน', swap: 'สลับ/แลกเปลี่ยน', routemap: 'แผนที่เส้นทาง', login: 'เข้าสู่ระบบ', admin: 'ผู้ดูแลระบบ', report: 'รายงาน', request: 'ขอใช้',
+  booking: 'จอง', calendar: 'ปฏิทิน', schedule: 'ตารางเวลา', map: 'แผนที่', settings: 'ตั้งค่า', setting: 'ตั้งค่า', form: 'แบบฟอร์ม', history: 'ประวัติ', profile: 'โปรไฟล์', register: 'ลงทะเบียน', search: 'ค้นหา', submit: 'ยื่นเรื่อง',
+};
+
+/**
+ * "/Sys/Index.html?x=1" → "/sys" — query dropped, index.html folded into its folder, trailing slash removed. A single-page-app route ("#/submit") is kept because
+ * it IS the page. The Apps Script backend (anaPageKey) groups with exactly the same rule.
+ */
+export const pageKey = (p) => {
+  let t = String(p || '/'); let hash = ''; const hi = t.indexOf('#');
+  if (hi >= 0) { const hv = t.slice(hi); if (/^#!?\//.test(hv)) hash = hv.split('?')[0].toLowerCase().replace(/\/+$/, ''); t = t.slice(0, hi); }
+  t = t.split('?')[0].toLowerCase(); if (t[0] !== '/') t = `/${t}`;
+  t = t.replace(/\/index\.html?$/, '/'); t = t.length > 1 ? t.replace(/\/+$/, '') : t;
+  return t + hash;
+};
+const lastSeg = (k) => { const hi = k.indexOf('#'); const seg = (hi >= 0 ? k.slice(hi + 1) : k).split('/').filter(Boolean); return (seg.length ? seg[seg.length - 1] : '').replace(/\.(html?|php|aspx?)$/, ''); };
+const isFront = (k, rootPath) => k === '/' || (!!rootPath && rootPath !== '/' && k === pageKey(rootPath));
+
+export function pageKind(path, rootPath = '') {
+  const k = pageKey(path); if (isFront(k, rootPath)) return 'p:home';
+  const n = lastSeg(k); for (const [id, re] of PAGE_RULES) if (re.test(n)) return id;
+  return 'p:page';
+}
+export function pageLabel(path, rootPath = '') {
+  const k = pageKey(path); if (isFront(k, rootPath)) return 'หน้าแรก';
+  const n = lastSeg(k); if (PAGE_LABELS[n]) return PAGE_LABELS[n];
+  const raw = lastSeg(String(path || '').split('?')[0].replace(/\/index\.html?$/i, '/')); const orig = raw.toLowerCase() === n ? raw : n;
+  return orig.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').trim() || k;
+}
+
+const unit = (o) => ({ ...site({ key: o.key, name: o.name, url: o.path, status: 'active', track: true, pv: o.pv, uv: o.uv, prev: null, realtime: o.realtime, byHour: o.byHour }), path: o.path, kind: o.kind });
+const hours24 = (a) => (arr(a).length === 24 ? a.map(num) : Array(24).fill(0));
+
+/**
+ * Backend answer of `projects/pages` → {days, site, uv, realtime, units[] (≤8: the busiest pages + "other"), flows[]} or null when it is not that answer.
+ * A folder that other pages live under ("/carsystemsansai" when "/carsystemsansai/startmile.html" exists) is that system's front page.
+ */
+export function normalizePages(d) {
+  if (!d || typeof d !== 'object' || !Array.isArray(d.pages)) return null;
+  const s = d.site || {}; const root = (() => { try { return new URL(s.url).pathname; } catch { return ''; } })();
+  const merged = new Map();
+  for (const p of d.pages.filter((x) => x && x.path !== undefined)) {
+    const key = pageKey(p.path); const m = merged.get(key);
+    if (!m) merged.set(key, { key, path: key, pv: num(p.pv), uv: num(p.uv), realtime: num(p.realtime), byHour: hours24(p.byHour) });
+    else { m.pv += num(p.pv); m.uv += num(p.uv); m.realtime += num(p.realtime); m.byHour = m.byHour.map((n, i) => n + num(hours24(p.byHour)[i])); }
+  }
+  const all = [...merged.values()];
+  const isFolder = (k) => !/\.[a-z0-9]{2,5}$/.test(k) && all.some((o) => o.key !== k && o.key.startsWith(`${k === '/' ? '' : k}/`));
+  const list = all.map((p) => { const front = isFront(p.key, root) || (isFolder(p.key) && !p.key.includes('#')); return { ...p, name: front ? 'หน้าแรก' : pageLabel(p.path, root), kind: front ? 'p:home' : pageKind(p.path, root) }; });
+  const hasOther = d.other && num(d.other.pv) > 0;
+  const units = list.sort((a, b) => b.pv - a.pv).slice(0, hasOther ? MAX_PAGES - 1 : MAX_PAGES).map(unit);
+  if (hasOther) units.push(unit({ key: '*other', path: '*other', name: 'หน้าอื่นๆ', kind: 'p:other', pv: num(d.other.pv), uv: num(d.other.uv), realtime: num(d.other.realtime), byHour: hours24(d.other.byHour) }));
+  const keys = new Set(units.map((u) => u.key)); const fk = (k) => (k === '*other' ? '*other' : pageKey(k));
+  const flows = arr(d.flows).map((f) => ({ from: fk(f.from), to: fk(f.to), n: num(f.n) })).filter((f) => f.n > 0 && keys.has(f.from) && keys.has(f.to) && f.from !== f.to);
+  return { days: num(d.days) || 30, site: { key: String(s.key || ''), name: String(s.name || ''), url: String(s.url || '') }, uv: num(d.uv) || units.reduce((a, u) => a + u.uv, 0),
+    realtime: d.realtime === undefined || d.realtime === null ? units.reduce((a, u) => a + u.realtime, 0) : num(d.realtime), units, flows };
+}
+
+/** Fallback for a backend without `pages`: the `stats` answer has page totals but no per-page hours, so the site's 24-hour profile is shared out in proportion (approximate, no flows). */
+export function pagesFromStats(st, days) {
+  const pages = arr(st && st.pages); const tot = pages.reduce((a, p) => a + num(p.n), 0) || 1; const hrs = hours24(st && st.byHour);
+  const mk = (n, u) => ({ pv: n, uv: u, realtime: 0, byHour: hrs.map((h) => Math.round((h * n) / tot)) });
+  const top = pages.slice(0, 7); const rest = pages.slice(7);
+  return { days, site: st && st.site ? { key: st.site.key, name: st.site.name, url: st.site.url } : {}, uv: st && st.uv, realtime: st && st.realtime,
+    pages: top.map((p) => ({ path: p.name, ...mk(num(p.n), num(p.u)) })), other: rest.length ? mk(rest.reduce((a, p) => a + num(p.n), 0), rest.reduce((a, p) => a + num(p.u), 0)) : null, flows: [] };
+}
+
+/**
+ * "Who goes where": one stop per page view. Real page-to-page transitions (`flows`, counted per visitor and day by the backend) decide how many views are
+ * continuations of an earlier stop — those figures walk from room to room instead of entering again, so the number of stops stays the page-view count.
+ * @returns {{id:number, enter:number, stops:{zone:number,start:number,end:number}[], exit:number}[]}
+ */
+export function pageJourneys(units, flows, days, perFig, c = DEFAULTS, seed = 71) {
+  const r = rng(seed); const arrivals = [];
+  units.forEach((u, zi) => u.byHour.forEach((n, hr) => {
+    const e = n / Math.max(1, days) / perFig; let k = Math.floor(e) + (r() < e - Math.floor(e) ? 1 : 0);
+    for (; k > 0; k--) arrivals.push({ zone: zi, at: hr * 60 + r() * 60 });
+  }));
+  arrivals.sort((a, b) => a.at - b.at || a.zone - b.zone);
+  const idx = new Map(units.map((u, i) => [u.key, i])); const into = units.map(() => []); const inflow = units.map(() => 0);
+  for (const f of arr(flows)) { const i = idx.get(f.from); const j = idx.get(f.to); if (i === undefined || j === undefined || i === j) continue; into[j].push({ i, n: num(f.n) }); inflow[j] += num(f.n); }
+  const figs = []; const tails = units.map(() => []); let id = 0;
+  for (const a of arrivals) {
+    let host = null; const q = Math.min(0.8, inflow[a.zone] / Math.max(1, units[a.zone].pv));
+    if (q > 0 && r() < q) {
+      const opts = into[a.zone].map((o) => ({ o, cand: tails[o.i].filter((f) => { const l = f.stops[f.stops.length - 1]; const gap = a.at - (l.start + c.dwell); return gap >= 2 && gap <= c.walk + 45 && f.stops.length < 3; }) })).filter((x) => x.cand.length);
+      if (opts.length) { let pick = r() * opts.reduce((t, x) => t + x.o.n, 0); let ch = opts[0]; for (const x of opts) { pick -= x.o.n; if (pick <= 0) { ch = x; break; } } host = ch.cand[ch.cand.length - 1]; }   // the most recent arrival: the shortest wait in the source room
+    }
+    if (host) {
+      const l = host.stops[host.stops.length - 1]; tails[l.zone].splice(tails[l.zone].indexOf(host), 1);
+      l.end = Math.max(l.start + c.dwell, a.at - c.walk); host.stops.push({ zone: a.zone, start: a.at, end: a.at + c.dwell }); host.exit = a.at + c.dwell + c.walk; tails[a.zone].push(host);
+    } else { const f = { id: ++id, enter: a.at - c.walk, stops: [{ zone: a.zone, start: a.at, end: a.at + c.dwell }], exit: a.at + c.dwell + c.walk }; figs.push(f); tails[a.zone].push(f); }
+  }
+  return figs;
+}
+
+/** Where do people go next from each page: {pageKey: [{to, n}]} sorted by n. */
+export function nextPages(units, flows) {
+  const by = {}; units.forEach((u) => { by[u.key] = []; });
+  for (const f of arr(flows)) if (by[f.from]) by[f.from].push({ to: f.to, n: f.n });
+  Object.values(by).forEach((a) => a.sort((x, y) => y.n - x.n)); return by;
+}
+/** Where do people come from before each page. */
+export function prevPages(units, flows) {
+  const by = {}; units.forEach((u) => { by[u.key] = []; });
+  for (const f of arr(flows)) if (by[f.to]) by[f.to].push({ from: f.from, n: f.n });
+  Object.values(by).forEach((a) => a.sort((x, y) => y.n - x.n)); return by;
+}
+
+/** Plain-language findings about the pages of one system. */
+export function pageInsights(units, flows, days) {
+  const out = []; const tot = units.reduce((a, u) => a + u.pv, 0); const pct = (a, b) => Math.round((a / Math.max(1, b)) * 100); const name = (k) => (units.find((u) => u.key === k) || { name: k }).name;
+  if (!tot) return [{ tone: 'info', text: 'ยังไม่มีการเปิดหน้าในระบบนี้ในช่วงที่เลือก — วางโค้ดติดตามในทุกหน้าของเว็บแล้วเปิดสักหน้า' }];
+  const sorted = units.filter((u) => u.kind !== 'p:other').slice().sort((a, b) => b.pv - a.pv); const top = sorted[0];
+  if (top) out.push({ tone: 'info', text: `หน้า “${top.name}” คนใช้มากสุด ${fmt(top.pv)} ครั้งใน ${days} วัน (${pct(top.pv, tot)}% ของทั้งระบบ)` });
+  if (top && pct(top.pv, tot) >= 60 && sorted.length > 2) out.push({ tone: 'info', text: 'ผู้ใช้กระจุกอยู่ที่หน้าเดียวเป็นหลัก — หน้าอื่นอาจหาไม่เจอหรือไม่จำเป็น ลองทบทวนเมนูและลำดับการใช้งาน' });
+  const nx = nextPages(units, flows); const best = [].concat(...Object.entries(nx).map(([from, a]) => a.map((x) => ({ from, ...x })))).sort((a, b) => b.n - a.n)[0];
+  if (best && best.n >= 3) out.push({ tone: 'ok', text: `เส้นทางที่เดินบ่อยสุด: “${name(best.from)}” → “${name(best.to)}” (${fmt(best.n)} ครั้ง)` });
+  const dead = sorted.filter((u) => u.pv >= 20 && flows.length && !(nx[u.key] || []).length && u.kind !== 'p:home');
+  if (dead.length) out.push({ tone: 'info', text: `คนเปิด “${dead[0].name}” แล้วมักจบแค่นั้น (ไม่ไปต่อหน้าอื่น) — เป็นหน้าปลายทางตามปกติหรือไม่` });
+  const front = units.find((u) => u.kind === 'p:home'); const hs = sorted.filter((u) => u.kind !== 'p:home' && u.pv > 0);
+  if (front && hs[0] && front.pv > 0 && hs[0].pv > front.pv * 1.5) out.push({ tone: 'info', text: `หน้า “${hs[0].name}” ถูกเปิดมากกว่าหน้าแรกมาก — ผู้ใช้น่าจะเข้าผ่านลิงก์หรือบุ๊กมาร์กตรงๆ` });
+  const quiet = units.filter((u) => u.pv === 0 && u.kind !== 'p:other'); if (quiet.length) out.push({ tone: 'warn', text: `ยังไม่มีคนเข้า: ${quiet.map((u) => u.name).join(', ')}` });
+  const small = sorted.filter((u) => u.pv > 0 && pct(u.pv, tot) <= 2); if (small.length >= 2) out.push({ tone: 'info', text: `มี ${small.length} หน้าที่ใช้น้อยมาก (≤2%): ${small.slice(0, 3).map((u) => u.name).join(', ')} — พิจารณารวมหรือย้ายเมนู` });
+  const hourly = Array(24).fill(0); units.forEach((u) => u.byHour.forEach((n, i) => { hourly[i] += n; })); const ph = hourly.indexOf(Math.max(...hourly));
+  out.push({ tone: 'info', text: `ช่วงที่คนใช้ระบบนี้มากสุด ${pad(ph)}:00–${pad((ph + 1) % 24)}:00 น.` });
+  return out;
+}
+
+export function pagesCsv(units, days, siteName) {
+  const esc = (v) => { let t = String(v ?? ''); if (/^[=+\-@]/.test(t)) t = `'${t}`; return `"${t.replace(/"/g, '""')}"`; }; const tot = units.reduce((a, u) => a + u.pv, 0) || 1;
+  return [['ระบบ', 'หน้า', 'พาธ', `เปิดหน้า (${days} วัน)`, 'สัดส่วน %', 'ผู้เข้าชม', 'ออนไลน์ตอนนี้'], ...units.map((u) => [siteName, u.name, u.path, u.pv, Math.round((u.pv / tot) * 100), u.uv, u.realtime])].map((r) => r.map(esc).join(',')).join('\r\n');
+}
+
+/** Demo pages: the real vehicle system for a fleet project (your own numbers), a generic set (home · form · report · dashboard · admin) for the others. */
+export function makeSamplePages(s, days = 30, seed = 23) {
+  const r = rng(seed + s.key.length * 7 + (s.key.charCodeAt(s.key.length - 1) || 0)); const prof = [1, 0, 0, 0, 1, 2, 4, 9, 16, 20, 18, 12, 9, 13, 17, 15, 11, 6, 4, 3, 2, 2, 1, 1]; const ps = prof.reduce((a, b) => a + b, 0);
+  const hrs = (pv) => prof.map((w) => Math.round((w / ps) * pv * (0.85 + 0.3 * r())));
+  const car = themeOf(s) === 'ems'; const base = '/demo';
+  const defs = car
+    ? [['/carsystemsansai/index.html', 232, 79, 1], ['/carsystemsansai/startmile.html', 240, 82, 1], ['/carsystemsansai/check.html', 115, 47, 0], ['/carsystemsansai/', 21, 15, 0], ['/carsystemsansai/worktable.html', 12, 8, 0],
+      ['/carsystemsansai/dashboard.html', 10, 7, 0], ['/carsystemsansai/swap.html', 2, 2, 0], ['/carsystemsansai/routemap.html', 2, 2, 0], ['/carsystemsansai/emscheck.html', 1, 1, 0], ['/carsystemsansai/editmile.html', 1, 1, 0]]
+    : [[`${base}/`, 0.4, 0.45, 1], [`${base}/form.html`, 0.25, 0.3, 0], [`${base}/report.html`, 0.15, 0.15, 0], [`${base}/dashboard.html`, 0.12, 0.1, 0], [`${base}/admin.html`, 0.08, 0.05, 0]];
+  const pages = defs.map(([path, a, b, rt]) => { const pv = car ? a : Math.max(1, Math.round(s.pv * a)); return { path, pv, uv: car ? b : Math.max(1, Math.round(s.pv * b * 0.4)), realtime: rt && s.realtime ? 1 : 0, byHour: hrs(pv) }; });
+  const other = null;
+  const K = (i) => pageKey(pages[i].path); const q = (a, b, n) => ({ from: car && a === 0 ? '/carsystemsansai' : K(a), to: car && b === 0 ? '/carsystemsansai' : K(b), n: Math.round(n) });
+  const flows = car ? [q(0, 1, 120), q(1, 2, 80), q(0, 4, 6), q(0, 5, 5), q(5, 4, 3), q(2, 5, 3), q(0, 6, 2), q(0, 7, 2), q(0, 8, 1), q(1, 9, 1)]
+    : [q(0, 1, pages[1].pv * 0.5), q(1, 2, pages[2].pv * 0.4), q(0, 3, pages[3].pv * 0.4), q(3, 4, pages[4].pv * 0.3)];
+  return { days, site: { key: s.key, name: s.name, url: s.url }, uv: pages.reduce((a, p) => a + p.uv, 0), realtime: s.realtime || 0, pages, other, flows };
+}
+
+/** Site-level visitors (overview) in the same shape as page journeys, so one renderer can draw both. */
+export const asJourneys = (vis) => vis.map((v) => ({ id: v.id, enter: v.enter, stops: [{ zone: v.site, start: v.start, end: v.end }], exit: v.exit }));

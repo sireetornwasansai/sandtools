@@ -65,3 +65,26 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 .s3-pill.st-ok { color: var(--success); } .s3-pill.st-paused { color: #b45309; } .s3-pill.st-idle { color: var(--muted); } .s3-pill.st-silent { color: var(--danger, #dc2626); }
 .s3-note { margin: 0; font-size: .78rem; color: var(--muted); line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) { .s3-hbar i { transition: none; } }
+
+/* ---- ภายในระบบ: หน้าของเว็บเป็นห้อง 3 มิติ ---- */
+.s3 [hidden] { display: none !important; }
+.s3-back { margin-bottom: .35rem; }
+.s3-stage canvas { transition: opacity .3s ease; }
+.s3-stage canvas.s3-swap { opacity: 0; transition: none; }
+.s3-enter { margin-left: .6rem; font-size: .78rem; color: var(--muted); white-space: nowrap; }
+.s3-enter:hover, .s3-enter:focus-visible { color: var(--primary); text-decoration: underline; }
+.s3-lg.is-on { border-color: var(--primary); color: var(--text); box-shadow: 0 0 0 1px var(--primary) inset; }
+.s3-lane { display: inline-block; width: 1.1rem; height: 4px; border-radius: 2px; background: var(--primary); opacity: .6; }
+.s3-table tr.is-on td { background: var(--surface-3); }
+.s3-bar { position: relative; display: inline-flex; align-items: center; width: 110px; height: 1.1rem; border-radius: 4px; background: var(--surface-3); overflow: hidden; vertical-align: middle; }
+.s3-bar i { display: block; height: 100%; opacity: .75; }
+.s3-bar em { position: absolute; right: .3rem; font-style: normal; font-size: .72rem; color: var(--text); }
+.s3-room { display: grid; gap: .55rem; }
+.s3-room h3 { margin: 0; font-size: 1.1rem; }
+.s3-room p { margin: 0; }
+.s3-roommeta { color: var(--muted); font-size: .85rem; }
+.s3-roommeta code { font-size: .82rem; }
+.s3-flowrow { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .85rem; }
+.s3-flowrow > b { min-width: 5.5rem; }
+.s3-room .btn { justify-self: start; }
+@media (prefers-reduced-motion: reduce) { .s3-stage canvas { transition: none; } }
