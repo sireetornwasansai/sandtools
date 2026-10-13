@@ -209,6 +209,14 @@ export const pageKey = (p) => {
 const lastSeg = (k) => { const hi = k.indexOf('#'); const seg = (hi >= 0 ? k.slice(hi + 1) : k).split('/').filter(Boolean); return (seg.length ? seg[seg.length - 1] : '').replace(/\.(html?|php|aspx?)$/, ''); };
 const isFront = (k, rootPath) => k === '/' || (!!rootPath && rootPath !== '/' && k === pageKey(rootPath));
 
+/** Page names that mean something specific inside one kind of system (key = theme id, then last path segment). Wins over PAGE_LABELS / PAGE_RULES.
+ *  Add a line here to rename a page of HRD / EC / the vehicle system without touching the other systems that use the same file name (e.g. "app"). */
+export const SITE_PAGES = {
+  hrd: { usercode: { label: 'เข้าสู่ระบบ HRD', kind: 'p:login' }, app: { label: 'เข้าสู่ระบบ HRD', kind: 'p:login' }, panel: { label: 'เข้าสู่ระบบ HRD', kind: 'p:login' } },
+  ec: { app: { label: 'ระบบยื่นขอจริยธรรม', kind: 'p:form' }, tracking: { label: 'ติดตามผลการพิจารณา', kind: 'p:check' } },
+};
+export const sitePage = (theme, path) => { const m = SITE_PAGES[theme]; const n = lastSeg(pageKey(path)); return m && Object.prototype.hasOwnProperty.call(m, n) ? m[n] : null; };
+
 export function pageKind(path, rootPath = '') {
   const k = pageKey(path); if (isFront(k, rootPath)) return 'p:home';
   const n = lastSeg(k); for (const [id, re] of PAGE_RULES) if (re.test(n)) return id;
@@ -231,7 +239,7 @@ const hours24 = (a) => (arr(a).length === 24 ? a.map(num) : Array(24).fill(0));
 export function normalizePages(d) {
   if (!d || typeof d !== 'object' || !Array.isArray(d.pages)) return null;
   const s = d.site || {}; const root = (() => { try { return new URL(s.url).pathname; } catch { return ''; } })();
-  const merged = new Map();
+  const th = themeOf({ name: s.name, url: s.url, key: s.key, tags: s.tags }); const merged = new Map();
   for (const p of d.pages.filter((x) => x && x.path !== undefined)) {
     const key = pageKey(p.path); const m = merged.get(key);
     if (!m) merged.set(key, { key, path: key, pv: num(p.pv), uv: num(p.uv), realtime: num(p.realtime), byHour: hours24(p.byHour) });
@@ -239,7 +247,7 @@ export function normalizePages(d) {
   }
   const all = [...merged.values()];
   const isFolder = (k) => !/\.[a-z0-9]{2,5}$/.test(k) && all.some((o) => o.key !== k && o.key.startsWith(`${k === '/' ? '' : k}/`));
-  const list = all.map((p) => { const front = isFront(p.key, root) || (isFolder(p.key) && !p.key.includes('#')); return { ...p, name: front ? 'หน้าแรก' : pageLabel(p.path, root), kind: front ? 'p:home' : pageKind(p.path, root) }; });
+  const list = all.map((p) => { const front = isFront(p.key, root) || (isFolder(p.key) && !p.key.includes('#')); const ov = front ? null : sitePage(th, p.path); return { ...p, name: front ? 'หน้าแรก' : ov ? ov.label : pageLabel(p.path, root), kind: front ? 'p:home' : ov ? ov.kind : pageKind(p.path, root) }; });
   const hasOther = d.other && num(d.other.pv) > 0;
   const units = list.sort((a, b) => b.pv - a.pv).slice(0, hasOther ? MAX_PAGES - 1 : MAX_PAGES).map(unit);
   if (hasOther) units.push(unit({ key: '*other', path: '*other', name: 'หน้าอื่นๆ', kind: 'p:other', pv: num(d.other.pv), uv: num(d.other.uv), realtime: num(d.other.realtime), byHour: hours24(d.other.byHour) }));
