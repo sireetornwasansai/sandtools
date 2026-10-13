@@ -88,3 +88,24 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 .s3-flowrow > b { min-width: 5.5rem; }
 .s3-room .btn { justify-self: start; }
 @media (prefers-reduced-motion: reduce) { .s3-stage canvas { transition: none; } }
+
+/* ---- โหมดเล่นซ้ำ (วันทั่วไป / วันนี้ / วันที่คนใช้มากสุด) · วนเล่นซ้ำ · ผู้ใช้ใหม่–เดิม · สถานะใช้งานปัจจุบัน ---- */
+.s3-modebar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .9rem; }
+.s3-modebar .tabs { flex: none; margin-bottom: 0; }
+.s3-modehint { color: var(--muted); font-size: .84rem; }
+.s3-loop[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-bg, var(--surface-3)); box-shadow: 0 0 0 1px var(--primary) inset; }
+.s3-loop[aria-pressed="true"] .icon { animation: s3-spin 2.4s linear infinite; }
+@keyframes s3-spin { to { transform: rotate(360deg); } }
+.s3-lg.is-live { border-color: var(--success); color: var(--text); }
+.s3-livetag { font-style: normal; font-size: .72rem; font-weight: 700; color: var(--success); }
+.s3-lg i.s3-new { background: var(--primary); }
+.s3-lg i.s3-ring { background: var(--primary); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px #f59e0b; margin-right: .2rem; }
+.s3-pill.st-live { color: var(--success); background: var(--success-bg); }
+/* ป้ายหน่วยงาน: โรงพยาบาลสันทราย · กลุ่มงานพัฒนาคุณภาพและระบบบริการ */
+.s3-brand { position: absolute; left: 1.25rem; bottom: 1rem; z-index: 1; display: flex; align-items: center; gap: .6rem; pointer-events: none; padding: .4rem .8rem .4rem .45rem; border: 1px solid var(--border-strong); border-radius: 999px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: var(--shadow); }
+.s3-brand i { display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: #0f766e; color: #fff; font-style: normal; font-weight: 800; font-size: 1.05rem; }
+.s3-brand span { display: grid; line-height: 1.25; }
+.s3-brand b { font-size: .9rem; }
+.s3-brand small { color: var(--muted); font-size: .74rem; }
+@media (max-width: 700px) { .s3-brand small { display: none; } }
+@media (prefers-reduced-motion: reduce) { .s3-loop[aria-pressed="true"] .icon { animation: none; } }
