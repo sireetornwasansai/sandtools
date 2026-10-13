@@ -113,3 +113,8 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 @media (max-width: 700px) { .s3-brand small { display: none; } }
 @media (prefers-reduced-motion: reduce) { .s3-loop[aria-pressed="true"] .icon { animation: none; } }
 .s3-lg i.s3-adm { width: .7rem; height: .7rem; border-radius: 50%; background: #7c3aed; box-shadow: 0 0 0 2px #fff inset; }
+.s3-lg i.s3-r-admin { background: #7c3aed; }
+.s3-lg i.s3-r-head { background: #ea580c; }
+.s3-lg i.s3-r-officer { background: #0891b2; }
+.s3-lg i.s3-r-committee { background: #16a34a; }
+.s3-lg i.s3-r-researcher { background: #db2777; }
