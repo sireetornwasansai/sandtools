@@ -90,8 +90,9 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 @media (prefers-reduced-motion: reduce) { .s3-stage canvas { transition: none; } }
 
 /* ---- โหมดเล่นซ้ำ (วันทั่วไป / วันนี้ / วันที่คนใช้มากสุด) · วนเล่นซ้ำ · ผู้ใช้ใหม่–เดิม · สถานะใช้งานปัจจุบัน ---- */
-.s3-modebar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .9rem; }
-.s3-modebar .tabs { flex: none; margin-bottom: 0; }
+.s3-modebar, .s3-viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .9rem; }
+.s3-modebar .tabs, .s3-viewbar .tabs { flex: none; margin-bottom: 0; }
+.s3-viewbar .tab[aria-selected="true"] { font-weight: 700; }
 .s3-modehint { color: var(--muted); font-size: .84rem; }
 .s3-loop[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-bg, var(--surface-3)); box-shadow: 0 0 0 1px var(--primary) inset; }
 .s3-toggle[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-bg, var(--surface-3)); box-shadow: 0 0 0 1px var(--primary) inset; }
