@@ -212,13 +212,16 @@ const isFront = (k, rootPath) => k === '/' || (!!rootPath && rootPath !== '/' &&
 /** Page names that mean something specific inside one kind of system (key = theme id, then last path segment). Wins over PAGE_LABELS / PAGE_RULES.
  *  Add a line here to rename a page of HRD / EC / the vehicle system without touching the other systems that use the same file name (e.g. "app"). */
 export const SITE_PAGES = {
-  hrd: { usercode: { label: 'ระบบบันทึกหน่วยกิต HRD', kind: 'p:form' }, app: { label: 'ระบบบันทึกหน่วยกิต HRD', kind: 'p:form' }, panel: { label: 'ระบบบันทึกหน่วยกิต HRD', kind: 'p:form' }, login: { label: 'เข้าสู่ระบบ HRD', kind: 'p:login' }, courses: { label: 'หลักสูตรอบรม', kind: 'p:cal' }, register: { label: 'ลงทะเบียนอบรม', kind: 'p:form' }, credits: { label: 'ระบบบันทึกหน่วยกิต HRD', kind: 'p:form' }, certificate: { label: 'ใบรับรอง / ผลการอบรม', kind: 'p:report' }, admin: { label: 'ผู้ดูแลระบบ HRD', kind: 'p:admin' } },
-  ec: { app: { label: 'ระบบยื่นขอจริยธรรม', kind: 'p:form' }, tracking: { label: 'ติดตามผลการพิจารณา', kind: 'p:check' }, login: { label: 'เข้าสู่ระบบ EC', kind: 'p:login' }, submit: { label: 'ระบบยื่นขอจริยธรรม', kind: 'p:form' }, review: { label: 'พิจารณาโครงการ (กรรมการ)', kind: 'p:check' }, admin: { label: 'ผู้ดูแลระบบ EC', kind: 'p:admin' } },
+  hrd: { usercode: { label: 'ระบบบันทึกหน่วยกิต HRD', kind: 'p:form' }, app: { label: 'ระบบบันทึกหน่วยกิต HRD', kind: 'p:form' }, panel: { label: 'ระบบบันทึกหน่วยกิต HRD', kind: 'p:form' }, login: { label: 'เข้าสู่ระบบ HRD', kind: 'p:login' }, record: { label: 'บันทึกการอบรม', kind: 'p:form' }, dashboard: { label: 'แดชบอร์ดภาพรวม', kind: 'p:dash' }, groups: { label: 'สรุปรายกลุ่มงาน', kind: 'p:report' }, personal: { label: 'ประวัติรายบุคคล', kind: 'p:check' }, supervisor: { label: 'สรุปกลุ่มงาน (หัวหน้า)', kind: 'p:report' }, employee: { label: 'ข้อมูลบุคลากร', kind: 'p:admin' }, summary: { label: 'สรุปการอบรม', kind: 'p:report' }, hm5: { label: 'รายงาน ชม.5', kind: 'p:report' }, incoming: { label: 'รายการเข้ามาใหม่', kind: 'p:check' }, attend: { label: 'ตรวจรับการเข้าอบรม', kind: 'p:check' }, lt: { label: 'หมวด LT', kind: 'p:page' }, ha: { label: 'หมวด HA', kind: 'p:page' }, desk: { label: 'โต๊ะงานวันนี้', kind: 'p:dash' }, kg: { label: 'หมวด KG', kind: 'p:page' }, kb: { label: 'คลังความรู้', kind: 'p:page' }, forms: { label: 'ศูนย์แบบฟอร์ม', kind: 'p:form' } },
+  ec: { app: { label: 'ระบบยื่นขอจริยธรรม', kind: 'p:form' }, tracking: { label: 'ติดตามผลการพิจารณา', kind: 'p:check' }, login: { label: 'เข้าสู่ระบบ EC', kind: 'p:login' }, dashboard: { label: 'แดชบอร์ด', kind: 'p:dash' }, accept: { label: 'รับโครงการ', kind: 'p:check' }, evaluate: { label: 'ประเมินโครงการ (กรรมการ)', kind: 'p:check' }, meeting: { label: 'การประชุม', kind: 'p:cal' }, 'staff-projects': { label: 'โครงการทั้งหมด (เจ้าหน้าที่)', kind: 'p:report' }, history: { label: 'ประวัติการพิจารณา', kind: 'p:report' }, 'my-projects': { label: 'โครงการของฉัน', kind: 'p:page' }, submit: { label: 'ยื่นขอจริยธรรม', kind: 'p:form' }, documents: { label: 'เอกสาร', kind: 'p:page' }, minutes: { label: 'รายงานการประชุม', kind: 'p:report' }, 'research-reports': { label: 'รายงานการวิจัย', kind: 'p:report' }, users: { label: 'จัดการผู้ใช้', kind: 'p:admin' }, profile: { label: 'โปรไฟล์', kind: 'p:page' } },
 };
-/** Who uses a page: the views reported by a logged-in admin / staff member (t.js sandRole); the rest are 'not stated' (e.g. the login screen). */
-export const ROLES = { admin: { label: 'แอดมิน/เจ้าหน้าที่ผู้ดูแล', short: 'แอดมิน', col: '#7c3aed' }, staff: { label: 'บุคลากรโรงพยาบาล', short: 'บุคลากร', col: '#0891b2' } };
-export function roleOf(u) { const pv = Math.max(0, num(u && u.pv)); const adm = Math.min(pv, Math.max(0, num(u && u.adm))); const stf = Math.min(pv - adm, Math.max(0, num(u && u.stf))); const known = adm + stf; return { adm, stf, none: pv - known, known, admPct: known ? Math.round((adm / known) * 100) : 0, stfPct: known ? 100 - Math.round((adm / known) * 100) : 0 }; }
-export const roleText = (u) => { const r = roleOf(u); return r.known ? `${ROLES.admin.short} ${fmt(r.adm)} (${r.admPct}%) · ${ROLES.staff.short} ${fmt(r.stf)} (${r.stfPct}%)` : ''; };
+/** Who uses a page: the role WORD the website reported with each view (t.js sandRole); views without a role (e.g. the login screen) are 'not stated'. */
+export const ROLE_IDS = ['admin', 'head', 'officer', 'committee', 'researcher', 'user'];
+export const ROLES = { admin: { label: 'ผู้ดูแลระบบ (แอดมิน)', short: 'แอดมิน', col: '#7c3aed' }, head: { label: 'หัวหน้างาน / หัวหน้ากลุ่มงาน', short: 'หัวหน้างาน', col: '#ea580c' }, officer: { label: 'เจ้าหน้าที่', short: 'เจ้าหน้าที่', col: '#0891b2' }, committee: { label: 'กรรมการ', short: 'กรรมการ', col: '#16a34a' }, researcher: { label: 'ผู้วิจัย', short: 'ผู้วิจัย', col: '#db2777' }, user: { label: 'ผู้ใช้ทั่วไป', short: 'ผู้ใช้ทั่วไป', col: '#64748b' } };
+const rlOf = (o) => { const r = {}; if (o && typeof o === 'object') for (const id of ROLE_IDS) { const n = Math.max(0, Math.round(num(o[id]))); if (n) r[id] = n; } return r; };
+const rlAdd = (a, b) => { for (const id of ROLE_IDS) if (b && b[id]) a[id] = (a[id] || 0) + b[id]; return a; };
+export function roleOf(u) { let left = Math.max(0, num(u && u.pv)); const by = {}; for (const id of ROLE_IDS) { const n = Math.min(left, num(u && u.rl && u.rl[id])); if (n > 0) { by[id] = n; left -= n; } } const known = Math.max(0, num(u && u.pv)) - left; const list = ROLE_IDS.filter((id) => by[id]).map((id) => ({ id, n: by[id], pct: Math.round((by[id] / known) * 100) })).sort((a, b) => b.n - a.n); return { by, list, known, none: left }; }
+export const roleText = (u) => roleOf(u).list.map((x) => `${ROLES[x.id].short} ${fmt(x.n)} (${x.pct}%)`).join(' · ');
 export const sitePage = (theme, path) => { const m = SITE_PAGES[theme]; const n = lastSeg(pageKey(path)); return m && Object.prototype.hasOwnProperty.call(m, n) ? m[n] : null; };
 
 export function pageKind(path, rootPath = '') {
@@ -233,7 +236,7 @@ export function pageLabel(path, rootPath = '') {
   return orig.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').trim() || k;
 }
 
-const unit = (o) => ({ ...site({ key: o.key, name: o.name, url: o.path, status: 'active', track: true, pv: o.pv, uv: o.uv, prev: null, realtime: o.realtime, byHour: o.byHour }), path: o.path, kind: o.kind, adm: num(o.adm), stf: num(o.stf) });
+const unit = (o) => ({ ...site({ key: o.key, name: o.name, url: o.path, status: 'active', track: true, pv: o.pv, uv: o.uv, prev: null, realtime: o.realtime, byHour: o.byHour }), path: o.path, kind: o.kind, rl: rlOf(o.rl) });
 const hours24 = (a) => (arr(a).length === 24 ? a.map(num) : Array(24).fill(0));
 
 /**
@@ -246,15 +249,15 @@ export function normalizePages(d) {
   const th = themeOf({ name: s.name, url: s.url, key: s.key, tags: s.tags }); const merged = new Map();
   for (const p of d.pages.filter((x) => x && x.path !== undefined)) {
     const key = pageKey(p.path); const m = merged.get(key);
-    if (!m) merged.set(key, { key, path: key, pv: num(p.pv), adm: num(p.adm), stf: num(p.stf), uv: num(p.uv), realtime: num(p.realtime), byHour: hours24(p.byHour) });
-    else { m.pv += num(p.pv); m.adm += num(p.adm); m.stf += num(p.stf); m.uv += num(p.uv); m.realtime += num(p.realtime); m.byHour = m.byHour.map((n, i) => n + num(hours24(p.byHour)[i])); }
+    if (!m) merged.set(key, { key, path: key, pv: num(p.pv), rl: rlOf(p.rl), uv: num(p.uv), realtime: num(p.realtime), byHour: hours24(p.byHour) });
+    else { m.pv += num(p.pv); rlAdd(m.rl, rlOf(p.rl)); m.uv += num(p.uv); m.realtime += num(p.realtime); m.byHour = m.byHour.map((n, i) => n + num(hours24(p.byHour)[i])); }
   }
   const all = [...merged.values()];
   const isFolder = (k) => !/\.[a-z0-9]{2,5}$/.test(k) && all.some((o) => o.key !== k && o.key.startsWith(`${k === '/' ? '' : k}/`));
   const list = all.map((p) => { const front = isFront(p.key, root) || (isFolder(p.key) && !p.key.includes('#')); const ov = front ? null : sitePage(th, p.path); return { ...p, name: front ? 'หน้าแรก' : ov ? ov.label : pageLabel(p.path, root), kind: front ? 'p:home' : ov ? ov.kind : pageKind(p.path, root) }; });
   const hasOther = d.other && num(d.other.pv) > 0;
   const units = list.sort((a, b) => b.pv - a.pv).slice(0, hasOther ? MAX_PAGES - 1 : MAX_PAGES).map(unit);
-  if (hasOther) units.push(unit({ key: '*other', path: '*other', name: 'หน้าอื่นๆ', kind: 'p:other', pv: num(d.other.pv), adm: num(d.other.adm), stf: num(d.other.stf), uv: num(d.other.uv), realtime: num(d.other.realtime), byHour: hours24(d.other.byHour) }));
+  if (hasOther) units.push(unit({ key: '*other', path: '*other', name: 'หน้าอื่นๆ', kind: 'p:other', pv: num(d.other.pv), rl: rlOf(d.other.rl), uv: num(d.other.uv), realtime: num(d.other.realtime), byHour: hours24(d.other.byHour) }));
   const keys = new Set(units.map((u) => u.key)); const fk = (k) => (k === '*other' ? '*other' : pageKey(k));
   const flows = arr(d.flows).map((f) => ({ from: fk(f.from), to: fk(f.to), n: num(f.n) })).filter((f) => f.n > 0 && keys.has(f.from) && keys.has(f.to) && f.from !== f.to);
   return { days: num(d.days) || 30, site: { key: String(s.key || ''), name: String(s.name || ''), url: String(s.url || '') }, uv: num(d.uv) || units.reduce((a, u) => a + u.uv, 0),
@@ -327,13 +330,10 @@ export function pageInsights(units, flows, days) {
   if (front && hs[0] && front.pv > 0 && hs[0].pv > front.pv * 1.5) out.push({ tone: 'info', text: `หน้า “${hs[0].name}” ถูกเปิดมากกว่าหน้าแรกมาก — ผู้ใช้น่าจะเข้าผ่านลิงก์หรือบุ๊กมาร์กตรงๆ` });
   const quiet = units.filter((u) => u.pv === 0 && u.kind !== 'p:other'); if (quiet.length) out.push({ tone: 'warn', text: `ยังไม่มีคนเข้า: ${quiet.map((u) => u.name).join(', ')}` });
   const small = sorted.filter((u) => u.pv > 0 && pct(u.pv, tot) <= 2); if (small.length >= 2) out.push({ tone: 'info', text: `มี ${small.length} หน้าที่ใช้น้อยมาก (≤2%): ${small.slice(0, 3).map((u) => u.name).join(', ')} — พิจารณารวมหรือย้ายเมนู` });
-  const rs = units.reduce((a, u) => { const r = roleOf(u); return { adm: a.adm + r.adm, stf: a.stf + r.stf }; }, { adm: 0, stf: 0 });
-  if (rs.adm + rs.stf > 0) {
-    const rt = rs.adm + rs.stf; const rp = (n) => Math.round((n / rt) * 100);
-    out.push({ tone: 'info', text: `ผู้ใช้ที่ระบุบทบาทได้: ${ROLES.admin.short} ${fmt(rs.adm)} ครั้ง (${rp(rs.adm)}%) · ${ROLES.staff.short} ${fmt(rs.stf)} ครั้ง (${rp(rs.stf)}%)` });
-    const ta = units.slice().sort((a, b) => roleOf(b).adm - roleOf(a).adm)[0]; const ts = units.slice().sort((a, b) => roleOf(b).stf - roleOf(a).stf)[0];
-    if (ta && roleOf(ta).adm > 0) out.push({ tone: 'info', text: `ฝั่งแอดมินใช้หน้า “${ta.name}” มากสุด (${fmt(roleOf(ta).adm)} ครั้ง)` });
-    if (ts && roleOf(ts).stf > 0) out.push({ tone: 'info', text: `ฝั่งบุคลากรใช้หน้า “${ts.name}” มากสุด (${fmt(roleOf(ts).stf)} ครั้ง)` });
+  const rs = {}; units.forEach((u) => { for (const x of roleOf(u).list) rs[x.id] = (rs[x.id] || 0) + x.n; }); const rt = Object.values(rs).reduce((a, b) => a + b, 0);
+  if (rt > 0) {
+    out.push({ tone: 'info', text: `ผู้ใช้ที่ระบุบทบาทได้: ${ROLE_IDS.filter((id) => rs[id]).map((id) => `${ROLES[id].short} ${fmt(rs[id])} ครั้ง (${pct(rs[id], rt)}%)`).join(' · ')}` });
+    for (const id of ROLE_IDS) { if (!rs[id]) continue; const top = units.slice().sort((a, b) => (roleOf(b).by[id] || 0) - (roleOf(a).by[id] || 0))[0]; if (top && roleOf(top).by[id] > 0) out.push({ tone: 'info', text: `ฝั่ง${ROLES[id].short}ใช้หน้า “${top.name}” มากสุด (${fmt(roleOf(top).by[id])} ครั้ง)` }); }
   }
   const hourly = Array(24).fill(0); units.forEach((u) => u.byHour.forEach((n, i) => { hourly[i] += n; })); const ph = hourly.indexOf(Math.max(...hourly));
   out.push({ tone: 'info', text: `ช่วงที่คนใช้ระบบนี้มากสุด ${pad(ph)}:00–${pad((ph + 1) % 24)}:00 น.` });
@@ -342,20 +342,20 @@ export function pageInsights(units, flows, days) {
 
 export function pagesCsv(units, days, siteName) {
   const esc = (v) => { let t = String(v ?? ''); if (/^[=+\-@]/.test(t)) t = `'${t}`; return `"${t.replace(/"/g, '""')}"`; }; const tot = units.reduce((a, u) => a + u.pv, 0) || 1;
-  return [['ระบบ', 'หน้า', 'พาธ', `เปิดหน้า (${days} วัน)`, 'สัดส่วน %', 'ผู้เข้าชม', 'ออนไลน์ตอนนี้', 'แอดมิน', 'บุคลากร'], ...units.map((u) => [siteName, u.name, u.path, u.pv, Math.round((u.pv / tot) * 100), u.uv, u.realtime, roleOf(u).adm, roleOf(u).stf])].map((r) => r.map(esc).join(',')).join('\r\n');
+  return [['ระบบ', 'หน้า', 'พาธ', `เปิดหน้า (${days} วัน)`, 'สัดส่วน %', 'ผู้เข้าชม', 'ออนไลน์ตอนนี้', ...ROLE_IDS.map((id) => ROLES[id].short)], ...units.map((u) => [siteName, u.name, u.path, u.pv, Math.round((u.pv / tot) * 100), u.uv, u.realtime, ...ROLE_IDS.map((id) => roleOf(u).by[id] || 0)])].map((r) => r.map(esc).join(',')).join('\r\n');
 }
 
 /** Demo pages: the real vehicle system for a fleet project (your own numbers), a generic set (home · form · report · dashboard · admin) for the others. */
 export function makeSamplePages(s, days = 30, seed = 23) {
   const r = rng(seed + s.key.length * 7 + (s.key.charCodeAt(s.key.length - 1) || 0)); const prof = [1, 0, 0, 0, 1, 2, 4, 9, 16, 20, 18, 12, 9, 13, 17, 15, 11, 6, 4, 3, 2, 2, 1, 1]; const ps = prof.reduce((a, b) => a + b, 0);
   const hrs = (pv) => prof.map((w) => Math.round((w / ps) * pv * (0.85 + 0.3 * r())));
-  const th = themeOf(s); const car = th === 'ems'; const base = '/demo'; const SPA = { hrd: [['login', 0.25, 0.3, 0, 0, 0], ['courses', 0.3, 0.3, 1, 0.04, 0.9], ['register', 0.2, 0.2, 0, 0.03, 0.93], ['certificate', 0.15, 0.15, 0, 0.05, 0.9], ['admin', 0.1, 0.05, 0, 0.95, 0.03]], ec: [['login', 0.2, 0.25, 0, 0, 0], ['submit', 0.4, 0.4, 1, 0.02, 0.94], ['tracking', 0.2, 0.2, 0, 0.05, 0.9], ['review', 0.12, 0.08, 0, 0.9, 0.05], ['admin', 0.08, 0.05, 0, 0.97, 0.02]] };
-  const spa = SPA[th] ? SPA[th].map(([n, a, b, rt, ad, st]) => [`/#/${n}`, a, b, rt, ad, st]) : null;
+  const th = themeOf(s); const car = th === 'ems'; const base = '/demo'; const SPA = { hrd: [['login', 0.12, 0.3, 0, {}], ['record', 0.3, 0.3, 1, { user: 0.88, head: 0.05, admin: 0.04 }], ['dashboard', 0.22, 0.2, 0, { user: 0.7, head: 0.12, admin: 0.15 }], ['supervisor', 0.1, 0.06, 0, { head: 0.7, admin: 0.28 }], ['desk', 0.26, 0.05, 0, { admin: 0.98 }]], ec: [['login', 0.12, 0.25, 0, {}], ['dashboard', 0.25, 0.3, 1, { researcher: 0.5, committee: 0.25, officer: 0.15, admin: 0.08 }], ['submit', 0.3, 0.3, 0, { researcher: 0.96, admin: 0.01 }], ['evaluate', 0.2, 0.08, 0, { committee: 0.85, officer: 0.05, admin: 0.08 }], ['users', 0.13, 0.05, 0, { admin: 0.9, officer: 0.08 }]] };
+  const spa = SPA[th] ? SPA[th].map(([n, a, b, rt, sh]) => [`/#/${n}`, a, b, rt, sh]) : null;
   const defs = spa || (car
     ? [['/carsystemsansai/index.html', 232, 79, 1], ['/carsystemsansai/startmile.html', 240, 82, 1], ['/carsystemsansai/check.html', 115, 47, 0], ['/carsystemsansai/', 21, 15, 0], ['/carsystemsansai/worktable.html', 12, 8, 0],
       ['/carsystemsansai/dashboard.html', 10, 7, 0], ['/carsystemsansai/swap.html', 2, 2, 0], ['/carsystemsansai/routemap.html', 2, 2, 0], ['/carsystemsansai/emscheck.html', 1, 1, 0], ['/carsystemsansai/editmile.html', 1, 1, 0]]
-    : [[`${base}/`, 0.4, 0.45, 1, 0.05, 0.8], [`${base}/form.html`, 0.25, 0.3, 0, 0.03, 0.9], [`${base}/report.html`, 0.15, 0.15, 0, 0.5, 0.4], [`${base}/dashboard.html`, 0.12, 0.1, 0, 0.5, 0.45], [`${base}/admin.html`, 0.08, 0.05, 0, 0.95, 0.03]]);
-  const pages = defs.map(([path, a, b, rt, ad = 0, st = 0]) => { const pv = car ? a : Math.max(1, Math.round(s.pv * a)); return { path, pv, adm: Math.round(pv * ad), stf: Math.round(pv * st), uv: car ? b : Math.max(1, Math.round(s.pv * b * 0.4)), realtime: rt && s.realtime ? 1 : 0, byHour: hrs(pv) }; });
+    : [[`${base}/`, 0.4, 0.45, 1, { user: 0.8, admin: 0.05 }], [`${base}/form.html`, 0.25, 0.3, 0, { user: 0.9, admin: 0.03 }], [`${base}/report.html`, 0.15, 0.15, 0, { user: 0.4, admin: 0.5 }], [`${base}/dashboard.html`, 0.12, 0.1, 0, { user: 0.45, admin: 0.5 }], [`${base}/admin.html`, 0.08, 0.05, 0, { user: 0.03, admin: 0.95 }]]);
+  const pages = defs.map(([path, a, b, rt, sh = {}]) => { const pv = car ? a : Math.max(1, Math.round(s.pv * a)); const rl = {}; for (const id of ROLE_IDS) if (sh[id]) rl[id] = Math.round(pv * sh[id]); return { path, pv, rl, uv: car ? b : Math.max(1, Math.round(s.pv * b * 0.4)), realtime: rt && s.realtime ? 1 : 0, byHour: hrs(pv) }; });
   const other = null;
   const K = (i) => pageKey(pages[i].path); const q = (a, b, n) => ({ from: car && a === 0 ? '/carsystemsansai' : K(a), to: car && b === 0 ? '/carsystemsansai' : K(b), n: Math.round(n) });
   const flows = spa ? [q(0, 1, pages[1].pv * 0.5), q(1, 2, pages[2].pv * 0.4), q(1, 3, pages[3].pv * 0.3), q(0, 4, pages[4].pv * 0.4)] : car ? [q(0, 1, 120), q(1, 2, 80), q(0, 4, 6), q(0, 5, 5), q(5, 4, 3), q(2, 5, 3), q(0, 6, 2), q(0, 7, 2), q(0, 8, 1), q(1, 9, 1)]
