@@ -213,7 +213,7 @@ test('replay events carry the page: normalizeReplay → replayVisitors → asJou
 test('SITE_PAGES: HRD login pages and EC pages get their own names, other systems keep theirs', () => {
   const mk = (name, url, key, paths) => normalizePages({ days: 30, site: { key, name, url }, pages: paths.map((p, i) => ({ path: p, pv: 10 - i, uv: 1 })), flows: [] });
   const h = mk('HRD ระบบจัดการการพัฒนาบุคลากร', 'https://hrd.example.org/', 'h1', ['/', '/usercode', '/app', '/panel']);
-  assert.deepEqual(h.units.filter((u) => u.path !== '/').map((u) => [u.name, u.kind]), [['เข้าสู่ระบบ HRD', 'p:login'], ['เข้าสู่ระบบ HRD', 'p:login'], ['เข้าสู่ระบบ HRD', 'p:login']]);
+  assert.deepEqual(h.units.filter((u) => u.path !== '/').map((u) => [u.name, u.kind]), [['ระบบบันทึกหน่วยกิต HRD', 'p:form'], ['ระบบบันทึกหน่วยกิต HRD', 'p:form'], ['ระบบบันทึกหน่วยกิต HRD', 'p:form']]);
   const e = mk('EC Online Submission', 'https://ec.example.org/', 'e1', ['/', '/app', '/tracking']);
   assert.deepEqual(e.units.map((u) => u.name), ['หน้าแรก', 'ระบบยื่นขอจริยธรรม', 'ติดตามผลการพิจารณา']);
   const o = mk('Other site', 'https://x.example.org/', 'o1', ['/', '/app']); assert.equal(o.units[1].name, 'app');
