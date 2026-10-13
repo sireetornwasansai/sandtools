@@ -32,7 +32,7 @@ export async function buildHit(request, f, secret) {
   const type = f.t === 'ev' ? 'ev' : 'pv';
   return {
     action: 'hit', secret, k: f.k, t: type, p: path || '/', e: type === 'ev' ? str(f.e, 60) : '', host, src: request.method === 'GET' ? 'px' : 'js',
-    ref: str(f.r, 80).toLowerCase().replace(/^www\./, ''), utm: str(f.u, 40), lang: str(f.l, 12).slice(0, 12), w: Number(f.w) || 0,
+    role: f.o === 'admin' || f.o === 'staff' ? f.o : '', ref: str(f.r, 80).toLowerCase().replace(/^www\./, ''), utm: str(f.u, 40), lang: str(f.l, 12).slice(0, 12), w: Number(f.w) || 0,
     country: /^[A-Z]{2}$/.test(country) ? country : '', device: p.device, browser: p.browser, os: p.os, bot: p.bot,
     vid: ip || ua ? await sha(`${secret}|${bangkokDay()}|${f.k}|${ip}|${ua}`) : ''
   };
