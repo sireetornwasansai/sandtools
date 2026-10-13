@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pageKey, pageKind, pageLabel, normalizePages, pageJourneys, nextPages, pageInsights, pagesCsv, makeSamplePages, pagesFromStats, themeOf, THEMES, normalizeFloor, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample, MAX_SITES, MAX_FIGURES, DEFAULTS,
-  usageRank, asJourneys, busiestDay, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, dayLabel, addDays, MODES, MODE_IDS, MAX_DAY_FIGURES, REPLAY_PRIVACY } from '../../src/js/modules/site-engine.js';
+  usageRank, asJourneys, busiestDay, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, dayLabel, addDays, MODES, MODE_IDS, MAX_DAY_FIGURES, REPLAY_PRIVACY,
+  WING_MAX, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext, wingLayout } from '../../src/js/modules/site-engine.js';
 
 const sample = () => makeSample(30);
 
@@ -111,9 +112,9 @@ test('busiestDay: ties → latest, empty never wins', () => {
 test('normalizeReplay: rejects other answers, derives counts, clamps events', () => {
   for (const bad of [null, {}, { sites: [] }, { day: 'x', sites: [] }, { day: DAY }]) assert.equal(normalizeReplay(bad), null);
   const r = normalizeReplay(rawReplay()); assert.equal(r.sites.a.back, 1);
-  assert.deepEqual(r.sites.b, { n: 1, uv: 1, fresh: 1, back: 0, ev: [{ m: 610, v: 1, f: 0 }] });
+  assert.deepEqual(r.sites.b, { n: 1, uv: 1, fresh: 1, back: 0, ev: [{ m: 610, v: 1, f: 0, p: -1 }], pg: [] });
   const odd = normalizeReplay(rawReplay({ mode: 'x', scale: 0, sites: [{ key: 'z', ev: [[-1, 1, 0], [1440, 1, 0], [30, 2, 9], [20, 3, 'x']] }, { n: 5 }] }));
-  assert.equal(odd.mode, 'today'); assert.equal(odd.scale, 1); assert.deepEqual(odd.sites.z.ev, [{ m: 20, v: 3, f: 0 }, { m: 30, v: 2, f: 2 }]);
+  assert.equal(odd.mode, 'today'); assert.equal(odd.scale, 1); assert.deepEqual(odd.sites.z.ev, [{ m: 20, v: 3, f: 0, p: -1 }, { m: 30, v: 2, f: 2, p: -1 }]);
 });
 test('replayVisitors: one person per VISIT, new vs returning flagged', () => {
   const rep = normalizeReplay(rawReplay()); const v = replayVisitors(rep, drawn);
@@ -149,4 +150,43 @@ test('replayCsv + sample replay + helpers', () => {
   assert.equal(p.busiest.d, p.day); assert.ok(Object.values(t.sites).every((s) => s.ev.every((e) => e.m <= 600))); assert.equal(Object.keys(t.sites).length, 6);
   assert.ok(dayStats(p).views > dayStats(t).views); assert.ok(replayVisitors(p, pickSites(d.sites).sites).length <= MAX_DAY_FIGURES);
   assert.deepEqual(MODE_IDS, ['typical', 'today', 'peak']); assert.match(dayLabel('2026-10-13'), /2569/); assert.equal(addDays('2026-10-31', 1), '2026-11-01');
+});
+
+/* ---------------------------------------- wings: the pages behind each station ---------------------------------------- */
+const lay = (n) => Array.from({ length: n }, (_, i) => { const top = Math.ceil(n / 2); const isTop = i < top; const cnt = isTop ? top : n - top; const k = isTop ? i : i - top; const x = ((k + 0.5) * 12) / cnt; return { top: isTop, c: [x, isTop ? 1.7 : 10.3], door: [x, isTop ? 2.9 : 9.1], dir: isTop ? 1 : -1 }; });
+
+test('wingOf / normalizeWings: busiest pages only, never the "other" bucket, answers of other shapes are rejected', () => {
+  const d = sample(); const s = pickSites(d.sites).sites[0]; const pg = normalizePages(makeSamplePages(s, 30)); const w = wingOf(pg);
+  assert.ok(w.units.length > 0 && w.units.length <= WING_MAX); assert.ok(w.units.every((u) => u.kind !== 'p:other'));
+  assert.ok(w.units.every((u, i) => i === 0 || w.units[i - 1].pv >= u.pv)); assert.ok(w.flows.every((f) => w.units.some((u) => u.key === f.from) && w.units.some((u) => u.key === f.to)));
+  assert.equal(wingOf(null), null); assert.equal(normalizeWings(null), null); assert.equal(normalizeWings({ sites: 1 }), null);
+  const raw = { days: 30, sites: [{ site: { key: 'a', name: 'A', url: 'https://x.test/' }, uv: 3, realtime: 0, pages: [{ path: '/', pv: 5, uv: 3 }, { path: '/form.html', pv: 2, uv: 2 }], other: { pv: 4, uv: 2 }, flows: [{ from: '/', to: '/form.html', n: 2 }] }, { pages: [] }] };
+  const m = normalizeWings(raw); assert.deepEqual(Object.keys(m), ['a']); assert.equal(m.a.units.length, 2); assert.equal(m.a.hasMore, true); assert.equal(m.a.tot, 11); assert.deepEqual(wingNext(m.a, m.a.units[0].key), { to: m.a.units[1].key, n: 2 });
+  assert.equal(wingNext(m.a, m.a.units[1].key), null);
+});
+test('makeSampleWings: one wing per sample project', () => {
+  const ss = pickSites(sample().sites).sites; const m = makeSampleWings(ss, 30); assert.equal(Object.keys(m).length, ss.length); assert.ok(ss.every((s) => m[s.key].units.length >= 1));
+});
+test('wingPick: deterministic, follows the page views, -1 when there is nothing to pick', () => {
+  const w = { units: [{ pv: 90 }, { pv: 10 }, { pv: 0 }] }; const pick = (id) => wingPick(w, id);
+  assert.equal(pick(5), pick(5)); const n = Array.from({ length: 400 }, (_, i) => pick(i + 1)); const c0 = n.filter((x) => x === 0).length;
+  assert.ok(c0 > 300 && c0 < 390); assert.ok(n.every((x) => x === 0 || x === 1)); assert.equal(wingPick({ units: [] }, 1), -1); assert.equal(wingPick(null, 1), -1); assert.equal(wingPick({ units: [{ pv: 0 }] }, 1), -1);
+});
+test('wingLayout: tiles stay behind the right wall, inside the slab, finite, and the side walkway is in the gap between stations', () => {
+  for (const n of [1, 2, 3, 5, 8]) {
+    const L = lay(n); const wl = wingLayout(L, L.map((_, i) => (i % 2 ? 6 : 3)));
+    wl.forEach((w, i) => {
+      assert.equal(w.out, L[i].top ? -1 : 1); assert.ok(w.tiles.every((t) => t.c.every(Number.isFinite)));
+      for (const t of w.tiles) { assert.ok(t.c[0] - w.size / 2 >= w.slab.x0 - 1e-9 && t.c[0] + w.size / 2 <= w.slab.x1 + 1e-9, `x n=${n} i=${i}`); assert.ok(L[i].top ? t.c[1] < 0 : t.c[1] > 12, `y n=${n} i=${i}`); assert.ok(t.c[1] >= w.slab.y0 && t.c[1] <= w.slab.y1); }
+      assert.ok(w.lane.x > 0 && w.lane.x < 12); assert.ok(Math.abs(w.lane.x - L[i].c[0]) >= 1.2, 'walkway must clear the station');
+    });
+    assert.equal(wl[0].tiles.length, 3); if (n > 1) assert.equal(wl[1].tiles.length, 6);
+  }
+  assert.equal(wingLayout(lay(2), [0, 0]).every((w) => w.tiles.length === 0), true);
+});
+test('replay events carry the page: normalizeReplay → replayVisitors → asJourneys', () => {
+  const rep = normalizeReplay(rawReplay({ sites: [{ key: 'a', n: 3, fresh: 2, back: 1, pgs: ['/Form.html?x=1', '/'], ev: [[600, 1, 0, 0], [605, 2, 0, 1], [700, 1, 1, 7], [710, 3, 0]] }] }));
+  assert.deepEqual(rep.sites.a.pg, ['/form.html', '/']); assert.deepEqual(rep.sites.a.ev.map((e) => e.p), [0, 1, 7, -1]);
+  const v = replayVisitors(rep, [{ key: 'a' }]); assert.deepEqual(v.map((x) => x.pk), ['/form.html', '/', '', '']); assert.deepEqual(asJourneys(v).map((x) => x.pk), ['/form.html', '/', '', '']);
+  assert.ok(asJourneys(visitors(pickSites(sample().sites).sites, 30, 5)).every((x) => x.pk === ''));
 });
