@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pageKey, pageKind, pageLabel, normalizePages, pageJourneys, nextPages, pageInsights, pagesCsv, makeSamplePages, pagesFromStats, themeOf, THEMES, normalizeFloor, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample, MAX_SITES, MAX_FIGURES, DEFAULTS } from '../../src/js/modules/site-engine.js';
+import { pageKey, pageKind, pageLabel, normalizePages, pageJourneys, nextPages, pageInsights, pagesCsv, makeSamplePages, pagesFromStats, themeOf, THEMES, normalizeFloor, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample, MAX_SITES, MAX_FIGURES, DEFAULTS,
+  usageRank, asJourneys, busiestDay, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, dayLabel, addDays, MODES, MODE_IDS, MAX_DAY_FIGURES, REPLAY_PRIVACY } from '../../src/js/modules/site-engine.js';
 
 const sample = () => makeSample(30);
 
@@ -88,4 +89,64 @@ test('nextPages / pageInsights / pagesCsv / pagesFromStats', () => {
   assert.equal(pageInsights([], [], 30)[0].tone, 'info'); assert.match(pagesCsv(d.units, 30, '=evil'), /^"ระบบ"/); assert.match(pagesCsv(d.units, 30, '=evil').split('\r\n')[1], /"'=evil"/);
   const fb = normalizePages(pagesFromStats({ site: { key: 'k', name: 'n', url: 'https://x.org/a/' }, byHour: Array(24).fill(1), pages: [{ name: '/a/', n: 10, u: 5 }, { name: '/a/form.html', n: 5, u: 2 }] }, 30));
   assert.equal(fb.units.length, 2); assert.equal(fb.flows.length, 0);
+});
+
+test('usageRank / pickSites: people online now outrank busier projects; silent, idle, paused last', () => {
+  const mk = (key, pv, extra = {}) => ({ key, name: key, pv, prev: 0, realtime: 0, status: 'active', track: true, ...extra });
+  const all = [mk('busy', 500), mk('live-small', 3, { realtime: 2 }), mk('silent', 0, { prev: 40 }), mk('idle', 0), mk('paused', 900, { status: 'paused' }), mk('ok', 20)];
+  assert.deepEqual(all.map(usageRank), [1, 0, 2, 3, 4, 1]);
+  assert.deepEqual(pickSites(all).sites.map((x) => x.key), ['live-small', 'busy', 'ok', 'silent', 'idle', 'paused']);
+  const many = Array.from({ length: 12 }, (_, i) => mk('k' + i, 100 - i, i === 11 ? { realtime: 1, pv: 1 } : {}));
+  assert.equal(pickSites(many).sites[0].key, 'k11');
+});
+const DAY = '2026-10-07'; const TODAY = '2026-10-13';
+const rawReplay = (o = {}) => ({ mode: 'peak', day: DAY, today: TODAY, scale: 1,
+  byDay: [{ d: '2026-10-05', pv: 10 }, { d: DAY, pv: 40 }, { d: '2026-10-09', pv: 40 }, { d: '2026-10-12', pv: 0 }, { d: TODAY, pv: 12 }],
+  sites: [{ key: 'a', n: 6, uv: 3, fresh: 3, back: 1, ev: [[600, 1, 0], [602, 1, 2], [605, 2, 0], [700, 3, 0], [760, 1, 1], [762, 1, 2]] }, { key: 'b', ev: [[610, 1, 0]] }], ...o });
+const drawn = [{ key: 'a' }, { key: 'b' }];
+test('busiestDay: ties → latest, empty never wins', () => {
+  assert.deepEqual(busiestDay(rawReplay().byDay), { d: '2026-10-09', pv: 40 });
+  assert.equal(busiestDay([{ d: '2026-10-01', pv: 0 }]), null); assert.equal(busiestDay(null), null);
+});
+test('normalizeReplay: rejects other answers, derives counts, clamps events', () => {
+  for (const bad of [null, {}, { sites: [] }, { day: 'x', sites: [] }, { day: DAY }]) assert.equal(normalizeReplay(bad), null);
+  const r = normalizeReplay(rawReplay()); assert.equal(r.sites.a.back, 1);
+  assert.deepEqual(r.sites.b, { n: 1, uv: 1, fresh: 1, back: 0, ev: [{ m: 610, v: 1, f: 0 }] });
+  const odd = normalizeReplay(rawReplay({ mode: 'x', scale: 0, sites: [{ key: 'z', ev: [[-1, 1, 0], [1440, 1, 0], [30, 2, 9], [20, 3, 'x']] }, { n: 5 }] }));
+  assert.equal(odd.mode, 'today'); assert.equal(odd.scale, 1); assert.deepEqual(odd.sites.z.ev, [{ m: 20, v: 3, f: 0 }, { m: 30, v: 2, f: 2 }]);
+});
+test('replayVisitors: one person per VISIT, new vs returning flagged', () => {
+  const rep = normalizeReplay(rawReplay()); const v = replayVisitors(rep, drawn);
+  assert.equal(v.length, 5); assert.equal(v.filter((x) => x.back).length, 1);
+  for (const x of v) assert.ok(x.enter < x.start && x.start < x.end && x.end < x.exit);
+  assert.deepEqual(v, replayVisitors(rep, drawn)); assert.equal(replayVisitors(null, drawn).length, 0);
+  assert.equal(replayVisitors(rep, [{ key: 'b' }])[0].site, 0);
+  assert.equal(asJourneys(v).filter((x) => x.back).length, 1);
+  const d = sample(); const ss = pickSites(d.sites).sites; assert.ok(asJourneys(visitors(ss, d.days, perFigure(ss, d.days))).every((x) => x.back === false));
+});
+test('replayRange: past day spans its activity, today stops near now', () => {
+  const past = normalizeReplay(rawReplay()); const r = replayRange(replayVisitors(past, drawn), past, 900); assert.ok(r.from <= 590 && r.to >= 780 && r.to - r.from >= 180);
+  const now = normalizeReplay(rawReplay({ day: TODAY })); const rn = replayRange(replayVisitors(now, drawn), now, 650); assert.ok(rn.to <= 720 && rn.to > 650);
+  assert.deepEqual(replayRange([], now, 30), { from: 0, to: 180 }); assert.deepEqual(replayRange([], past, 0), { from: DEFAULTS.open, to: DEFAULTS.close });
+});
+test('cumViews + dayStats', () => {
+  const rep = normalizeReplay(rawReplay()); assert.equal(cumViews(rep, 'a', 599), 0); assert.equal(cumViews(rep, 'a', 605), 3); assert.equal(cumViews(rep, 'nope', 900), 0);
+  const st = dayStats(rep); assert.deepEqual([st.views, st.fresh, st.back, st.visits, st.backPct], [7, 4, 1, 5, 20]); assert.equal(st.peakHour, 10); assert.equal(st.top.key, 'a');
+  const sc = normalizeReplay(rawReplay({ scale: 3 })); assert.equal(cumViews(sc, 'a', 1439), 18);
+  const e = dayStats(normalizeReplay(rawReplay({ sites: [] }))); assert.deepEqual([e.views, e.peakHour, e.top, e.backPct], [0, -1, null, 0]);
+});
+test('compareToPeak + replayInsights', () => {
+  assert.deepEqual(compareToPeak(rawReplay().byDay, TODAY), { peakDay: '2026-10-09', peakPv: 40, today: TODAY, todayPv: 12, pct: 30, isPeak: false });
+  assert.equal(compareToPeak([], TODAY), null);
+  const today = normalizeReplay(rawReplay({ day: TODAY })); const t = replayInsights(today, dayStats(today), { a: 'ระบบ A' }).map((x) => x.text).join('\n');
+  assert.match(t, /ผู้ใช้ใหม่ 4/); assert.match(t, /ระบบ A มีคนเปิดมากสุด/); assert.match(t, /≈ 30% ของวันที่คนใช้มากสุด/); assert.ok(t.includes(REPLAY_PRIVACY));
+  assert.deepEqual(replayInsights(null, {}), []);
+});
+test('replayCsv + sample replay + helpers', () => {
+  const rep = normalizeReplay(rawReplay()); const rows = replayCsv(rep, [{ key: 'a', name: '=evil()' }, { key: 'zz', name: 'x' }]).split('\r\n'); assert.equal(rows.length, 2); assert.match(rows[1], /^"2026-10-07","'=evil\(\)"/);
+  const d = sample(); const t = normalizeReplay(makeSampleReplay(d.sites, 'today', TODAY, 600)); const p = normalizeReplay(makeSampleReplay(d.sites, 'peak', TODAY, 600));
+  assert.deepEqual(makeSampleReplay(d.sites, 'today', TODAY, 600), makeSampleReplay(d.sites, 'today', TODAY, 600));
+  assert.equal(p.busiest.d, p.day); assert.ok(Object.values(t.sites).every((s) => s.ev.every((e) => e.m <= 600))); assert.equal(Object.keys(t.sites).length, 6);
+  assert.ok(dayStats(p).views > dayStats(t).views); assert.ok(replayVisitors(p, pickSites(d.sites).sites).length <= MAX_DAY_FIGURES);
+  assert.deepEqual(MODE_IDS, ['typical', 'today', 'peak']); assert.match(dayLabel('2026-10-13'), /2569/); assert.equal(addDays('2026-10-31', 1), '2026-11-01');
 });
