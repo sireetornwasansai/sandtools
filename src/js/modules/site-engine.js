@@ -33,10 +33,10 @@ function site(s) {
 export const THEMES = {
   ems: { icon: '🚑', label: 'ยานพาหนะ / รถพยาบาล' }, hrd: { icon: '🎓', label: 'ห้องอบรมบุคลากร' }, ec: { icon: '🔬', label: 'ห้องวิจัย / จริยธรรมการวิจัย' }, vaccine: { icon: '💉', label: 'ห้องวัคซีน' },
   dental: { icon: '🦷', label: 'ห้องทันตกรรม' }, pt: { icon: '🩺', label: 'ห้องกายภาพบำบัด' }, plan: { icon: '📊', label: 'ห้องแผนงาน / ยุทธศาสตร์' }, doc: { icon: '🗂️', label: 'ห้องสารบรรณ' },
-  visit: { icon: '🏠', label: 'เยี่ยมบ้าน / แผนที่' }, web: { icon: '🌐', label: 'เว็บไซต์ / ระบบทั่วไป' },
+  visit: { icon: '🏠', label: 'เยี่ยมบ้าน / แผนที่' }, fte: { icon: '📈', label: 'ห้องรายงานอัตรากำลัง (FTE)' }, web: { icon: '🌐', label: 'เว็บไซต์ / ระบบทั่วไป' },
 };
 const RULES = [
-  ['vaccine', /vaccin|วัคซีน|\bepi\b|immuniz/], ['dental', /dental|ทันต|ฟัน/], ['pt', /physio|กายภาพ|\bpt\b|pt-?station/],
+  ['fte', /\bfte\b|อัตรากำลัง/], ['vaccine', /vaccin|วัคซีน|\bepi\b|immuniz/], ['dental', /dental|ทันต|ฟัน/], ['pt', /physio|กายภาพ|\bpt\b|pt-?station/],
   ['ems', /ยานพาหนะ|พาหนะ|ขอใช้รถ|จองรถ|รถพยาบาล|รถ|ambulance|\bems\b|fleet|vehicle|carsystem/], ['hrd', /hrd|อบรม|training|บุคลากร|ทรัพยากรบุคคล/],
   ['ec', /\bec\b|จริยธรรม|วิจัย|ethic|research|\birb\b/], ['visit', /เยี่ยมบ้าน|home-?visit|แผนที่|\bmap\b/], ['doc', /สารบรรณ|เอกสาร|document|\bdocs?\b/], ['plan', /แผนงาน|ยุทธศาสตร์|strategy|\bplan\b|kpi|ตัวชี้วัด/],
 ];
@@ -158,7 +158,7 @@ export function sitesCsv(all, days) {
 export function makeSample(days = 30, seed = 11) {
   const r = rng(seed); const prof = [1, 0, 0, 0, 1, 2, 4, 9, 16, 20, 18, 12, 9, 13, 17, 15, 11, 6, 4, 3, 2, 2, 1, 1];
   const defs = [['ระบบยานพาหนะ (SAND)', 'https://sand.example.org', 420, 1.0, 'ok'], ['ระบบพัฒนาบุคลากร HRD', 'https://hrd.example.org', 300, 1.2, 'ok'], ['จริยธรรมการวิจัย (EC)', 'https://ec.example.org', 150, 0.8, 'ok'],
-    ['ห้องวัคซีน', 'https://vaccine.example.org', 90, 0.7, 'ok'], ['เว็บไซต์โรงพยาบาล', 'https://hospital.example.org', 260, 1.1, 'ok'], ['ระบบสารบรรณ', 'https://doc.example.org', 120, 0.9, 'ok'],
+    ['ห้องวัคซีน', 'https://vaccine.example.org', 90, 0.7, 'ok'], ['ระบบรายงาน FTE', 'https://fte.example.org', 260, 1.1, 'ok'], ['ระบบสารบรรณ', 'https://doc.example.org', 120, 0.9, 'ok'],
     ['ระบบทันตกรรม', 'https://dental.example.org', 60, 0, 'silent'], ['ระบบกายภาพบำบัด', 'https://pt.example.org', 0, 0, 'idle']];
   const sites = defs.map(([name, url, perDay, trend, kind], i) => {
     const byHour = prof.map((w) => (kind === 'silent' ? (r(), 0) : Math.round(((w * perDay * days) / 160) * (0.8 + 0.4 * r())))); const pv = byHour.reduce((a, b) => a + b, 0);
@@ -469,9 +469,6 @@ export function makeSampleReplay(all, mode = 'today', today = '2026-10-13', nowM
 /* ============================ wings: the pages of each system, drawn behind its station ============================ */
 
 export const WING_MAX = 6;          // pages drawn behind one station (3 x 2 tiles)
-export const WING_DEPTH = 2.6;      // how far the annex reaches behind / in front of the building wall (floor units)
-export const WING_KEY = 'sand:home3d:wings';
-
 /** One system's page answer (normalizePages result) → what is drawn behind its station: the busiest pages (never the "other pages" bucket) and the walks between them. */
 export function wingOf(pg) {
   if (!pg || !Array.isArray(pg.units)) return null;
@@ -500,20 +497,77 @@ export function wingPick(w, id, seed = 83) {
 /** Where people usually go next from page `key` of a wing: {to, n} or null. */
 export function wingNext(w, key) { const f = (w ? w.flows : []).filter((x) => x.from === key).sort((a, b) => b.n - a.n)[0]; return f ? { to: f.to, n: f.n } : null; }
 
-/**
- * Geometry of the annexes. Back-row stations get theirs behind the building (y < 0), front-row stations in front of it (y > G).
- * For each station: up to WING_MAX tiles (3 per row, busiest nearest the station), the side walkway people use to get there (the gap between two stations) and the slab.
- * @param lay layout(n) of the stations · @param counts pages per station
- */
-export function wingLayout(lay, counts, G = 12, depth = WING_DEPTH) {
-  const nTop = lay.filter((l) => l.top).length; const nBot = lay.length - nTop;
-  return lay.map((l, i) => {
-    const cnt = l.top ? nTop : nBot; const cw = G / Math.max(1, cnt); const cx = l.c[0]; const out = l.top ? -1 : 1; const near = l.top ? 0.12 : G - 0.12;
-    const k = lay.slice(0, i).filter((q) => q.top === l.top).length; const lx = cx + (k < cnt - 1 ? 1 : -1) * Math.min(cw / 2, 2);
-    const n = Math.min(WING_MAX, Math.max(0, counts[i] || 0)); const TS = Math.min(0.98, (cw - 0.4) / 3); const size = Math.max(0.4, Math.min(0.8, TS - 0.1));
-    const tiles = []; for (let p = 0; p < n; p++) { const r = Math.floor(p / 3); const inRow = Math.min(3, n - r * 3); tiles.push({ c: [cx + ((p % 3) - (inRow - 1) / 2) * TS, near + out * (0.62 + r * 1.02)], row: r }); }
-    const gw = Math.min(cw - 0.35, 3.2); const far = near + out * (depth - 0.2);
-    return { out, near, size, tiles, lane: { x: lx, y0: l.door[1], y1: near + out * 0.45 },
-      slab: { x0: Math.min(cx - gw / 2, lx - 0.25), x1: Math.max(cx + gw / 2, lx + 0.25), y0: Math.min(near, far), y1: Math.max(near, far) } };
-  });
+/* ============================ two plans: department (walk in, branch off to its rooms) · whole hospital ============================ */
+
+export const VIEW_KEY = 'sand:home3d:view';
+export const VIEWS = [['dept', '🧭 แผนกและส่วนย่อย'], ['hospital', '🏥 ภาพรวมโรงพยาบาล']];
+export const VIEW_IDS = VIEWS.map((v) => v[0]);
+
+/** View 1 · department plan (world units). HALF = depth of one half of the floor, CORR = main corridor, HALL = the hall of one department,
+ *  HEAD = the head office at its far end, COLW = widest department column. Each department: corridor → its own hall → rooms (= pages) on both sides. */
+export const DEPT = { HALF: 5.6, CORR: 1.3, HALL: 0.84, ROWS: 3, HEAD: 1.7, EDGE: 0.15, COLW: 3.9 };
+
+export function deptWorld(n) {
+  const top = Math.ceil(n / 2); const cols = Math.max(1, top); const GY = 2 * DEPT.HALF + DEPT.CORR;
+  return { GX: Math.min(17, Math.max(9.6, cols * DEPT.COLW)), GY, CY: GY / 2, top, bot: n - top };
 }
+
+/**
+ * @param {number[]} counts rooms (pages) of each department · first half of the departments on the back row, the rest on the front row
+ * Rooms: busiest page nearest the corridor, alternating left / right of the hall (p = 0 left·row 0, p = 1 right·row 0, p = 2 left·row 1 …).
+ * `ax` = where people stand in the room (hall side), `px` = where the room's model stands (far side).
+ */
+export function deptLayout(counts) {
+  const n = counts.length; const W = deptWorld(n); const { CORR, HALL, ROWS, HEAD, EDGE } = DEPT; const out = [];
+  for (let i = 0; i < n; i++) {
+    const top = i < W.top; const cnt = top ? W.top : n - W.top; const k = top ? i : i - W.top; const slot = W.GX / cnt; const cx = (k + 0.5) * slot; const pw = Math.min(DEPT.COLW, slot);
+    const x0 = cx - pw / 2; const x1 = cx + pw / 2; const ye = top ? W.CY - CORR / 2 : W.CY + CORR / 2; const dir = top ? -1 : 1;
+    const head = top ? { x0: x0 + EDGE, x1: x1 - EDGE, y0: EDGE, y1: EDGE + HEAD } : { x0: x0 + EDGE, x1: x1 - EDGE, y0: W.GY - EDGE - HEAD, y1: W.GY - EDGE };
+    const hall = { cx, x0: cx - HALL / 2, x1: cx + HALL / 2, y0: top ? head.y1 : ye, y1: top ? ye : head.y0 };
+    const from = ye + dir * EDGE; const to = top ? head.y1 : head.y0; const rd = Math.abs(from - to) / ROWS; const rw = (pw - 2 * EDGE - HALL) / 2; const rooms = [];
+    for (let p = 0; p < Math.min(ROWS * 2, Math.max(0, counts[i] || 0)); p++) {
+      const row = p >> 1; const side = p & 1 ? 1 : -1; const ya = from + dir * row * rd; const yb = ya + dir * rd; const y0 = Math.min(ya, yb); const y1 = Math.max(ya, yb);
+      const rx0 = side < 0 ? x0 + EDGE : hall.x1; const rx1 = side < 0 ? hall.x0 : x1 - EDGE; const c = [(rx0 + rx1) / 2, (y0 + y1) / 2];
+      rooms.push({ p, row, side, x0: rx0, x1: rx1, y0, y1, c, w: rw, d: rd, door: [side < 0 ? rx1 : rx0, c[1]], ax: side < 0 ? rx1 - 0.3 : rx0 + 0.3, px: side < 0 ? rx0 + rw * 0.36 : rx1 - rw * 0.36 });
+    }
+    out.push({ top, dir, pad: { x0, x1, y0: top ? 0 : ye, y1: top ? ye : W.GY }, hall, mouth: [cx, ye], head, c: [cx, (head.y0 + head.y1) / 2], rooms });
+  }
+  return out;
+}
+/** Where the rank-th person of a room stands (2 columns x 3 rows on the hall side). */
+export function deptStand(r, rank) { const q = rank % 6; return [r.ax + r.side * 0.26 * Math.floor(q / 3), r.c[1] + ((q % 3) - 1) * 0.32]; }
+/** Where people without a page stand: at the head office, at the end of the hall. */
+export function headStand(d, rank) { const q = rank % 6; return [d.hall.cx + ((q % 3) - 1) * 0.24, (d.top ? d.head.y1 + 0.22 : d.head.y0 - 0.22) - d.dir * Math.floor(q / 3) * 0.22]; }
+
+/** View 2 · hospital plan: front plaza (road with the two gates) · lobby with the tower sign · back and front rooms along a spine corridor, one room per system. */
+export const HOSP = { GX: 15, GY: 13, CY: 10.6, X0: 0.25, Y0: 0.25, RD: 2.4, SP: 1.1, LOB: [6, 9], WINGW: 5.75 };
+export const HOSP_GROUPS = [
+  { id: 'admin', name: 'บริหารทั่วไป', icon: '🏢', col: '#0369a1', side: -1, themes: ['ems', 'fte', 'doc', 'web'] },
+  { id: 'quality', name: 'พัฒนาคุณภาพ', icon: '🩺', col: '#0f766e', side: 1, themes: ['hrd', 'ec', 'vaccine', 'plan', 'dental', 'pt', 'visit'] },
+];
+/** Which wing a project belongs to: a `group:admin` / `group:quality` tag wins, otherwise its theme (vehicle · FTE · documents · websites → general administration; HRD · EC · vaccine · clinics · plans → quality development). */
+export function groupOf(s, theme = themeOf(s)) {
+  const tag = (s.tags || []).map((t) => String(t).toLowerCase()).find((t) => t.startsWith('group:')); const id = tag ? tag.slice(6) : '';
+  if (HOSP_GROUPS.some((g) => g.id === id)) return id;
+  return (HOSP_GROUPS.find((g) => g.themes.includes(theme)) || HOSP_GROUPS[1]).id;
+}
+export const HG = (id) => HOSP_GROUPS.find((g) => g.id === id) || HOSP_GROUPS[1];
+
+/** @param {{group:string, pv:number}[]} items one per project → rooms aligned with `items`; busiest nearest the lobby, alternating back / front row. */
+export function hospitalLayout(items) {
+  const { X0, Y0, RD, SP, LOB, WINGW } = HOSP; const sy = Y0 + RD + SP / 2; const rooms = Array(items.length).fill(null); const wings = [];
+  for (const g of HOSP_GROUPS) {
+    const idx = items.map((it, i) => i).filter((i) => HG(items[i].group).id === g.id).sort((a, b) => items[b].pv - items[a].pv || a - b);
+    const cols = Math.max(1, Math.ceil(idx.length / 2)); const rw = Math.min(2.9, WINGW / cols);
+    idx.forEach((i, sIdx) => {
+      const col = sIdx >> 1; const front = !!(sIdx & 1); const rx0 = g.side < 0 ? LOB[0] - (col + 1) * rw : LOB[1] + col * rw; const rx1 = rx0 + rw; const y0 = front ? Y0 + RD + SP : Y0; const y1 = y0 + RD; const c = [(rx0 + rx1) / 2, (y0 + y1) / 2];
+      rooms[i] = { i, group: g.id, front, x0: rx0, x1: rx1, y0, y1, c, w: rw, d: RD, door: [c[0], front ? y0 : y1], ax: rx0 + rw * 0.76, px: rx0 + rw * 0.33 };
+    });
+    wings.push({ id: g.id, side: g.side, count: idx.length, x0: g.side < 0 ? LOB[0] - cols * rw : LOB[1], x1: g.side < 0 ? LOB[0] : LOB[1] + cols * rw });
+  }
+  return { rooms, wings, sy, lobby: { x0: LOB[0], x1: LOB[1], y0: Y0, y1: Y0 + 2 * RD + SP }, gate: [(LOB[0] + LOB[1]) / 2, Y0 + 2 * RD + SP] };
+}
+/** Where the rank-th person of a hospital room stands (2 columns x 3 rows, beside the room's model). */
+export function hospStand(r, rank) { const q = rank % 6; return [r.ax - 0.3 * (q % 2), r.c[1] + (((q >> 1) % 3) - 1) * 0.44]; }
+/** Walk from the road to a room: plaza → lobby door → spine → the room's door (reverse it for the way out). */
+export function hospRoute(L, r) { const lx = L.gate[0]; return [[lx, HOSP.CY], [lx, L.gate[1] + 0.15], [lx, L.sy], [r.door[0], L.sy], r.door]; }
