@@ -97,6 +97,11 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 .s3-loop[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-bg, var(--surface-3)); box-shadow: 0 0 0 1px var(--primary) inset; }
 .s3-toggle[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-bg, var(--surface-3)); box-shadow: 0 0 0 1px var(--primary) inset; }
 .s3-lg i.s3-wing { width: .5rem; height: .9rem; border-radius: 2px; background: linear-gradient(180deg, #7c3aed 0 45%, #3758f9 45% 100%); }
+.s3-livebtn[aria-pressed="true"] { border-color: #16a34a; color: #15803d; box-shadow: 0 0 0 1px #16a34a inset; }
+.s3-livedot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: #94a3b8; margin-right: .35rem; }
+.s3-livebtn[aria-pressed="true"] .s3-livedot { background: #16a34a; animation: s3-pulse 1.4s ease-in-out infinite; }
+@keyframes s3-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .s3-livebtn[aria-pressed="true"] .s3-livedot { animation: none; } }
 .s3-loop[aria-pressed="true"] .icon { animation: s3-spin 2.4s linear infinite; }
 @keyframes s3-spin { to { transform: rotate(360deg); } }
 .s3-lg.is-live { border-color: var(--success); color: var(--text); }
@@ -112,9 +117,3 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 .s3-brand small { color: var(--muted); font-size: .74rem; }
 @media (max-width: 700px) { .s3-brand small { display: none; } }
 @media (prefers-reduced-motion: reduce) { .s3-loop[aria-pressed="true"] .icon { animation: none; } }
-.s3-lg i.s3-adm { width: .7rem; height: .7rem; border-radius: 50%; background: #7c3aed; box-shadow: 0 0 0 2px #fff inset; }
-.s3-lg i.s3-r-admin { background: #7c3aed; }
-.s3-lg i.s3-r-head { background: #ea580c; }
-.s3-lg i.s3-r-officer { background: #0891b2; }
-.s3-lg i.s3-r-committee { background: #16a34a; }
-.s3-lg i.s3-r-researcher { background: #db2777; }
