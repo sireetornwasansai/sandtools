@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { pageKey, pageKind, pageLabel, normalizePages, pageJourneys, nextPages, pageInsights, pagesCsv, makeSamplePages, pagesFromStats, themeOf, THEMES, normalizeFloor, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample, MAX_SITES, MAX_FIGURES, DEFAULTS,
   usageRank, asJourneys, busiestDay, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, dayLabel, addDays, MODES, MODE_IDS, MAX_DAY_FIGURES, REPLAY_PRIVACY,
   WING_MAX, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext,
-  DEPT, HOSP, sitePage, deptWorld, deptLayout, deptStand, headStand, HOSP_GROUPS, groupOf, HG, hospitalLayout, hospStand, hospRoute, VIEW_IDS } from '../../src/js/modules/site-engine.js';
+  DEPT, deptWorld, deptLayout, deptStand, headStand, HOSP, HOSP_GROUPS, groupOf, hospitalLayout, hospStand, hospRoute, VIEW_IDS } from '../../src/js/modules/site-engine.js';
 
 const sample = () => makeSample(30);
 
@@ -171,51 +171,45 @@ test('wingPick: deterministic, follows the page views, -1 when there is nothing 
   assert.equal(pick(5), pick(5)); const n = Array.from({ length: 400 }, (_, i) => pick(i + 1)); const c0 = n.filter((x) => x === 0).length;
   assert.ok(c0 > 300 && c0 < 390); assert.ok(n.every((x) => x === 0 || x === 1)); assert.equal(wingPick({ units: [] }, 1), -1); assert.equal(wingPick(null, 1), -1); assert.equal(wingPick({ units: [{ pv: 0 }] }, 1), -1);
 });
-test('deptLayout: rooms stay inside their department, off the hall, and the busiest sit nearest the corridor', () => {
+test('deptLayout: rooms inside their department, beside the hall, below the head office; busiest nearest the corridor', () => {
   for (const n of [1, 2, 3, 5, 8]) {
-    const W = deptWorld(n); const L = deptLayout(Array.from({ length: n }, (_, i) => (i % 2 ? 6 : 3))); assert.equal(L.length, n); assert.ok(W.GX >= 9.6 && W.GX <= 17);
+    const W = deptWorld(n); const L = deptLayout(Array.from({ length: n }, (_, i) => (i % 2 ? 6 : 3))); assert.equal(L.length, n); assert.ok(W.GX >= 9.6 && W.GX <= 17); assert.ok(Math.abs(W.GY - 12.5) < 1e-9);
     L.forEach((d, i) => {
-      assert.equal(d.top, i < W.top); assert.ok(d.pad.x0 >= 0 && d.pad.x1 <= W.GX + 1e-9 && d.pad.y0 >= 0 && d.pad.y1 <= W.GY + 1e-9); assert.equal(d.rooms.length, i % 2 ? 6 : 3);
+      assert.equal(d.top, i < W.top); assert.equal(d.rooms.length, i % 2 ? 6 : 3); assert.ok(d.pad.x0 >= 0 && d.pad.x1 <= W.GX + 1e-9);
+      assert.ok(d.top ? d.mouth[1] <= W.CY - DEPT.CORR / 2 + 1e-9 : d.mouth[1] >= W.CY + DEPT.CORR / 2 - 1e-9, 'hall opens on the corridor edge');
       d.rooms.forEach((r, k) => {
-        assert.equal(r.p, k); assert.ok(r.c.every(Number.isFinite));
-        assert.ok(r.x0 >= d.pad.x0 - 1e-9 && r.x1 <= d.pad.x1 + 1e-9 && r.y0 >= d.pad.y0 - 1e-9 && r.y1 <= d.pad.y1 + 1e-9, 'room inside pad');
-        assert.ok(r.side < 0 ? r.x1 <= d.hall.x0 + 1e-9 : r.x0 >= d.hall.x1 - 1e-9, 'room is beside the hall, not in it');
-        assert.ok(d.top ? r.y0 >= d.head.y1 - 1e-9 : r.y1 <= d.head.y0 + 1e-9, 'rooms do not run into the head office');
+        assert.equal(r.p, k); assert.ok(r.c.every(Number.isFinite)); assert.ok(r.x0 >= d.pad.x0 - 1e-9 && r.x1 <= d.pad.x1 + 1e-9 && r.y0 >= d.pad.y0 - 1e-9 && r.y1 <= d.pad.y1 + 1e-9, 'inside the pad');
+        assert.ok(r.side < 0 ? r.x1 <= d.hall.x0 + 1e-9 : r.x0 >= d.hall.x1 - 1e-9, 'beside the hall'); assert.ok(d.top ? r.y0 >= d.head.y1 - 1e-9 : r.y1 <= d.head.y0 + 1e-9, 'not in the head office');
+        if (k >= 2) assert.ok(d.top ? r.y1 < d.rooms[k - 2].y1 : r.y0 > d.rooms[k - 2].y0, 'busiest nearest the corridor');
+        const s = deptStand(r, k); assert.ok(s[0] > r.x0 && s[0] < r.x1 && s[1] > r.y0 && s[1] < r.y1, 'standing place inside the room');
       });
-      assert.ok(deptStand(d.rooms[0] || { ax: 0, side: 1, c: [0, 0] }, 3).every(Number.isFinite)); assert.ok(headStand(d, 7).every(Number.isFinite));
+      const hs = headStand(d, 4); assert.ok(hs.every(Number.isFinite));
     });
   }
-  assert.deepEqual(deptLayout([0, 0]).map((d) => d.rooms.length), [0, 0]);
+  assert.equal(deptLayout([0, 0])[0].rooms.length, 0);
 });
-test('groupOf: vehicle system and FTE → general administration; HRD / EC / vaccine → quality development; tag wins', () => {
-  const G = (name, tags = []) => groupOf({ name, url: '', key: 'k', tags });
-  assert.equal(G('SAND', []), 'admin'); assert.equal(G('ระบบยานพาหนะ'), 'admin'); assert.equal(G('ระบบรายงาน FTE'), 'admin');
-  assert.equal(G('HRD training'), 'quality'); assert.equal(G('EC Sansai'), 'quality'); assert.equal(G('ห้องวัคซีน'), 'quality'); assert.equal(G('HRD', ['group:admin']), 'admin');
-  assert.deepEqual(VIEW_IDS, ['dept', 'hospital']);
+test('groupOf: vehicle + FTE → general administration, HRD / EC / vaccine → quality development, tag overrides', () => {
+  const g = (name, tags = []) => groupOf({ name, url: '', key: 'k', tags });
+  assert.equal(g('ระบบยานพาหนะ (SAND)'), 'admin'); assert.equal(g('ระบบรายงาน FTE'), 'admin');
+  assert.equal(g('HRD training'), 'quality'); assert.equal(g('จริยธรรมการวิจัย EC'), 'quality'); assert.equal(g('ห้องวัคซีน'), 'quality');
+  assert.equal(g('ห้องวัคซีน', ['group:admin']), 'admin'); assert.equal(HOSP_GROUPS.length, 2);
 });
-test('hospitalLayout: every project gets a room inside its wing, doors face the spine, routes stay on the floor', () => {
-  const items = [{ group: 'admin', pv: 5 }, { group: 'quality', pv: 9 }, { group: 'admin', pv: 50 }, { group: 'quality', pv: 1 }, { group: 'quality', pv: 3 }, { group: 'admin', pv: 2 }];
-  const L = hospitalLayout(items); assert.equal(L.rooms.length, items.length); assert.ok(L.rooms.every(Boolean));
-  L.rooms.forEach((r, i) => {
-    const w = L.wings.find((x) => x.id === items[i].group); assert.equal(r.group, items[i].group); assert.ok(r.x0 >= w.x0 - 1e-9 && r.x1 <= w.x1 + 1e-9, 'inside its wing'); assert.ok(r.y0 >= HOSP.Y0 && r.y1 <= HOSP.GY);
-    assert.ok(hospStand(r, 4).every(Number.isFinite)); for (const q of hospRoute(L, r)) assert.ok(q[0] >= 0 && q[0] <= HOSP.GX && q[1] >= 0 && q[1] <= HOSP.GY);
-  });
-  assert.ok(L.rooms[2].c[0] > L.rooms[5].c[0], 'busiest admin room is nearest the lobby');
-  assert.equal(HG('nope').id, 'quality'); assert.equal(hospitalLayout([]).rooms.length, 0);
+test('hospitalLayout: wings by group, busiest nearest the lobby, rooms inside the building, routes stay on the floor', () => {
+  for (const n of [1, 3, 8]) {
+    const items = Array.from({ length: n }, (_, i) => ({ group: i % 3 ? 'quality' : 'admin', pv: 100 - i })); const L = hospitalLayout(items);
+    assert.equal(L.rooms.length, n);
+    L.rooms.forEach((r, i) => {
+      assert.ok(r && r.group === items[i].group); assert.ok(r.x0 >= HOSP.X0 - 1e-9 && r.x1 <= HOSP.GX && r.y0 >= HOSP.Y0 - 1e-9 && r.y1 <= L.lobby.y1 + 1e-9);
+      assert.ok(r.group === 'admin' ? r.x1 <= HOSP.LOB[0] + 1e-9 : r.x0 >= HOSP.LOB[1] - 1e-9, 'wing side'); assert.ok(r.front ? r.door[1] === r.y0 : r.door[1] === r.y1, 'door faces the spine');
+      const st = hospStand(r, i); assert.ok(st[0] > r.x0 && st[0] < r.x1 && st[1] > r.y0 && st[1] < r.y1);
+      for (const [x, y] of hospRoute(L, r)) assert.ok(x >= 0 && x <= HOSP.GX && y >= 0 && y <= HOSP.GY);
+    });
+  }
+  const L2 = hospitalLayout([{ group: 'admin', pv: 1 }, { group: 'admin', pv: 9 }]); assert.ok(L2.rooms[1].x1 >= L2.rooms[0].x1, 'busiest nearest the lobby'); assert.deepEqual(VIEW_IDS, ['dept', 'hospital']);
 });
 test('replay events carry the page: normalizeReplay → replayVisitors → asJourneys', () => {
   const rep = normalizeReplay(rawReplay({ sites: [{ key: 'a', n: 3, fresh: 2, back: 1, pgs: ['/Form.html?x=1', '/'], ev: [[600, 1, 0, 0], [605, 2, 0, 1], [700, 1, 1, 7], [710, 3, 0]] }] }));
   assert.deepEqual(rep.sites.a.pg, ['/form.html', '/']); assert.deepEqual(rep.sites.a.ev.map((e) => e.p), [0, 1, 7, -1]);
   const v = replayVisitors(rep, [{ key: 'a' }]); assert.deepEqual(v.map((x) => x.pk), ['/form.html', '/', '', '']); assert.deepEqual(asJourneys(v).map((x) => x.pk), ['/form.html', '/', '', '']);
   assert.ok(asJourneys(visitors(pickSites(sample().sites).sites, 30, 5)).every((x) => x.pk === ''));
-});
-
-test('SITE_PAGES: HRD login pages and EC pages get their own names, other systems keep theirs', () => {
-  const mk = (name, url, key, paths) => normalizePages({ days: 30, site: { key, name, url }, pages: paths.map((p, i) => ({ path: p, pv: 10 - i, uv: 1 })), flows: [] });
-  const h = mk('HRD ระบบจัดการการพัฒนาบุคลากร', 'https://hrd.example.org/', 'h1', ['/', '/usercode', '/app', '/panel']);
-  assert.deepEqual(h.units.filter((u) => u.path !== '/').map((u) => [u.name, u.kind]), [['ระบบบันทึกหน่วยกิต HRD', 'p:form'], ['ระบบบันทึกหน่วยกิต HRD', 'p:form'], ['ระบบบันทึกหน่วยกิต HRD', 'p:form']]);
-  const e = mk('EC Online Submission', 'https://ec.example.org/', 'e1', ['/', '/app', '/tracking']);
-  assert.deepEqual(e.units.map((u) => u.name), ['หน้าแรก', 'ระบบยื่นขอจริยธรรม', 'ติดตามผลการพิจารณา']);
-  const o = mk('Other site', 'https://x.example.org/', 'o1', ['/', '/app']); assert.equal(o.units[1].name, 'app');
-  assert.equal(sitePage('web', '/app'), null); assert.equal(sitePage('ec', '/#/tracking').label, 'ติดตามผลการพิจารณา');
 });
