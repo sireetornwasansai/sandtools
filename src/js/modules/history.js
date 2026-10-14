@@ -5,7 +5,7 @@ import { gasCall } from '../core/api.js';
 import { notice } from '../core/notices.js';
 import { TOOLS, navigate } from '../core/routes.js';
 
-const TOOL = { qr: 'QR Code', converter: 'แปลงไฟล์', compress: 'ย่อไฟล์', prompt: 'Prompt', skill: 'skill.md', pdf: 'เครื่องมือ PDF', library: 'คลังข้อมูล', links: 'ลิงก์ย่อ', projects: 'โครงการ' };
+const TOOL = { qr: 'QR Code', converter: 'แปลงไฟล์', compress: 'ย่อไฟล์', prompt: 'Prompt', skill: 'skill.md', pdf: 'เครื่องมือ PDF', library: 'คลังข้อมูล', links: 'ลิงก์ย่อ', projects: 'โครงการ', inbox: 'หนังสือรับเข้า' };
 const valid = (ts) => ts && !Number.isNaN(new Date(ts).getTime());
 const when = (ts) => (valid(ts) ? new Date(ts).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '-');
 const ago = (ts) => { if (!valid(ts)) return '-'; const m = Math.round((Date.now() - new Date(ts).getTime()) / 60000); return m < 1 ? 'เมื่อสักครู่' : m < 60 ? `${m} นาทีที่แล้ว` : m < 1440 ? `${Math.round(m / 60)} ชั่วโมงที่แล้ว` : `${Math.round(m / 1440)} วันที่แล้ว`; };

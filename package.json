@@ -14,7 +14,7 @@
     "ocr:fetch": "node scripts/fetch-ocr.mjs",
     "preview": "node scripts/preview.mjs",
     "typecheck": "tsc -p jsconfig.json",
-    "test": "node --test \"tests/unit/*.test.mjs\" tests/gas.test.mjs",
+    "test": "node --test \"tests/unit/*.test.mjs\" tests/gas.test.mjs tests/inbox.test.mjs",
     "test:e2e": "node scripts/build.mjs && node tests/e2e/run.mjs",
     "test:all": "npm run typecheck && npm test && npm run test:e2e"
   },

@@ -29,12 +29,14 @@ export const QRS_ROUTE = { id: 'qrs', path: '/qrs', title: 'ประวัต�
 export const PROJECTS_ROUTE = { id: 'projects', path: '/projects', title: 'โครงการ', fullTitle: 'โครงการและสถิติเว็บไซต์', desc: 'แนบเว็บไซต์/ระบบ เพื่อดูสถิติการเข้าใช้งาน',
   icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/>',
   keywords: 'projects project analytics website site visitors pageviews โครงการ เว็บไซต์ สถิติ ผู้เข้าชม การใช้งาน เว็บ ติดตาม tracking', load: () => import('../modules/projects.js') };
+export const INBOX_ROUTE = { id: 'inbox', path: '/inbox', title: 'หนังสือรับเข้า', fullTitle: 'หนังสือรับเข้า (ธุรการ)', desc: 'หนังสือเวียนที่เก็บจากกลุ่ม Telegram — ตรวจและออกเลขรับ',
+  icon: '<path d="M4 13l2-8h12l2 8"/><path d="M4 13v6a1 1 0 001 1h14a1 1 0 001-1v-6h-5a3 3 0 01-6 0z"/>', keywords: 'inbox หนังสือรับเข้า หนังสือเวียน ธุรการ เลขรับ telegram เทเลแกรม ทะเบียนหนังสือ สารบรรณ', load: () => import('../modules/inbox.js') };
 export const HISTORY_ROUTE = { id: 'history', path: '/history', title: 'ประวัติ', fullTitle: 'ประวัติการใช้งาน', desc: 'ดูประวัติการใช้งานที่หน่วยงานบันทึกไว้',
   icon: ICONS.list, keywords: 'history log ประวัติ บันทึก การใช้งาน', load: () => import('../modules/history.js') };
 export const SETTINGS_ROUTE = { id: 'settings', path: '/settings', title: 'ตั้งค่า', fullTitle: 'Settings', desc: 'ธีม ความเป็นส่วนตัว สถานะระบบ',
   icon: ICONS.settings, keywords: 'settings ตั้งค่า theme ธีม dark light privacy ล้างข้อมูล', load: () => import('../modules/settings.js') };
 export const HOME_ROUTE = { id: 'home', path: '/', title: 'หน้าแรก', fullTitle: 'Dashboard', desc: 'หน้าแรก', icon: ICONS.home, keywords: 'home dashboard หน้าแรก', load: () => import('../modules/dashboard.js') };
-export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
+export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
 
 /** Parse "#/path?x=1" into {path, params}. */
 export function parseHash(hash = location.hash) {
@@ -51,7 +53,7 @@ export function navigate(path, params) {
 /** Score tools against a query (title, id, keywords). Empty query returns everything. */
 export function searchTools(query) {
   const q = query.trim().toLowerCase();
-  const all = [...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
+  const all = [...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
   if (!q) return all;
   const scored = all.map((t) => {
     const hay = `${t.title} ${t.fullTitle} ${t.id} ${t.keywords} ${t.desc}`.toLowerCase();

@@ -1,11 +1,12 @@
 /**
  * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.6.0 — QR attached to projects, QR pictures + URLs recorded in Links/Drive)
  *
- * This project has FOUR script files — keep them together:
+ * This project has FIVE script files — keep them together:
  *   Code.gs     (this file)  entry points, login/session, usage log, file archive, history
  *   Library.gs               คลังข้อมูล: browse/manage the Drive archive, tags, search index   (action "library")
  *   Links.gs                 ลิงก์ย่อ + ประวัติ QR Code + สถิติการคลิก/สแกน                    (actions "links", "go", "click")
  *   Analytics.gs             โครงการและสถิติเว็บไซต์ (แนบเว็บ/โครงการเพื่อนับผู้เข้าชม)         (actions "projects", "hit")
+ *   Inbox.gs                 หนังสือรับเข้า (ธุรการ): ดึงหนังสือเวียนจากกลุ่ม Telegram แบบเงียบ   (actions "inbox", "tg")
  *
  * Responsibilities (kept deliberately small — everything else runs in the browser):
  *   • GET  ?action=health|version        public status check
@@ -40,7 +41,7 @@
 
 var APP_VERSION = '1.6.0';
 /** Reported by ?action=health so the frontend can detect an out-of-date deployment (e.g. Code.gs without Analytics.gs wiring). */
-var APP_FEATURES = ['login', 'log', 'archive', 'history', 'library', 'links', 'qr', 'projects', 'qrx', 'qrimg'];
+var APP_FEATURES = ['login', 'log', 'archive', 'history', 'library', 'links', 'qr', 'projects', 'qrx', 'qrimg', 'inbox'];
 var TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo?id_token=';
 var VALID_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
 var MAX_BODY_CHARS = 8192;
@@ -90,6 +91,8 @@ function doPost(e) {
       case 'projects': ctx.op = 'projects:' + String(body.op || '').slice(0, 10); return respond(ctx, projects(body));  // Analytics.gs
       case 'click': return respond(ctx, lnkClick(body));                                                                // Links.gs (edge function only)
       case 'hit': return respond(ctx, anaHit(body));                                                                    // Analytics.gs (edge function only)
+      case 'inbox': ctx.op = 'inbox:' + String(body.op || '').slice(0, 10); return respond(ctx, inbox(body));           // Inbox.gs (clerks)
+      case 'tg': return respond(ctx, inbHook(body));                                                                    // Inbox.gs (edge function only; silent Telegram intake)
       default: throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');
     }
   } catch (err) { return fail(ctx, err); }
@@ -383,7 +386,7 @@ function setupSheet() {
 /**
  * Run once from the Apps Script editor (select "setup" → Run).
  * Generates SESSION_SECRET if missing and creates empty placeholders for the other properties.
- * Afterwards run, in this order:  setupSheet → setupSearchIndex (Library.gs) → setupLinks (Links.gs) → setupAnalytics (Analytics.gs).
+ * Afterwards run, in this order:  setupSheet → setupSearchIndex (Library.gs) → setupLinks (Links.gs) → setupAnalytics (Analytics.gs) → setupInbox (Inbox.gs).
  */
 function setup() {
   var p = PropertiesService.getScriptProperties();

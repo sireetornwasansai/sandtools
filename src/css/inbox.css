@@ -1,0 +1,14 @@
+/* หนังสือรับเข้า (Inbox) */
+.inb-tools { margin-bottom: .75rem; } .inb-tools input[type="search"] { flex: 1 1 260px; min-width: 0; }
+.inb-count { margin: 0 0 .6rem; font-size: .85rem; }
+.inb-list { display: grid; gap: .5rem; }
+.inb-row { display: flex; align-items: center; gap: .85rem; width: 100%; padding: .7rem .9rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.inb-row:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+.inb-row.inb-pending { border-left: 4px solid var(--primary); } .inb-row.inb-ignored { opacity: .65; }
+.inb-no { flex: 0 0 5.5rem; font-variant-numeric: tabular-nums; }
+.inb-main { flex: 1 1 auto; min-width: 0; display: grid; gap: .1rem; } .inb-main b { overflow-wrap: anywhere; } .inb-main small { overflow-wrap: anywhere; }
+.inb-ico { flex: 0 0 auto; color: var(--muted); } .inb-time { flex: 0 0 auto; font-size: .8rem; font-variant-numeric: tabular-nums; }
+.inb-two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .9rem; } .inb-links { display: flex; flex-wrap: wrap; gap: .4rem; margin: .25rem 0 .9rem; }
+.inb-meta { margin: 0 0 .5rem; font-size: .85rem; } .inb-orig { margin-top: .5rem; } .inb-orig pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; padding: .6rem; border-radius: 10px; background: var(--surface-2); font: inherit; font-size: .85rem; }
+.modal-wide:has(.inb-two) { width: min(640px, 100%); }
+@media (max-width: 640px) { .inb-two { grid-template-columns: 1fr; } .inb-time { display: none; } .inb-no { flex-basis: 4.5rem; } }
