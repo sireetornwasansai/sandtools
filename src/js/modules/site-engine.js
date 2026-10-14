@@ -525,30 +525,25 @@ export const VIEW_IDS = VIEWS.map((v) => v[0]);
 
 /** View 1 · department plan (world units). HALF = depth of one half of the floor, CORR = main corridor, HALL = the hall of one department,
  *  HEAD = the head office at its far end, COLW = widest department column. Each department: corridor → its own hall → rooms (= pages) on both sides. */
-export const DEPT = { HALF: 5.6, CORR: 1.3, HALL: 0.84, ROWS: 3, HEAD: 1.7, EDGE: 0.15, COLW: 3.9 };
-
-export function deptWorld(n) {
-  const top = Math.ceil(n / 2); const cols = Math.max(1, top); const GY = 2 * DEPT.HALF + DEPT.CORR;
-  return { GX: Math.min(17, Math.max(9.6, cols * DEPT.COLW)), GY, CY: GY / 2, top, bot: n - top };
-}
-
+export const DEPT = { HALF: 6.1, CORR: 1.4, HALL: 0.9, ROWS: 3, HEAD: 1.5, EDGE: 0.2, COLW: 4.8, GAP: 0.8, RGAP: 0.22 };   // GAP = clear space between two neighbouring departments · RGAP = clear space between two rooms of one department
+export function deptWorld(n) { const top = Math.ceil(n / 2); const cols = Math.max(1, top); const GY = 2 * DEPT.HALF + DEPT.CORR; return { GX: Math.min(20, Math.max(9.6, cols * DEPT.COLW)), GY, CY: GY / 2, top, bot: n - top }; }
 /**
  * @param {number[]} counts rooms (pages) of each department, busiest department first · first half of the departments on the back row, the rest on the front row
- * Rooms: busiest page nearest the corridor, alternating left / right of the hall (p = 0 left·row 0, p = 1 right·row 0, p = 2 left·row 1 …).
- * `ax` = where people stand in the room (hall side), `px` = where the room's model stands (far side).
+ * Rooms: busiest page nearest the corridor, alternating left / right of the hall. `ax` = where people stand (hall side), `px` = where the room's model stands (far side).
+ * Every department pad is DEPT.GAP narrower than its column, and rooms keep DEPT.RGAP between each other, so nothing touches.
  */
 export function deptLayout(counts) {
   const n = counts.length; const W = deptWorld(n); const { CORR, HALL, ROWS, HEAD, EDGE } = DEPT; const out = [];
   for (let i = 0; i < n; i++) {
-    const top = i < W.top; const cnt = top ? W.top : n - W.top; const k = top ? i : i - W.top; const slot = W.GX / cnt; const cx = (k + 0.5) * slot; const pw = Math.min(DEPT.COLW, slot);
+    const top = i < W.top; const cnt = top ? W.top : n - W.top; const k = top ? i : i - W.top; const slot = W.GX / cnt; const cx = (k + 0.5) * slot; const pw = Math.min(DEPT.COLW, slot) - DEPT.GAP;
     const x0 = cx - pw / 2; const x1 = cx + pw / 2; const ye = top ? W.CY - CORR / 2 : W.CY + CORR / 2; const dir = top ? -1 : 1;
     const head = top ? { x0: x0 + EDGE, x1: x1 - EDGE, y0: EDGE, y1: EDGE + HEAD } : { x0: x0 + EDGE, x1: x1 - EDGE, y0: W.GY - EDGE - HEAD, y1: W.GY - EDGE };
     const hall = { cx, x0: cx - HALL / 2, x1: cx + HALL / 2, y0: top ? head.y1 : ye, y1: top ? ye : head.y0 };
     const from = ye + dir * EDGE; const to = top ? head.y1 : head.y0; const rd = Math.abs(from - to) / ROWS; const rw = (pw - 2 * EDGE - HALL) / 2; const rooms = [];
     for (let p = 0; p < Math.min(ROWS * 2, Math.max(0, counts[i] || 0)); p++) {
-      const row = p >> 1; const side = p & 1 ? 1 : -1; const ya = from + dir * row * rd; const yb = ya + dir * rd; const y0 = Math.min(ya, yb); const y1 = Math.max(ya, yb);
+      const row = p >> 1; const side = p & 1 ? 1 : -1; const ya = from + dir * (row * rd + DEPT.RGAP / 2); const yb = from + dir * ((row + 1) * rd - DEPT.RGAP / 2); const y0 = Math.min(ya, yb); const y1 = Math.max(ya, yb);
       const rx0 = side < 0 ? x0 + EDGE : hall.x1; const rx1 = side < 0 ? hall.x0 : x1 - EDGE; const c = [(rx0 + rx1) / 2, (y0 + y1) / 2];
-      rooms.push({ p, row, side, x0: rx0, x1: rx1, y0, y1, c, w: rw, d: rd, door: [side < 0 ? rx1 : rx0, c[1]], ax: side < 0 ? rx1 - 0.3 : rx0 + 0.3, px: side < 0 ? rx0 + rw * 0.36 : rx1 - rw * 0.36 });
+      rooms.push({ p, row, side, x0: rx0, x1: rx1, y0, y1, c, w: rw, d: Math.abs(y1 - y0), door: [side < 0 ? rx1 : rx0, c[1]], ax: side < 0 ? rx1 - 0.3 : rx0 + 0.3, px: side < 0 ? rx0 + rw * 0.36 : rx1 - rw * 0.36 });
     }
     out.push({ top, dir, pad: { x0, x1, y0: top ? 0 : ye, y1: top ? ye : W.GY }, hall, mouth: [cx, ye], head, c: [cx, (head.y0 + head.y1) / 2], rooms });
   }
@@ -559,8 +554,10 @@ export function deptStand(r, rank) { const q = rank % 6; return [r.ax + r.side *
 /** Where people without a page stand: at the head office, at the end of the hall. */
 export function headStand(d, rank) { const q = rank % 6; return [d.hall.cx + ((q % 3) - 1) * 0.24, (d.top ? d.head.y1 + 0.22 : d.head.y0 - 0.22) - d.dir * Math.floor(q / 3) * 0.22]; }
 
-/** View 2 · hospital plan: front plaza (road with the two gates) · lobby with the tower sign · back and front rooms along a spine corridor, one room per system. */
-export const HOSP = { GX: 15, GY: 13, CY: 10.6, X0: 0.25, Y0: 0.25, RD: 2.4, SP: 1.1, LOB: [6, 9], WINGW: 5.75 };
+/** View 2 · hospital campus (seen from the south-east): the main building stands at the very BACK so it never hides a system · in front of it the avenue (main entrance) and, left and right of it, the wings:
+ *  a back row and a front row of system buildings with the walking street (spine) between them · car parks fill the land beside the building · the front and the east edge of the campus are public roads.
+ *  Every length is a clear space, so rooms never touch (GAP_X between neighbours in a row). */
+export const HOSP = { X0: 0.4, Y0: 0.4, BLD: 5.2, YARD: 0.8, ROOM_W: 2.0, ROOM_D: 2.0, GAP_X: 0.7, SP: 1.3, AVE: 2.4, AVE_GAP: 0.45, SIDE: 0.4, WALK: 0.4, ROAD: 2.2, MIN_COLS: 2 };
 export const HOSP_GROUPS = [
   { id: 'admin', name: 'บริหารทั่วไป', icon: '🏢', col: '#0369a1', side: -1, themes: ['ems', 'fte', 'doc', 'web'] },
   { id: 'quality', name: 'พัฒนาคุณภาพ', icon: '🩺', col: '#0f766e', side: 1, themes: ['hrd', 'ec', 'vaccine', 'plan', 'dental', 'pt', 'visit'] },
@@ -573,23 +570,31 @@ export function groupOf(s, theme = themeOf(s)) {
 }
 export const HG = (id) => HOSP_GROUPS.find((g) => g.id === id) || HOSP_GROUPS[1];
 
-/** @param {{group:string, pv:number}[]} items one per project (index = project index) → rooms aligned with `items`; busiest nearest the lobby, alternating back / front row. */
+/** @param {{group:string, pv:number}[]} items one per project → rooms aligned with `items`; busiest nearest the avenue, alternating back / front row. */
 export function hospitalLayout(items) {
-  const { X0, Y0, RD, SP, LOB, WINGW } = HOSP; const sy = Y0 + RD + SP / 2; const rooms = Array(items.length).fill(null); const wings = [];
-  for (const g of HOSP_GROUPS) {
-    const idx = items.map((it, i) => i).filter((i) => HG(items[i].group).id === g.id).sort((a, b) => items[b].pv - items[a].pv || a - b);
-    const cols = Math.max(1, Math.ceil(idx.length / 2)); const rw = Math.min(2.9, WINGW / cols);
+  const H = HOSP; const rooms = Array(items.length).fill(null);
+  const pick = HOSP_GROUPS.map((g) => ({ g, idx: items.map((it, i) => i).filter((i) => HG(items[i].group).id === g.id).sort((a, b) => items[b].pv - items[a].pv || a - b) }));
+  const colsOf = (n) => Math.max(H.MIN_COLS, Math.ceil(n / 2)); const wid = (c) => c * H.ROOM_W + (c - 1) * H.GAP_X;
+  const wl = wid(colsOf(pick.find((p) => p.g.side < 0).idx.length)); const wr = wid(colsOf(pick.find((p) => p.g.side > 0).idx.length));
+  const AX0 = H.X0 + H.SIDE + wl + H.AVE_GAP; const AX1 = AX0 + H.AVE; const XE = AX1 + H.AVE_GAP + wr + H.SIDE;
+  const BY1 = H.Y0 + H.BLD; const yb0 = BY1 + H.YARD; const yb1 = yb0 + H.ROOM_D; const yf0 = yb1 + H.SP; const yf1 = yf0 + H.ROOM_D; const YE = yf1 + H.SIDE;
+  const GX = XE + H.WALK + H.ROAD; const GY = YE + H.WALK + H.ROAD; const sy = (yb1 + yf0) / 2; const wings = [];
+  for (const { g, idx } of pick) {
+    const nc = colsOf(idx.length);
     idx.forEach((i, sIdx) => {
-      const col = sIdx >> 1; const front = !!(sIdx & 1); const rx0 = g.side < 0 ? LOB[0] - (col + 1) * rw : LOB[1] + col * rw; const rx1 = rx0 + rw; const y0 = front ? Y0 + RD + SP : Y0; const y1 = y0 + RD; const c = [(rx0 + rx1) / 2, (y0 + y1) / 2];
-      rooms[i] = { i, group: g.id, front, x0: rx0, x1: rx1, y0, y1, c, w: rw, d: RD, door: [c[0], front ? y0 : y1], ax: rx0 + rw * 0.76, px: rx0 + rw * 0.33 };
+      const col = sIdx >> 1; const front = !!(sIdx & 1);
+      const rx0 = g.side < 0 ? AX0 - H.AVE_GAP - (col + 1) * H.ROOM_W - col * H.GAP_X : AX1 + H.AVE_GAP + col * (H.ROOM_W + H.GAP_X); const rx1 = rx0 + H.ROOM_W;
+      const y0 = front ? yf0 : yb0; const y1 = y0 + H.ROOM_D; const c = [(rx0 + rx1) / 2, (y0 + y1) / 2];
+      rooms[i] = { i, group: g.id, front, x0: rx0, x1: rx1, y0, y1, c, w: H.ROOM_W, d: H.ROOM_D, door: [c[0], front ? y0 : y1], ax: rx0 + H.ROOM_W * 0.76, px: rx0 + H.ROOM_W * 0.33 };
     });
-    wings.push({ id: g.id, side: g.side, count: idx.length, x0: g.side < 0 ? LOB[0] - cols * rw : LOB[1], x1: g.side < 0 ? LOB[0] : LOB[1] + cols * rw });
+    wings.push({ id: g.id, side: g.side, count: idx.length, cols: nc, x0: g.side < 0 ? AX0 - H.AVE_GAP - wid(nc) : AX1 + H.AVE_GAP, x1: g.side < 0 ? AX0 - H.AVE_GAP : AX1 + H.AVE_GAP + wid(nc) });
   }
-  return { rooms, wings, sy, lobby: { x0: LOB[0], x1: LOB[1], y0: Y0, y1: Y0 + 2 * RD + SP }, gate: [(LOB[0] + LOB[1]) / 2, Y0 + 2 * RD + SP] };
+  const gx = (AX0 + AX1) / 2;
+  return { rooms, wings, sy, avenue: { x0: AX0, x1: AX1 }, lobby: { x0: AX0, x1: AX1, y0: H.Y0, y1: BY1 }, gate: [gx, BY1], bld: { cx: gx, y0: H.Y0, y1: BY1 }, rows: { back: [yb0, yb1], front: [yf0, yf1] }, campus: { x0: 0, y0: 0, x1: XE, y1: YE }, road: { w: H.ROAD, front: [GY - H.ROAD, GY], east: [GX - H.ROAD, GX], walk: H.WALK }, lots: [{ x0: H.X0 + 0.25, x1: AX0 - 0.3, y0: H.Y0 + 0.3, y1: BY1 - 0.1 }, { x0: AX1 + 0.3, x1: XE - 0.25, y0: H.Y0 + 0.3, y1: BY1 - 0.1 }], world: { GX, GY } };
 }
 /** Where the rank-th person of a hospital room stands (2 columns x 3 rows, beside the room's model). */
 export function hospStand(r, rank) { const q = rank % 6; return [r.ax - 0.3 * (q % 2), r.c[1] + (((q >> 1) % 3) - 1) * 0.44]; }
-/** People come OUT of the main hospital building (the staff of the organisation, not outsiders): through its side door on the spine, on the side of the wing where their system building stands. */
-export function hospDoor(L, r) { const west = r.x1 <= L.lobby.x0 + 1e-6; return [west ? L.lobby.x0 + 0.3 : L.lobby.x1 - 0.3, L.sy]; }
-/** Walk along the spine path (the open-air street between the system buildings) to the building's door; reverse it for the way back. */
-export function hospRoute(L, r) { return [[r.door[0], L.sy], r.door]; }
+/** People come OUT of the main hospital building (the staff): through its front door at the top of the avenue. */
+export function hospDoor(L) { return [L.gate[0], L.gate[1] + 0.12]; }
+/** Down the avenue to the walking street (spine), along it to the room's door; reverse it for the way back. */
+export function hospRoute(L, r) { return [[L.gate[0], L.sy], [r.door[0], L.sy], r.door]; }

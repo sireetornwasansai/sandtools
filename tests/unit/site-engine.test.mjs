@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { pageKey, pageKind, pageLabel, normalizePages, pageJourneys, nextPages, pageInsights, pagesCsv, makeSamplePages, pagesFromStats, themeOf, THEMES, normalizeFloor, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample, MAX_SITES, MAX_FIGURES, DEFAULTS,
   usageRank, asJourneys, busiestDay, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, dayLabel, addDays, MODES, MODE_IDS, MAX_DAY_FIGURES, REPLAY_PRIVACY,
   WING_MAX, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext,
-  DEPT, deptWorld, deptLayout, deptStand, headStand, HOSP, HOSP_GROUPS, groupOf, hospitalLayout, hospStand, hospRoute, VIEW_IDS } from '../../src/js/modules/site-engine.js';
+  DEPT, deptWorld, deptLayout, deptStand, headStand, HOSP, HOSP_GROUPS, groupOf, hospitalLayout, hospStand, hospRoute, hospDoor, VIEW_IDS } from '../../src/js/modules/site-engine.js';
 
 const sample = () => makeSample(30);
 
@@ -173,7 +173,7 @@ test('wingPick: deterministic, follows the page views, -1 when there is nothing 
 });
 test('deptLayout: rooms inside their department, beside the hall, below the head office; busiest nearest the corridor', () => {
   for (const n of [1, 2, 3, 5, 8]) {
-    const W = deptWorld(n); const L = deptLayout(Array.from({ length: n }, (_, i) => (i % 2 ? 6 : 3))); assert.equal(L.length, n); assert.ok(W.GX >= 9.6 && W.GX <= 17); assert.ok(Math.abs(W.GY - 12.5) < 1e-9);
+    const W = deptWorld(n); const L = deptLayout(Array.from({ length: n }, (_, i) => (i % 2 ? 6 : 3))); assert.equal(L.length, n); assert.ok(W.GX >= 9.6 && W.GX <= 20); assert.ok(Math.abs(W.GY - (2 * DEPT.HALF + DEPT.CORR)) < 1e-9);
     L.forEach((d, i) => {
       assert.equal(d.top, i < W.top); assert.equal(d.rooms.length, i % 2 ? 6 : 3); assert.ok(d.pad.x0 >= 0 && d.pad.x1 <= W.GX + 1e-9);
       assert.ok(d.top ? d.mouth[1] <= W.CY - DEPT.CORR / 2 + 1e-9 : d.mouth[1] >= W.CY + DEPT.CORR / 2 - 1e-9, 'hall opens on the corridor edge');
@@ -188,24 +188,34 @@ test('deptLayout: rooms inside their department, beside the hall, below the head
   }
   assert.equal(deptLayout([0, 0])[0].rooms.length, 0);
 });
+test('deptLayout: nothing touches — departments keep DEPT.GAP apart and rooms keep DEPT.RGAP apart', () => {
+  const L = deptLayout(Array.from({ length: 8 }, () => 6));
+  for (const row of [L.filter((d) => d.top), L.filter((d) => !d.top)]) for (let i = 1; i < row.length; i++) assert.ok(row[i].pad.x0 - row[i - 1].pad.x1 >= DEPT.GAP - 1e-9, 'departments are apart');
+  for (const d of L) for (const a of d.rooms) for (const b of d.rooms) if (a.p < b.p && a.side === b.side) assert.ok(Math.abs(a.c[1] - b.c[1]) - a.d >= DEPT.RGAP - 1e-9, 'rooms are apart');
+});
 test('groupOf: vehicle + FTE → general administration, HRD / EC / vaccine → quality development, tag overrides', () => {
   const g = (name, tags = []) => groupOf({ name, url: '', key: 'k', tags });
   assert.equal(g('ระบบยานพาหนะ (SAND)'), 'admin'); assert.equal(g('ระบบรายงาน FTE'), 'admin');
   assert.equal(g('HRD training'), 'quality'); assert.equal(g('จริยธรรมการวิจัย EC'), 'quality'); assert.equal(g('ห้องวัคซีน'), 'quality');
   assert.equal(g('ห้องวัคซีน', ['group:admin']), 'admin'); assert.equal(HOSP_GROUPS.length, 2);
 });
-test('hospitalLayout: wings by group, busiest nearest the lobby, rooms inside the building, routes stay on the floor', () => {
+test('hospitalLayout: main building at the back, wings in front of it, busiest nearest the avenue, nothing touches, routes stay on the floor', () => {
   for (const n of [1, 3, 8]) {
-    const items = Array.from({ length: n }, (_, i) => ({ group: i % 3 ? 'quality' : 'admin', pv: 100 - i })); const L = hospitalLayout(items);
+    const items = Array.from({ length: n }, (_, i) => ({ group: i % 3 ? 'quality' : 'admin', pv: 100 - i })); const L = hospitalLayout(items); const { GX, GY } = L.world;
     assert.equal(L.rooms.length, n);
     L.rooms.forEach((r, i) => {
-      assert.ok(r && r.group === items[i].group); assert.ok(r.x0 >= HOSP.X0 - 1e-9 && r.x1 <= HOSP.GX && r.y0 >= HOSP.Y0 - 1e-9 && r.y1 <= L.lobby.y1 + 1e-9);
-      assert.ok(r.group === 'admin' ? r.x1 <= HOSP.LOB[0] + 1e-9 : r.x0 >= HOSP.LOB[1] - 1e-9, 'wing side'); assert.ok(r.front ? r.door[1] === r.y0 : r.door[1] === r.y1, 'door faces the spine');
+      assert.ok(r && r.group === items[i].group);
+      assert.ok(r.x0 >= HOSP.X0 - 1e-9 && r.x1 <= L.campus.x1 + 1e-9 && r.y0 >= L.lobby.y1 + HOSP.YARD - 1e-9 && r.y1 <= L.campus.y1 + 1e-9, 'rooms in front of the building, inside the campus');
+      assert.ok(r.group === 'admin' ? r.x1 <= L.avenue.x0 + 1e-9 : r.x0 >= L.avenue.x1 - 1e-9, 'wing side'); assert.ok(r.front ? r.door[1] === r.y0 : r.door[1] === r.y1, 'door faces the spine');
       const st = hospStand(r, i); assert.ok(st[0] > r.x0 && st[0] < r.x1 && st[1] > r.y0 && st[1] < r.y1);
-      for (const [x, y] of hospRoute(L, r)) assert.ok(x >= 0 && x <= HOSP.GX && y >= 0 && y <= HOSP.GY);
+      for (const [x, y] of [hospDoor(L, r), ...hospRoute(L, r)]) assert.ok(x >= 0 && x <= GX && y >= 0 && y <= GY, 'route stays on the floor');
+      L.rooms.forEach((o, k) => { if (k > i && o.front === r.front && o.group === r.group) assert.ok(o.x0 >= r.x1 + HOSP.GAP_X - 1e-9 || r.x0 >= o.x1 + HOSP.GAP_X - 1e-9, 'rooms in a row are apart'); });
     });
+    assert.ok(L.road.front[0] >= L.campus.y1 && L.road.east[0] >= L.campus.x1, 'roads run along the front and the right side');
+    assert.ok(L.bld.y1 <= L.rows.back[0] - HOSP.YARD + 1e-9, 'the building is behind every row, so it hides nothing');
+    for (const lot of L.lots) assert.ok(lot.x1 > lot.x0 && lot.y1 > lot.y0 && lot.y1 <= L.bld.y1);
   }
-  const L2 = hospitalLayout([{ group: 'admin', pv: 1 }, { group: 'admin', pv: 9 }]); assert.ok(L2.rooms[1].x1 >= L2.rooms[0].x1, 'busiest nearest the lobby'); assert.deepEqual(VIEW_IDS, ['dept', 'hospital']);
+  const L2 = hospitalLayout([{ group: 'admin', pv: 1 }, { group: 'admin', pv: 9 }]); assert.ok(L2.rooms[1].x1 >= L2.rooms[0].x1, 'busiest nearest the avenue'); assert.deepEqual(VIEW_IDS, ['dept', 'hospital']); assert.ok(hospitalLayout([]).world.GX > 0);
 });
 test('replay events carry the page: normalizeReplay → replayVisitors → asJourneys', () => {
   const rep = normalizeReplay(rawReplay({ sites: [{ key: 'a', n: 3, fresh: 2, back: 1, pgs: ['/Form.html?x=1', '/'], ev: [[600, 1, 0, 0], [605, 2, 0, 1], [700, 1, 1, 7], [710, 3, 0]] }] }));

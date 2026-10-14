@@ -21,8 +21,11 @@ test('sample data: HRD and EC are single-file apps with role mixes; every sample
   for (const th of ['hrd', 'ec']) { const s = d.sites.find((x) => themeOf(x) === th); if (!s) continue; const pg = makeSamplePages(s, 30); assert.ok(pg.pages.every((p) => p.path.startsWith('/#/')), th); assert.ok(pg.pages.some((p) => Object.keys(p.rl).length), th); for (const p of pg.pages) for (const k of Object.keys(p.rl)) assert.ok(ROLE_IDS.includes(k)); }
 });
 
-test('hospital: people come out of the side door of the main building on the spine and walk along it to their building', () => {
-  const L = hospitalLayout([{ group: 'admin', pv: 5 }, { group: 'quality', pv: 9 }, { group: 'quality', pv: 2 }]);
-  for (const r of L.rooms) { const e = hospDoor(L, r); assert.equal(e[1], L.sy); assert.ok(e[0] >= L.lobby.x0 && e[0] <= L.lobby.x1, 'inside the main building footprint'); assert.equal(r.x1 <= L.lobby.x0 + 1e-6, e[0] < (L.lobby.x0 + L.lobby.x1) / 2, 'door on the wing side');
-    for (const q of hospRoute(L, r)) assert.ok(q[0] >= 0 && q[0] <= HOSP.GX && q[1] >= 0 && q[1] <= HOSP.GY); }
+test('hospital: people come out of the front door of the main building (back of the campus), down the avenue, then along the spine to their building', () => {
+  const L = hospitalLayout([{ group: 'admin', pv: 5 }, { group: 'quality', pv: 9 }, { group: 'quality', pv: 2 }]); const { GX, GY } = L.world;
+  for (const r of L.rooms) {
+    const e = hospDoor(L, r); assert.ok(e[0] >= L.avenue.x0 && e[0] <= L.avenue.x1); assert.ok(e[1] >= L.bld.y1 && e[1] < L.rows.back[0]);
+    const route = hospRoute(L, r); assert.equal(route[0][0], e[0]); assert.equal(route[0][1], L.sy); assert.equal(route[1][1], L.sy); assert.deepEqual(route[2], r.door);
+    for (const q of route) assert.ok(q[0] >= 0 && q[0] <= GX && q[1] >= 0 && q[1] <= GY);
+  }
 });
