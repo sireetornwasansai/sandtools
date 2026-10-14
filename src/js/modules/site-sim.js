@@ -18,7 +18,7 @@ import { deltaChip, ago } from '../core/charts.js';
 import { THEMES, themeOf, MAX_SITES, PALETTE, IDLE_COL, DEFAULTS, hhmm, fmt, hostOf, normalizeFloor, fromListStats, pickSites, stateOf, trendOf, perFigure, visitors, timeRange, crowdPeak, summarize, insights, sitesCsv, makeSample,
   kindMeta, normalizePages, pagesFromStats, pageJourneys, nextPages, prevPages, pageInsights, pagesCsv, makeSamplePages, asJourneys,
   MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY,
-  VIEW_KEY, VIEWS, VIEW_IDS, DEPT, HOSP, HOSP_GROUPS, HG, groupOf, deptWorld, deptLayout, deptStand, headStand, hospitalLayout, hospStand, hospRoute, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext } from './site-engine.js';
+  VIEW_KEY, VIEWS, VIEW_IDS, DEPT, HOSP, HOSP_GROUPS, HG, groupOf, deptWorld, deptLayout, deptStand, headStand, hospitalLayout, hospStand, hospRoute, hospDoor, ROLES, ROLE_IDS, roleOf, roleText, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext } from './site-engine.js';
 import { drawRoom, roomColor } from './site-rooms.js';
 
 const G = 12; const CORR = 6; const ENT = [0.6, CORR]; const EXIT = [11.4, CORR]; const CAP = 16;
@@ -41,6 +41,7 @@ const PAL = {
 };
 const TITLE_FLOOR = 'โรงพยาบาลสันทราย · โครงการและเว็บไซต์ที่ดูแล';
 const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+const hx = (c, f) => `#${rgb(c).map((v) => Math.round(f <= 1 ? v * f : v + (255 - v) * (f - 1)).toString(16).padStart(2, '0')).join('')}`;   // like shade() but returns a hex colour (box() / shade() only parse hex)
 const shade = (c, f) => `rgb(${rgb(c).map((v) => Math.round(f <= 1 ? v * f : v + (255 - v) * (f - 1))).join(',')})`;
 const short = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const bkkMinutes = () => { const d = new Date(); return ((d.getUTCHours() + 7) % 24) * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60; };
@@ -160,7 +161,7 @@ export function mountSiteFloor(host, opts = {}) {
     chip.textContent = source === 'sample' ? 'ข้อมูลตัวอย่าง' : 'ข้อมูลจริง'; chip.dataset.kind = source;
     if (!ins) cv.setAttribute('aria-label', `ผัง 3 มิติ ${sites.length} โครงการ · เปิดหน้ารวม ${fmt(sm.pv)} ครั้งใน ${S.days} วัน`);
     csvBtn.disabled = false; drawAll();
-    if (view === 'dept') loadWings();
+    loadWings();
     if (mode !== 'typical') loadReplay(mode, !!R.rep);
   }
 
@@ -234,7 +235,7 @@ export function mountSiteFloor(host, opts = {}) {
   /** Walls as short segments (so a person is hidden by a wall only when really behind it). k 'y' = wall along x at y=c · 'x' = wall along y at x=c · gap = doorway. */
   function buildWalls() {
     const out = []; const T = 0.34; const EXT = '#94a3b8';
-    const seg = (k, a, b, c, hh, col, gap) => { for (let u = a; u < b - 1e-6; u += 0.4) { const v = Math.min(b, u + 0.4); const m = (u + v) / 2; if (gap && m > gap[0] && m < gap[1]) continue; out.push({ k, a: u, b: v, c, h: hh, col, d: c + m }); } };
+    const seg = (k, a, b, c, hh, col, gap, hedge) => { for (let u = a; u < b - 1e-6; u += 0.4) { const v = Math.min(b, u + 0.4); const m = (u + v) / 2; if (gap && m > gap[0] && m < gap[1]) continue; out.push({ k, a: u, b: v, c, h: hh, col, d: c + m, hedge: !!hedge }); } };
     if (!ins && view === 'dept') {
       DL.forEach((d, i) => {
         const col = colOf(i); const hy = d.top ? 1.15 : T; const hd = d.head; const gapH = [d.hall.x0, d.hall.x1];
@@ -246,7 +247,8 @@ export function mountSiteFloor(host, opts = {}) {
       });
     } else if (!ins && HL) {
       const wl = HL.wings[0]; const wr = HL.wings[1]; const xa = wl.x0; const xb = wr.x1; const yf = HL.lobby.y1; const gx = HL.gate[0];
-      seg('y', xa, xb, HOSP.Y0, 1.25, EXT); seg('y', xa, xb, yf, T, EXT, [gx - 0.6, gx + 0.6]); seg('x', HOSP.Y0, yf, xa, 1.25, EXT); seg('x', HOSP.Y0, yf, xb, T, EXT);
+      const HC = '#2f8f4e'; const lbx0 = HL.lobby.x0; const lbx1 = HL.lobby.x1;   // the campus is fenced by a trimmed hedge (the main building closes the gap in front)
+      seg('y', xa, xb, HOSP.Y0, 0.62, HC, null, true); seg('y', xa, lbx0, yf, 0.62, HC, null, true); seg('y', lbx1, xb, yf, 0.62, HC, null, true); seg('x', HOSP.Y0, yf, xa, 0.62, HC, null, true); seg('x', HOSP.Y0, yf, xb, 0.62, HC, null, true);
       HL.rooms.forEach((r, i) => {
         if (!r) return; const col = HG(r.group).col; const gd = [r.door[0] - 0.4, r.door[0] + 0.4];
         seg('x', r.y0, r.y1, r.x0, T, col); seg('x', r.y0, r.y1, r.x1, T, col); seg('y', r.x0, r.x1, r.front ? r.y0 : r.y1, T, col, gd);
@@ -257,13 +259,19 @@ export function mountSiteFloor(host, opts = {}) {
   const W_NOTE_DEPT = ' · ห้องในแผนก = หน้าย่อยของระบบนั้น (สีผนัง = แผนก) คนที่เข้ามาจะเดินตามทางเดินไปยังห้องที่ใช้จริง — คลิกห้องเพื่อเข้าไปดูภายในระบบ';
   const W_NOTE_HOSP = ' · ตึกโรงพยาบาล: ปีกซ้าย = บริหารทั่วไป ปีกขวา = พัฒนาคุณภาพ หนึ่งห้องคือหนึ่งระบบ คนเดินเข้าทางประตูหน้าตึกไปยังห้องของระบบที่ใช้จริง — คลิกห้องเพื่อเข้าไปดูภายในระบบ';
   /** Which page does each drawn person use? A real day knows it (pk); otherwise it is drawn in proportion to the page views. */
+  const mixC = {}; let mixAt = 0;
+  /** Role mix of a whole system (all its pages together), for the hospital view where people are not placed in pages. */
+  function siteMix(z) { if (mixAt !== W.at) { for (const q of Object.keys(mixC)) delete mixC[q]; mixAt = W.at; } if (mixC[z]) return mixC[z]; const w = W.map[sites[z] && sites[z].key]; const by = {}; let tot = 0; if (w) for (const u of w.units) { const q = roleOf(u); tot += q.known + q.none; for (const id of ROLE_IDS) by[id] = (by[id] || 0) + (q.by[id] || 0); } return (mixC[z] = { by, tot: Math.max(1, tot) }); }
+  function roleDraw(m, id) { const x = ((id * 2654435761) >>> 0) / 4294967296; let acc = 0; for (const r of ROLE_IDS) { acc += (m.by[r] || 0) / m.tot; if (x < acc) return r; } return ''; }
   function planWings() {
     for (const j of jr) {
-      j.pg = -1; if (view !== 'dept' || ins || !DL.length) continue;
+      j.pg = -1; j.role = ''; if (!ins && view === 'hospital') { j.role = roleDraw(siteMix(j.stops[0].zone), j.id); continue; } if (view !== 'dept' || ins || !DL.length) continue;
       const z = j.stops[0].zone; const w = W.map[sites[z] && sites[z].key]; if (!w || !DL[z] || !DL[z].rooms.length) continue;
       const g = j.pk ? w.units.findIndex((u) => u.key === j.pk) : wingPick(w, j.id); j.pg = g >= 0 && g < DL[z].rooms.length ? g : -1;
+      if (j.pg >= 0) j.role = roleDraw(roleMixOf(w.units[j.pg]), j.id);   // who stands in the room, in proportion to the roles the website reported
     }
   }
+  const roleMixOf = (u) => { const q = roleOf(u); return { by: q.by, tot: Math.max(1, q.known + q.none) }; };
   function setWingData(map) {
     W.map = map; W.at = Date.now(); W.days = S.days; W.src = S.source; W.busy = false; rebuildPlan(); planWings(); lastMin = -1; drawStatus();
     if (!ins) { drawLegend(); drawInsights(); drawTable(); drawNote(); }
@@ -297,7 +305,7 @@ export function mountSiteFloor(host, opts = {}) {
   }
   function setView(v) {
     if (!VIEW_IDS.includes(v) || v === view) return; if (ins) leave(); view = v; try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ }
-    hoverT = null; hover = -1; tip.hidden = true; rebuildPlan(); resize(); planWings(); lastMin = -1; if (v === 'dept') loadWings(); drawAll();
+    hoverT = null; hover = -1; tip.hidden = true; rebuildPlan(); resize(); planWings(); lastMin = -1; loadWings(); drawAll();
   }
   function drawViews() {
     viewEl.replaceChildren(...VIEWS.map(([id, l]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(view === id), onclick: () => setView(id) }, l)));
@@ -313,6 +321,14 @@ export function mountSiteFloor(host, opts = {}) {
     return out;
   }
 
+  /** Role mix per system (and overall), from the roles each website reports with its page views. */
+  function roleInsights() {
+    const out = []; const tot = {}; let all = 0;
+    sites.forEach((s) => { const w = W.map[s.key]; if (!w) return; const by = {}; let n = 0; for (const u of w.units) for (const x of roleOf(u).list) { by[x.id] = (by[x.id] || 0) + x.n; n += x.n; tot[x.id] = (tot[x.id] || 0) + x.n; all += x.n; }
+      if (n) out.push({ tone: 'info', text: `👥 ${s.name}: ${ROLE_IDS.filter((id) => by[id]).map((id) => `${ROLES[id].short} ${Math.round((by[id] / n) * 100)}%`).join(' · ')}` }); });
+    if (all) { const side = (tot.admin || 0) + (tot.head || 0) + (tot.officer || 0); out.unshift({ tone: 'info', text: `👥 ทุกระบบรวมกัน: ผู้ดูแล/เจ้าหน้าที่ ${Math.round((side / all) * 100)}% · ผู้ใช้ทั่วไป ${Math.round(((all - side) / all) * 100)}%` }); }
+    return out;
+  }
   function hospInsights() {
     const tot = sites.reduce((a, s) => a + s.pv, 0) || 1;
     return HOSP_GROUPS.map((g) => { const m = sites.filter((s, i) => groupOf(s, themes[i]) === g.id); const pv = m.reduce((a, s) => a + s.pv, 0); return { tone: 'info', text: `${g.icon} ปีก${g.name}: ${fmt(m.length)} ระบบ${m.length ? ` (${m.map((x) => x.name).join(', ')})` : ''} · เปิดหน้า ${fmt(pv)} ครั้ง (${Math.round((pv / tot) * 100)}% ของทั้งหมด)` }; });
@@ -363,16 +379,19 @@ export function mountSiteFloor(host, opts = {}) {
     let list;
     if (ins) list = pageInsights(ins.units, ins.flows, S.days);
     else if (dayOn()) { const base = replayInsights(R.rep, R.st, Object.fromEntries(S.all.map((x) => [x.key, x.name]))); const priv = base.pop(); list = [...base, ...insights(S.all, S.days, S.extra).filter((x) => x.tone === 'warn'), priv]; } else list = insights(S.all, S.days, S.extra);
-    if (!ins && view === 'dept') list = [...list, ...wingInsights()]; else if (!ins && view === 'hospital') list = [...list, ...hospInsights()];
+    if (!ins && view === 'dept') list = [...list, ...wingInsights(), ...roleInsights()]; else if (!ins && view === 'hospital') list = [...list, ...hospInsights(), ...roleInsights()];
     insightBox.replaceChildren(h('ul', { class: 's3-ilist' }, list.map((x) => h('li', { class: `tone-${x.tone}` }, svgIcon(x.tone === 'warn' ? ICONS.alert : x.tone === 'ok' ? ICONS.check : ICONS.eye, 18), h('span', null, x.text)))));
   }
   function drawLegend() { if (ins) legendIn(); else legendFloor(); }
+  const hasRoles = () => Object.values(W.map).some((w) => w && w.units.some((u) => roleOf(u).known));
+  const rolesLegend = () => (!ins && (deptOn() || hospOn()) && hasRoles() ? ROLE_IDS.filter((id) => Object.values(W.map).some((w) => w && w.units.some((u) => roleOf(u).by[id]))).map((id) => h('span', { class: 's3-lg' }, h('i', { class: `s3-adm s3-r-${id}` }), `จุดสีเหนือหัว = ${ROLES[id].short}`)) : []);
   function legendFloor() {
     legend.replaceChildren(...sites.map((s, i) => h('button', { type: 'button', class: `s3-lg${usageRank(s) === 0 ? ' is-live' : ''}`, title: `${stTxt(s)} · เปิดรายละเอียด`, onclick: () => open(s.key) }, h('i', { style: `background:${colOf(i)}` }), `${THEMES[themes[i]].icon} ${s.name}`, usageRank(s) === 0 ? h('em', { class: 's3-livetag' }, `● ${fmt(s.realtime)}`) : null)),
       ...(more ? [h('span', { class: 's3-lg more' }, `+${more} โครงการในตารางด้านล่าง`)] : []),
       ...(dayOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-new' }), 'ผู้ใช้ใหม่ (ครั้งแรกของวัน)'), h('span', { class: 's3-lg' }, h('i', { class: 's3-ring' }), 'ผู้ใช้เดิมที่กลับมาในวันเดียวกัน')] : []),
       ...(deptOn() ? [h('span', { class: 's3-lg' }, h('i', { class: 's3-wing' }), 'ห้องในแผนก = หน้าย่อยของระบบ (ยิ่งสีเข้มยิ่งมีคนเปิดมาก)')] : []),
-      ...(hospOn() ? HOSP_GROUPS.map((g) => h('span', { class: 's3-lg' }, h('i', { style: `background:${g.col}` }), `${g.icon} ${g.name} · ${fmt(HL.wings.find((x) => x.id === g.id).count)} ระบบ`)) : []),
+      ...rolesLegend(),
+    ...(hospOn() ? HOSP_GROUPS.map((g) => h('span', { class: 's3-lg' }, h('i', { style: `background:${g.col}` }), `${g.icon} ${g.name} · ${fmt(HL.wings.find((x) => x.id === g.id).count)} ระบบ`)) : []),
       h('span', { class: 's3-lg' }, h('i', { style: `background:${WALK}` }), 'กำลังเดินเข้า/ออก'), h('span', { class: 's3-lg' }, h('i', { style: `background:${STATE_COL.silent}` }), 'เงียบผิดปกติ'));
   }
   function drawTable() { if (ins) tableIn(); else tableFloor(); }
@@ -429,7 +448,7 @@ export function mountSiteFloor(host, opts = {}) {
     poly([P(x0, y1, a), P(x1, y1, a), P(x1, y1, b), P(x0, y1, b)], shade(col, 0.82)); poly([P(x1, y0, a), P(x1, y1, a), P(x1, y1, b), P(x1, y0, b)], shade(col, 0.66));
     poly([P(x0, y0, b), P(x1, y0, b), P(x1, y1, b), P(x0, y1, b)], shade(col, 1.08));
   }
-  function person(x, y, col, back = false, now = 0, sc = 1) {
+  function person(x, y, col, back = false, now = 0, sc = 1, role = '') {
     const [sx, sy] = P(x, y); const s = tw * 0.075 * sc;
     if (back) {   // came back the same day: gold halo on the floor, dark outline on the body, gold ring round the head
       const k = reduced ? 1 : 0.9 + 0.1 * Math.sin(now / 280 + x * 3);
@@ -440,6 +459,7 @@ export function mountSiteFloor(host, opts = {}) {
     if (back) { ctx.strokeStyle = pal.ink; ctx.lineWidth = Math.max(1.5, s * 0.4); ctx.stroke(); }
     ctx.fillStyle = '#f1c9a5'; ctx.beginPath(); ctx.arc(sx, sy - s * 4, s * 0.85, 0, 7); ctx.fill();
     if (back) { ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.5, s * 0.42); ctx.stroke(); }
+    if (role && ROLES[role]) { ctx.fillStyle = ROLES[role].col; ctx.beginPath(); ctx.arc(sx, sy - s * 5.6, s * 0.75, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, s * 0.25); ctx.stroke(); }   // coloured dot over the head = role (admin purple, head orange, officer cyan, committee green, researcher pink, general user grey)
   }
   function pill(text, x, y, color, sc = 1) {
     const kz = Math.pow(cam.z, -0.6) * sc;   // labels grow only a little when the camera zooms in
@@ -555,6 +575,13 @@ export function mountSiteFloor(host, opts = {}) {
     try { fn(); } finally { tw = t0; ox = x0; oy = y0; }
   }
   function wallDraw(q) {
+    if (q.hedge) {   // trimmed hedge: a dark green block with two lighter rounded tufts on top
+      const mid = (q.a + q.b) / 2; const dkk = pal.wk < 1 ? 0.6 : 1; const hc = hx('#2f8f4e', dkk); const hl = shade('#46b36a', dkk);
+      if (q.k === 'y') box(mid, q.c, q.b - q.a + 0.03, 0.44, q.h, hc); else box(q.c, mid, 0.44, q.b - q.a + 0.03, q.h, hc);
+      const [bx, by] = q.k === 'y' ? P(mid, q.c, Z(q.h)) : P(q.c, mid, Z(q.h)); const sg = q.k === 'y' ? 1 : -1; ctx.fillStyle = hl;
+      for (const o of [-0.1, 0.1]) { ctx.beginPath(); ctx.ellipse(bx + sg * o * tw * 0.5, by + o * tw * 0.12 * sg, tw * 0.1, tw * 0.055, 0, 0, 7); ctx.fill(); }
+      return;
+    }
     const fill = wsh(q.col, pal.wk * (q.k === 'x' ? 0.9 : 1)); const cap = wsh(q.col, pal.wk * 1.12); const e = 0.035;
     if (q.k === 'y') { faceY(q.a, q.b, q.c, 0, q.h, fill); poly([P(q.a, q.c - e, Z(q.h)), P(q.b, q.c - e, Z(q.h)), P(q.b, q.c + e, Z(q.h)), P(q.a, q.c + e, Z(q.h))], cap); }
     else { faceX(q.c, q.a, q.b, 0, q.h, fill); poly([P(q.c - e, q.a, Z(q.h)), P(q.c + e, q.a, Z(q.h)), P(q.c + e, q.b, Z(q.h)), P(q.c - e, q.b, Z(q.h))], cap); }
@@ -574,15 +601,16 @@ export function mountSiteFloor(host, opts = {}) {
   /** Walk in from the gate → along the corridor (and the hall / lobby) → stand in the room → walk out to the exit gate. */
   function planPlace(j, tt, F) {
     if (tt < j.enter || tt >= j.exit) return null;
-    const s0 = j.stops[0]; const z = s0.zone; const rank = F.rank.get(j.id) ?? 0; let route; let stand; let col = null; let state = 'work';
+    const s0 = j.stops[0]; const z = s0.zone; const rank = F.rank.get(j.id) ?? 0; let route; let stand; let col = null; let state = 'work'; let ent = ENT; let ext = EXIT;
     if (deptOn()) {
       const d = DL[z]; const r = j.pg >= 0 && d ? d.rooms[j.pg] : null; const cx = d.hall.cx;
       if (r) { stand = deptStand(r, rank); route = [[cx, CYc], [cx, r.c[1]], r.door]; const u = (W.map[sites[z].key] || { units: [] }).units[j.pg]; col = u ? roomColor(u.kind) : colOf(z); state = 'room'; }
       else { stand = headStand(d, rank); route = [[cx, CYc]]; }
-    } else { const r = HL.rooms[z]; stand = hospStand(r, rank); route = hospRoute(HL, r); }
-    if (tt < s0.start) return { pos: along([ENT, ...route, stand], (tt - j.enter) / Math.max(1, s0.start - j.enter)), state: 'walk', zone: z, rank: 0 };
-    if (tt < s0.end) return { pos: stand, state, zone: z, rank, col };
-    return { pos: along([stand, ...route.slice().reverse(), EXIT], (tt - s0.end) / Math.max(1, j.exit - s0.end)), state: 'walk', zone: z, rank: 0 };
+    } else { const r = HL.rooms[z]; stand = hospStand(r, rank); route = hospRoute(HL, r); ent = hospDoor(HL, r); ext = ent; }
+    const fade = (p) => (hospOn() ? Math.min(1, Math.hypot(p[0] - ent[0], p[1] - ent[1]) / 0.9) : 1);   // steps out of / back into the building door: fades with the distance from it
+    if (tt < s0.start) { const pos = along([ent, ...route, stand], (tt - j.enter) / Math.max(1, s0.start - j.enter)); return { pos, state: 'walk', zone: z, rank: 0, a: fade(pos) }; }
+    if (tt < s0.end) return { pos: stand, state, zone: z, rank, col, a: 1 };
+    { const pos = along([stand, ...route.slice().reverse(), ext], (tt - s0.end) / Math.max(1, j.exit - s0.end)); return { pos, state: 'walk', zone: z, rank: 0, a: fade(pos) }; }
   }
   const lineOf = (i, F) => { const s = sites[i]; const st = stateOf(s); return st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]; };
   const busyAt = (i, F) => F.at[i].length > 0 || (F.rm[i] || []).some((a2) => a2.length > 0);
@@ -613,10 +641,56 @@ export function mountSiteFloor(host, opts = {}) {
     });
   }
 
+  /** The main hospital building, after the real one (Sansai Hospital): cream tiers with tan balcony bands, purple trim and rows of windows, a purple rooftop pavilion, a tall ward block behind and a tan tower, with the name board on top. */
+  function hospBuilding(items) {
+    const gx = HL.gate[0]; const yf = HL.lobby.y1; const lx = HL.lobby.x0; const rx = HL.lobby.x1; const sy = HL.sy; const dk = pal.wk < 1 ? 0.55 : 1; const Cc = (c) => hx(c, dk);
+    const CREAM = Cc('#efe2b4'); const TAN = Cc('#c9a24e'); const TAN2 = Cc('#b68f3c'); const PUR = Cc('#7a4bc4'); const PUR2 = Cc('#9266d8'); const GLASS = Cc('#a9c9e2'); const DOOR = '#475569';
+    // one tier: a cream block with a tan balcony band + purple trim under the roof edge and rows of windows on the two faces the viewer sees (front +y, east +x)
+    const tier = (cx, cy, w, d, z0, hh, rows, skipDoor) => {
+      const x0 = cx - w / 2; const x1 = cx + w / 2; const y1 = cy + d / 2; const y0 = cy - d / 2; box(cx, cy, w, d, hh, CREAM, z0);
+      const top = z0 + hh; faceY(x0, x1, y1 + 0.004, top - 0.14, top - 0.04, TAN); faceY(x0, x1, y1 + 0.005, top - 0.2, top - 0.16, PUR); faceX(x1 + 0.004, y0, y1, top - 0.14, top - 0.04, TAN2); faceX(x1 + 0.005, y0, y1, top - 0.2, top - 0.16, PUR);
+      for (let r = 0; r < rows; r++) { const za = z0 + 0.16 + r * ((hh - 0.45) / Math.max(1, rows)); const zb = za + Math.min(0.34, (hh - 0.45) / Math.max(1, rows) - 0.08);
+        for (let x = x0 + 0.2; x < x1 - 0.3; x += 0.42) { if (skipDoor && r === 0 && Math.abs(x + 0.15 - gx) < 0.6) continue; faceY(x, x + 0.3, y1 + 0.006, za, zb, GLASS); }
+        for (let y = y0 + 0.2; y < y1 - 0.3; y += 0.42) faceX(x1 + 0.006, y, y + 0.3, za, zb, GLASS); }
+    };
+    items.push({ d: 7.2 + 1.6, f: () => {   // tall ward block at the back: balconies + purple vertical bars
+      box(7.2, 1.6, 2.5, 2.2, 4.4, CREAM);
+      for (const z of [0.2, 1.0, 1.8, 2.6, 3.4]) { faceY(5.97, 8.43, 2.701, z + 0.72, z + 0.82, TAN); for (let x = 6.05; x < 8.35; x += 0.4) faceY(x, x + 0.26, 2.702, z + 0.1, z + 0.58, GLASS); }
+      for (let x = 6.0; x < 8.45; x += 0.4) faceY(x, x + 0.06, 2.703, 0.1, 4.3, PUR);
+      for (const z of [0.9, 1.7, 2.5, 3.3, 4.1]) faceX(8.451, 0.55, 2.65, z, z + 0.1, TAN);
+    } });
+    items.push({ d: 8.4 + 2.9, f: () => {   // tan tower
+      box(8.4, 2.9, 1.2, 1.6, 3.6, TAN); box(8.4, 2.9, 1.28, 1.68, 0.1, TAN2, 3.6);
+      for (const z of [0.5, 1.3, 2.1, 2.9]) { for (const x of [7.95, 8.3, 8.65]) faceY(x, x + 0.22, 3.702, z, z + 0.45, GLASS); for (const y of [2.25, 2.65, 3.05]) faceX(9.002, y, y + 0.22, z, z + 0.45, GLASS); }
+    } });
+    items.push({ d: 7.5 + 4.55, f: () => {   // tier 1 + the entrance with its canopy
+      tier(7.5, 4.55, 3.0, 3.2, 0, 1.25, 2, true);
+      faceY(gx - 0.45, gx + 0.45, 6.152, 0, 0.8, DOOR); faceY(gx - 0.4, gx - 0.03, 6.153, 0.04, 0.74, GLASS); faceY(gx + 0.03, gx + 0.4, 6.153, 0.04, 0.74, GLASS);
+    } });
+    items.push({ d: gx + 6.15 + 0.5, f: () => { for (const x of [gx - 0.85, gx + 0.85]) box(x, 6.45, 0.1, 0.1, 0.85, CREAM); box(gx, 6.4, 2.1, 0.7, 0.08, PUR, 0.85); box(gx, 6.4, 2.16, 0.76, 0.03, TAN, 0.93); } });
+    items.push({ d: 7.45 + 4.2 + 0.2, f: () => { tier(7.45, 4.2, 2.6, 2.5, 1.25, 0.95, 1, false); } });   // tier 2
+    items.push({ d: 7.2 + 3.9 + 0.4, f: () => { tier(7.2, 3.9, 1.9, 1.7, 2.2, 0.8, 1, false); box(7.2, 3.9, 1.2, 0.9, 0.45, PUR, 3.0); box(7.2, 3.9, 1.34, 1.04, 0.07, PUR2, 3.45); } });   // tier 3 + purple rooftop pavilion
+    items.push({ d: gx + 5.35 + 0.3, f: () => {   // name board on the tier-2 roof
+      const tx = gx; box(tx, 5.35, 3.3, 0.16, 0.95, pal.brand, 2.2); const [ssx, ssy] = P(tx - 1.65, 5.431, Z(2.2)); const u = tw / 2;
+      ctx.save(); ctx.translate(ssx, ssy); ctx.transform(1, 0.5, 0, 1, 0, 0);
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0.45 * u, -0.48 * u, 0.3 * u, 0, 7); ctx.fill(); ctx.fillStyle = '#dc2626'; ctx.fillRect(0.45 * u - 0.07 * u, -0.48 * u - 0.19 * u, 0.14 * u, 0.38 * u); ctx.fillRect(0.45 * u - 0.19 * u, -0.48 * u - 0.07 * u, 0.38 * u, 0.14 * u);
+      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const cxs = 2.0 * u; const l2 = 'กลุ่มงานพัฒนาคุณภาพและระบบบริการ';
+      ctx.font = `700 ${0.27 * u}px ${font}`; ctx.fillText('โรงพยาบาลสันทราย', cxs, -0.64 * u); let fs = 0.17 * u; ctx.font = `600 ${fs}px ${font}`; const mw = ctx.measureText(l2).width; if (mw > 2.5 * u) { fs *= (2.5 * u) / mw; ctx.font = `600 ${fs}px ${font}`; } ctx.fillText(l2, cxs, -0.3 * u);
+      ctx.restore();
+    } });
+    items.push({ d: rx + sy + 0.2, f: () => { faceX(rx + 0.003, sy - 0.3, sy + 0.3, 0, 0.7, DOOR); faceX(rx + 0.004, sy - 0.26, sy - 0.02, 0.04, 0.62, GLASS); faceX(rx + 0.004, sy + 0.02, sy + 0.26, 0.04, 0.62, GLASS); box(rx + 0.2, sy, 0.5, 0.9, 0.06, PUR, 0.78); } });   // side door on the spine (east); the west door is on the hidden face
+    // covered walkway along the spine: posts + beams, kept open so nobody is hidden under it
+    const doors = HL.rooms.filter(Boolean).map((r) => r.door[0]); const xa = HL.wings[0].x0; const xb = HL.wings[1].x1;
+    const walk = (x0, x1) => { for (let x = x0; x < x1 - 0.2; x += 1.0) { const xm = Math.min(x1, x + 1.0); if (doors.some((d2) => Math.abs(d2 - x) < 0.5)) continue;
+      items.push({ d: x + sy + 0.45, f: () => { for (const y of [sy - 0.52, sy + 0.52]) box(x, y, 0.1, 0.1, 0.82, CREAM); box(x, sy, 0.09, 1.2, 0.05, TAN, 0.82); box((x + xm) / 2, sy - 0.52, xm - x, 0.07, 0.05, TAN, 0.82); box((x + xm) / 2, sy + 0.52, xm - x, 0.07, 0.05, PUR, 0.82); } }); } };
+    if (HL.wings[0].count) walk(xa + 0.3, lx); if (HL.wings[1].count) walk(rx, xb - 0.3);
+    void yf;
+  }
+
   function hospScene(items, labels, F, now, kit) {
     const { X0, Y0, RD, SP } = HOSP; const yf = HL.lobby.y1; const xa = HL.wings[0].x0; const xb = HL.wings[1].x1; const gx = HL.gate[0]; const kz = Math.pow(cam.z, -0.6); const hh = Math.max(16, tw * 0.27 * kz);
-    poly(rectPts(xa, Y0, xb, yf), pal.corr); HOSP_GROUPS.forEach((g, gi) => { const wg = HL.wings[gi]; if (wg.count) { ctx.globalAlpha = 0.1; poly(rectPts(wg.x0, Y0, wg.x1, yf), g.col); ctx.globalAlpha = 1; } });
-    ctx.globalAlpha = 0.55; poly(rectPts(xa, Y0 + RD, xb, Y0 + RD + SP), pal.grid); ctx.globalAlpha = 0.14; poly(rectPts(HL.lobby.x0, Y0, HL.lobby.x1, yf), pal.brand); ctx.globalAlpha = 1; poly(rectPts(xa, Y0, xb, yf), null, pal.brand, 2);
+    poly(rectPts(xa, Y0, xb, yf), pal.grass); HOSP_GROUPS.forEach((g, gi) => { const wg = HL.wings[gi]; if (wg.count) { ctx.globalAlpha = 0.1; poly(rectPts(wg.x0, Y0, wg.x1, yf), g.col); ctx.globalAlpha = 1; } });
+    poly(rectPts(xa, Y0 + RD, xb, Y0 + RD + SP), pal.walk); poly(rectPts(xa, Y0 + RD, xb, Y0 + RD + SP), null, pal.grid, 1); poly(rectPts(HL.lobby.x0, Y0, HL.lobby.x1, yf), pal.walk);   // paved spine street + the apron round the main building
     const mx = Math.max(1, ...sites.map((s) => s.pv)); const topKey = sm.top && sm.top.pv > 0 ? sm.top.key : '';
     HL.rooms.forEach((r, i) => {
       if (!r) return; const s = sites[i]; const st = stateOf(s); const lit = st === 'ok'; const col = colOf(i); const hov = hover === i; const k = Math.max(0.5, Math.min(0.9, r.w / 2.2, r.d / 2.7));
@@ -631,36 +705,25 @@ export function mountSiteFloor(host, opts = {}) {
     // wing banners: painted on the plaza in front of each wing
     HOSP_GROUPS.forEach((g, gi) => { const wg = HL.wings[gi]; if (!wg.count) return; const [bx, by] = P(g.side > 0 ? 9.2 : 4.2, 9.0, 0); labels.push({ x: bx, y: by, text: `${g.icon} ปีก${g.name} · ${wg.count} ระบบ`, col: g.col, sc: 1.15 }); });
     const [dx, dy] = P(gx, yf, Z(0.5)); labels.push({ x: dx, y: dy + tw * 0.34, text: 'ทางเข้าหลัก', col: pal.brand, sc: 0.8 });
-    // tower with the billboard, reception desk, trees
-    const tx = gx; items.push({ d: tx + 1.05 + 0.5, f: () => {
-      box(tx, 1.0, 2.0, 1.2, 3.6, pal.tower); for (const wx of [-0.55, 0, 0.55]) for (const wz of [0.55, 1.15, 1.75, 2.35, 2.95]) faceY(tx + wx - 0.14, tx + wx + 0.14, 1.601, wz, wz + 0.3, '#7dd3fc');
-      faceY(tx - 0.2, tx + 0.2, 1.602, 0, 0.55, '#475569');
-      box(tx, 1.0, 3.3, 0.16, 0.95, pal.brand, 3.6); const [sx, sy] = P(tx - 1.65, 1.081, Z(3.6)); const u = tw / 2;
-      ctx.save(); ctx.translate(sx, sy); ctx.transform(1, 0.5, 0, 1, 0, 0);
-      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0.45 * u, -0.48 * u, 0.3 * u, 0, 7); ctx.fill(); ctx.fillStyle = '#dc2626'; ctx.fillRect(0.45 * u - 0.07 * u, -0.48 * u - 0.19 * u, 0.14 * u, 0.38 * u); ctx.fillRect(0.45 * u - 0.19 * u, -0.48 * u - 0.07 * u, 0.38 * u, 0.14 * u);
-      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const cxs = 2.0 * u; const l2 = 'กลุ่มงานพัฒนาคุณภาพและระบบบริการ';
-      ctx.font = `700 ${0.27 * u}px ${font}`; ctx.fillText('โรงพยาบาลสันทราย', cxs, -0.64 * u); let fs = 0.17 * u; ctx.font = `600 ${fs}px ${font}`; const mw = ctx.measureText(l2).width; if (mw > 2.5 * u) { fs *= (2.5 * u) / mw; ctx.font = `600 ${fs}px ${font}`; } ctx.fillText(l2, cxs, -0.3 * u);
-      ctx.restore();
-    } });
-    items.push({ d: 8.3 + 5.2, f: () => { box(8.3, 5.1, 1.0, 0.4, 0.3, pal.desk); box(8.3, 5.1, 0.5, 0.06, 0.2, '#334155', 0.3); } });
+    hospBuilding(items);   // the main hospital building: people come out of it and walk to the system buildings
     for (const [x, y] of [[1.6, 8.4], [4.6, 12.3], [11.2, 12.3], [13.7, 8.4]]) items.push({ d: x + y, f: () => { box(x, y, 0.12, 0.12, 0.35, '#7c5a3a'); box(x, y, 0.62, 0.62, 0.42, '#22a35a', 0.35); box(x, y, 0.4, 0.4, 0.32, '#34c26f', 0.77); } });
   }
 
   function drawPlan(now) {
     const F = planState(t); const items = []; const labels = []; hits = []; whits = [];
     const kit = { ctx, P, Z, get tw() { return tw; }, pal, reduced, box, faceX, faceY, disc, poly, shade };
-    hospitalBase(now); gatePad('in', now); gatePad('out', now);
+    hospitalBase(now); if (!hospOn()) { gatePad('in', now); gatePad('out', now); }
     if (deptOn()) deptScene(items, labels, F, now, kit); else if (hospOn()) hospScene(items, labels, F, now, kit);
-    items.push(...gateItems('in', now), ...gateItems('out', now)); for (const q of PW) items.push({ d: q.d + 0.001, f: () => wallDraw(q) });
+    if (!hospOn()) items.push(...gateItems('in', now), ...gateItems('out', now)); for (const q of PW) items.push({ d: q.d + 0.001, f: () => wallDraw(q) });
     const psc = deptOn() ? 0.82 : 0.95; let here = 0; let entered = 0; let enteredBack = 0; let left = 0;
     for (const j of jr) {
       if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
       const r = planPlace(j, t, F); if (!r) continue; here += 1; if (r.state !== 'walk' && r.rank >= 6) continue;
-      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc) });
+      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => { ctx.globalAlpha = r.a == null ? 1 : r.a; person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc, j.role); ctx.globalAlpha = 1; } });
     }
     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
     labels.forEach((q) => pill(q.text, q.x, q.y, q.col, q.sc));
-    gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`);
+    if (!hospOn()) { gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`); }
     hud(F, here);
   }
 
@@ -762,7 +825,7 @@ export function mountSiteFloor(host, opts = {}) {
       pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
     });
     lanes.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.8));
-    gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`);
+    if (!hospOn()) { gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`); }
     hud(F, here);
   }
   /** Clock, counters, progress bar and the hour strip (once per drawn minute). */
@@ -837,11 +900,11 @@ export function mountSiteFloor(host, opts = {}) {
   }
   function tableIn() {
     const I = ins; const tot = I.tot || 1;
-    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, ['หน้า', 'พาธ', 'เปิดหน้า', 'สัดส่วน', 'ผู้เข้าชม', 'ออนไลน์', 'คนมักไปต่อที่'].map((x) => h('th', null, x)))),
+    tableBox.replaceChildren(h('table', { class: 's3-table' }, h('thead', null, h('tr', null, [...['หน้า', 'พาธ', 'เปิดหน้า', 'สัดส่วน', 'ผู้เข้าชม', 'ออนไลน์', 'คนมักไปต่อที่'], 'บทบาทผู้ใช้'].map((x) => h('th', null, x)))),
       h('tbody', null, I.units.map((u, i) => { const nx = (I.next[u.key] || [])[0];
         return h('tr', { class: focus === i ? 'is-on' : '' }, h('td', null, h('button', { type: 'button', class: 'rowbtn', onclick: () => focusRoom(i), title: 'ซูมไปที่ห้องนี้' }, `${kindMeta(u.kind).icon} ${u.name}`)), h('td', { class: 's3-cut', title: u.path }, u.path === '*other' ? '–' : u.path), h('td', null, fmt(u.pv)),
           h('td', null, h('span', { class: 's3-bar', title: `${Math.round((u.pv / tot) * 100)}%` }, h('i', { style: `width:${Math.max(2, (u.pv / tot) * 100)}%;background:${roomColor(u.kind)}` }), h('em', null, `${Math.round((u.pv / tot) * 100)}%`))),
-          h('td', null, fmt(u.uv)), h('td', null, fmt(u.realtime)), h('td', null, nx ? `${unitName(nx.to)} (${fmt(nx.n)})` : '–')); }))));
+          h('td', null, fmt(u.uv)), h('td', null, fmt(u.realtime)), h('td', { title: roleText(u) }, roleOf(u).known ? roleOf(u).list.slice(0, 2).map((x) => `${ROLES[x.id].short} ${x.pct}%`).join(' / ') : '–'), h('td', null, nx ? `${unitName(nx.to)} (${fmt(nx.n)})` : '–')); }))));
   }
   function drawRoomCard() {
     roomCard.hidden = !ins; if (!ins) return; const I = ins; const u = focus >= 0 ? I.units[focus] : null;
@@ -869,7 +932,7 @@ export function mountSiteFloor(host, opts = {}) {
     const w = W.map[sites[tl.i].key]; const u = w && w.units[tl.p]; if (!u) { tip.hidden = true; return; }
     const sr = stage.getBoundingClientRect(); const km = kindMeta(u.kind); const nx = wingNext(w, u.key); const nu = nx ? w.units.find((x) => x.key === nx.to) : null;
     tip.replaceChildren(h('b', null, `${km.icon} ${u.name}`), h('small', null, `${sites[tl.i].name} · ${km.label} · ${u.path}`), h('span', null, `${fmt(u.pv)} ครั้ง (${Math.round((u.pv / (w.tot || 1)) * 100)}% ของระบบนี้) · ผู้เข้าชม ${fmt(u.uv)}${u.realtime ? ` · ออนไลน์ ${fmt(u.realtime)}` : ''}`),
-      nu ? h('small', null, `มักไปต่อ → ${nu.name} (${fmt(nx.n)})`) : null, h('small', null, 'คลิกเพื่อเข้าไปดูภายในระบบและซูมที่หน้านี้'));
+      nu ? h('small', null, `มักไปต่อ → ${nu.name} (${fmt(nx.n)})`) : null, roleOf(u).known ? h('small', null, `👥 ${roleText(u)}`) : null, h('small', null, 'คลิกเพื่อเข้าไปดูภายในระบบและซูมที่หน้านี้'));
     tip.hidden = false; const px = ev.clientX - sr.left; tip.style.left = `${Math.min(Math.max(8, px + 14), Math.max(8, sr.width - 230))}px`; tip.style.top = `${Math.max(8, ev.clientY - sr.top + 14)}px`;
   }
   function showTip(i, ev) {
