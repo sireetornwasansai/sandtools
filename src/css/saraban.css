@@ -1,0 +1,75 @@
+/* สารบรรณ — uses the app's colour tokens so light/dark both work. Touch targets are >= 44px for the clerks' phones. */
+.sar .btn-sm { padding: .3rem .7rem; font-size: .85rem; min-height: 36px; }
+.sar .btn-lg { padding: .75rem 1.4rem; font-size: 1.05rem; min-height: 48px; }
+.sar-tabs { display: flex; gap: .35rem; overflow-x: auto; padding-bottom: .4rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
+.sar-tab { flex: none; min-height: 44px; padding: .45rem 1rem; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.sar-tab:hover { background: var(--primary-soft); }
+.sar-tab.on, .sar-tab[aria-selected="true"] { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+.sar-view[aria-busy="true"]::before { content: "กำลังโหลด…"; display: block; color: var(--muted); padding: 1rem 0; }
+.sar-h3 { font-size: 1rem; margin: 1.1rem 0 .5rem; }
+.sar-empty { padding: 1rem 0; text-align: center; }
+.sar-list { display: flex; flex-direction: column; gap: .55rem; margin: .6rem 0; }
+
+/* rows (register, my work, track, units) */
+.sar-row { display: grid; grid-template-columns: 5.4rem 1fr; gap: .8rem; width: 100%; text-align: left; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--border); border-radius: var(--radius); padding: .8rem .9rem; margin-bottom: .55rem; cursor: pointer; min-height: 44px; }
+.sar-row:hover { border-color: var(--primary); }
+.sar-row:focus-visible { outline: 0; box-shadow: 0 0 0 4px var(--primary-ring); }
+.sar-row.tone-bad { border-left-color: var(--error); } .sar-row.tone-warn { border-left-color: var(--warning); } .sar-row.tone-ok { border-left-color: var(--success); } .sar-row.tone-info { border-left-color: var(--primary); } .sar-row.tone-muted { border-left-color: var(--border); opacity: .75; }
+.sar-no { display: flex; flex-direction: column; align-items: flex-start; font-variant-numeric: tabular-nums; }
+.sar-no strong { font-size: 1.05rem; } .sar-no span { font-size: .75rem; color: var(--muted); }
+.sar-main { min-width: 0; } .sar-subject { font-weight: 600; overflow-wrap: anywhere; } .sar-sub { font-size: .85rem; margin-top: .1rem; overflow-wrap: anywhere; }
+.sar-badges { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
+.sar-badge { display: inline-flex; align-items: center; padding: .12rem .6rem; border-radius: 999px; font-size: .76rem; font-weight: 600; border: 1px solid var(--border); background: var(--surface-2, var(--surface)); color: var(--text-2); text-decoration: none; }
+.sar-badge.sar-bad { background: var(--error-bg); color: var(--error); border-color: var(--error); } .sar-badge.sar-warn { background: var(--warning-bg); color: var(--warning); border-color: var(--warning); }
+.sar-badge.sar-ok { background: var(--success-bg); color: var(--success); border-color: var(--success); } .sar-badge.sar-info { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+
+/* dashboard */
+.sar-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .6rem; margin-bottom: 1rem; }
+.sar-kpi { display: flex; flex-direction: column; gap: .15rem; text-align: left; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--primary); border-radius: var(--radius); padding: .8rem .9rem; cursor: pointer; min-height: 44px; }
+.sar-kpi strong { font-size: 1.9rem; line-height: 1; font-variant-numeric: tabular-nums; } .sar-kpi span { color: var(--muted); font-size: .85rem; }
+.sar-kpi.tone-bad { border-top-color: var(--error); } .sar-kpi.tone-warn { border-top-color: var(--warning); } .sar-kpi.tone-ok { border-top-color: var(--success); }
+.sar-queue-banner { display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between; align-items: center; border-color: var(--warning); background: var(--warning-bg); margin-bottom: 1rem; }
+.sar-queue-banner .sar-badge { margin-left: .5rem; }
+.sar-bars { display: flex; align-items: flex-end; gap: .35rem; height: 120px; padding-top: .3rem; }
+.sar-bar { position: relative; flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 2px; }
+.sar-bar i { display: block; width: 42%; min-height: 2px; border-radius: 3px 3px 0 0; } .sar-bar .in, .sar-dot.in { background: var(--primary); } .sar-bar .out, .sar-dot.out { background: var(--success); }
+.sar-bar span { position: absolute; bottom: -1.25rem; font-size: .68rem; color: var(--muted); } .sar-bars { margin-bottom: 1.4rem; }
+.sar-dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; margin-right: .25rem; }
+.sar-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin: 1rem 0; } .sar-two .card + .card { margin-top: 0; }
+.sar-line { display: flex; justify-content: space-between; align-items: center; gap: .8rem; padding: .5rem 0; border-bottom: 1px solid var(--border); } .sar-line:last-child { border-bottom: 0; } .sar-line.stale { background: var(--warning-bg); padding-inline: .5rem; border-radius: 8px; }
+.sar-bignum { display: flex; flex-direction: column; } .sar-bignum strong { font-size: 2.6rem; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--primary); }
+.sar-done { border-color: var(--success); background: var(--success-bg); } .sar-done p { margin: .4rem 0; }
+
+/* filters + forms */
+.sar-filters .sar-fgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .5rem; margin: .6rem 0; align-items: center; }
+.sar-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin-bottom: .8rem; }
+.sar-seg button { min-height: 44px; padding: .4rem 1.1rem; border: 0; background: var(--surface); color: var(--text-2); font: inherit; font-weight: 600; cursor: pointer; }
+.sar-seg button.on { background: var(--primary); color: var(--primary-contrast); }
+.sar-check { display: flex; align-items: center; gap: .55rem; min-height: 44px; cursor: pointer; }
+.sar-search { display: flex; gap: .5rem; flex-wrap: wrap; } .sar-search input { flex: 1 1 260px; }
+.sar-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0 1rem; } .sar-span { grid-column: 1 / -1; }
+.sar-drop { display: flex; flex-direction: column; align-items: center; gap: .35rem; width: 100%; padding: 1.4rem 1rem; text-align: center; font: inherit; color: var(--text-2); background: var(--surface-2, var(--surface)); border: 2px dashed var(--primary); border-radius: var(--radius); cursor: pointer; min-height: 44px; }
+.sar-drop:hover { background: var(--primary-soft); }
+.sar-fileline { display: flex; align-items: center; gap: .4rem; color: var(--muted); margin: .5rem 0 0; } .sar-status { min-height: 1.4em; margin: .4rem 0; }
+.sar input.sar-auto, .sar textarea.sar-auto, .sar select.sar-auto { background: var(--primary-soft); border-color: var(--primary); }
+.sar-submit { margin-top: 1rem; position: sticky; bottom: 0; background: var(--surface); padding: .7rem 0; z-index: 2; }
+.sar-unit-row { display: grid; grid-template-columns: 1fr; gap: .4rem; padding: .35rem .5rem; border-radius: 10px; border: 1px solid transparent; }
+.sar-unit-row.on { border-color: var(--primary); background: var(--primary-soft); }
+.sar-unit-opts { display: none; gap: .4rem; flex-wrap: wrap; } .sar-unit-row.on .sar-unit-opts { display: flex; }
+.sar-route-wrap input[type="text"] { margin-bottom: .6rem; }
+.sar-party { display: grid; grid-template-columns: 2fr 1.4fr 1.6fr auto; gap: .4rem; margin-bottom: .5rem; align-items: center; } .sar-party input[hidden], .sar-party select[hidden] { display: none; }
+@media (max-width: 720px) { .sar-party { grid-template-columns: 1fr; } .sar-row { grid-template-columns: 1fr; gap: .3rem; } .sar-no { flex-direction: row; align-items: baseline; gap: .5rem; } }
+
+/* queue */
+.sar-queue { border-color: var(--warning); } .sar-qrow { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .6rem; padding: .7rem 0; border-bottom: 1px solid var(--border); } .sar-qrow:last-child { border-bottom: 0; }
+
+/* detail */
+.sar-kvs { display: grid; gap: .1rem; margin: .8rem 0; } .sar-kv { display: grid; grid-template-columns: 8.5rem 1fr; gap: .6rem; padding: .35rem 0; border-bottom: 1px dashed var(--border); } .sar-kv > span { color: var(--muted); font-size: .88rem; } .sar-kv > div { overflow-wrap: anywhere; }
+.sar-files { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; } .sar-file { display: inline-flex; align-items: center; gap: .2rem; padding: .4rem .8rem; border: 1px solid var(--border); border-radius: 999px; color: var(--primary); text-decoration: none; min-height: 40px; }
+.sar-recv { border: 1px solid var(--border); border-left: 5px solid var(--primary); border-radius: 10px; padding: .7rem .8rem; margin-bottom: .6rem; } .sar-recv.st-pending { border-left-color: var(--warning); } .sar-recv.st-done { border-left-color: var(--success); } .sar-recv.st-returned { border-left-color: var(--error); }
+.sar-recv-h { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .3rem; }
+.sar-timeline { list-style: none; margin: 0; padding: 0 0 0 1rem; border-left: 2px solid var(--border); } .sar-timeline li { position: relative; padding: .3rem 0 .6rem .8rem; } .sar-timeline li::before { content: ""; position: absolute; left: -1.38rem; top: .75rem; width: .6rem; height: .6rem; border-radius: 50%; background: var(--primary); }
+.sar-steps { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; } .sar-step { font-size: .8rem; padding: .15rem .6rem; border-radius: 999px; background: var(--surface-2, var(--surface)); border: 1px solid var(--border); } .sar-step.st-done { background: var(--success-bg); color: var(--success); } .sar-step.st-pending { background: var(--warning-bg); color: var(--warning); } .sar-step.st-returned { background: var(--error-bg); color: var(--error); }
+.sar-track { padding: .5rem .7rem; } .sar-track .sar-row { border: 0; margin: 0; padding: .3rem 0; }
+.sar-pool { display: grid; gap: .2rem; margin-bottom: .8rem; }
+@media print { .sar-tabs, .sar-submit, .btn-row { display: none !important; } }

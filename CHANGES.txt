@@ -1,0 +1,5 @@
+ไฟล์ใหม่:  gas/Saraban.gs · src/js/modules/saraban.js · saraban-forms.js · saraban-engine.js · src/css/saraban.css
+           tests/saraban.test.mjs · tests/unit/saraban-engine.test.mjs · docs/SARABAN.md
+ไฟล์แก้:   gas/Code.gs (v1.7.0: action saraban, อัปโหลดไฟล์ใหญ่) · gas/Inbox.gs (ใช้ตัวนับเลขเดียวกับสารบรรณ) · gas/appsscript.json (ตามฉบับจริงของคุณ)
+           src/js/core/routes.js · src/js/core/api.js · src/js/main.js · src/js/modules/history.js · package.json (เพิ่มทดสอบ)
+ไม่ต้องแตะ: gas/Analytics.gs, Library.gs, Links.gs (ใช้ของที่คุณมีอยู่)

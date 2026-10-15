@@ -315,15 +315,21 @@ function inbUpdate(sc, u, b, accept) {
   var sh = inbSheet(), rows = inbAll(sh), o = null;
   rows.forEach(function (x) { if (x.id === String(b.id || '') && x.status !== 'deleted') o = x; });
   if (!o) throw httpError('NOT_FOUND', 'ไม่พบรายการนี้');
+  if (o.status === 'accepted' && typeof sarRegisterFromInbox === 'function') throw httpError('LOCKED', 'หนังสือที่ลงรับแล้วแก้ไขได้ที่หน้า “สารบรรณ” (เพื่อให้ทะเบียนตรงกัน)');
   inbApply(o, b);
   if (accept && o.status !== 'accepted') {
     if (!o.subject) throw httpError('BAD_REQUEST', 'กรุณาระบุเรื่องก่อนรับหนังสือ');
-    var yr = inbYearBE(), no = String(b.no || '').trim();
-    if (no) {
-      if (!/^\d{1,6}\/\d{4}$/.test(no)) throw httpError('BAD_REQUEST', 'เลขรับต้องอยู่ในรูปแบบ เลข/ปี พ.ศ. เช่น 125/' + yr);
-      if (rows.some(function (x) { return x.id !== o.id && x.regNo === no && x.status !== 'deleted'; })) throw httpError('DUPLICATE', 'เลขรับ ' + no + ' ถูกใช้แล้ว');
-    } else no = inbNextNo(rows, yr);
-    o.regNo = no; o.regDate = Utilities.formatDate(new Date(), LNK_TZ, 'yyyy-MM-dd'); o.status = 'accepted';
+    if (typeof sarRegisterFromInbox === 'function') {
+      // Saraban.gs owns the numbering: ONE counter and ONE register for this page and the สารบรรณ page (no duplicate เลขรับ).
+      sarRegisterFromInbox(sc, o, b);
+    } else {
+      var yr = inbYearBE(), no = String(b.no || '').trim();
+      if (no) {
+        if (!/^\d{1,6}\/\d{4}$/.test(no)) throw httpError('BAD_REQUEST', 'เลขรับต้องอยู่ในรูปแบบ เลข/ปี พ.ศ. เช่น 125/' + yr);
+        if (rows.some(function (x) { return x.id !== o.id && x.regNo === no && x.status !== 'deleted'; })) throw httpError('DUPLICATE', 'เลขรับ ' + no + ' ถูกใช้แล้ว');
+      } else no = inbNextNo(rows, yr);
+      o.regNo = no; o.regDate = Utilities.formatDate(new Date(), LNK_TZ, 'yyyy-MM-dd'); o.status = 'accepted';
+    }
   }
   o.by = sc.email;
   inbPut(sh, o.row, inbRowOf(o));
