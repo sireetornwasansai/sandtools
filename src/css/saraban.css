@@ -72,4 +72,11 @@
 .sar-steps { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; } .sar-step { font-size: .8rem; padding: .15rem .6rem; border-radius: 999px; background: var(--surface-2, var(--surface)); border: 1px solid var(--border); } .sar-step.st-done { background: var(--success-bg); color: var(--success); } .sar-step.st-pending { background: var(--warning-bg); color: var(--warning); } .sar-step.st-returned { background: var(--error-bg); color: var(--error); }
 .sar-track { padding: .5rem .7rem; } .sar-track .sar-row { border: 0; margin: 0; padding: .3rem 0; }
 .sar-pool { display: grid; gap: .2rem; margin-bottom: .8rem; }
+.sar-qhead { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; justify-content: space-between; }
+.sar-progress { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: .25rem; margin: .6rem 0 .2rem; padding: 0; counter-reset: sp; }
+.sar-progress li { counter-increment: sp; text-align: center; font-size: .8rem; color: var(--muted); padding-top: .55rem; border-top: 4px solid var(--border); border-radius: 2px; }
+.sar-progress li::before { content: counter(sp) ". "; }
+.sar-progress li.done { border-top-color: var(--success); color: var(--success); }
+.sar-progress li.now { border-top-color: var(--primary); color: var(--primary); font-weight: 700; }
+.sar-progress li.warn { border-top-color: var(--warning); color: var(--warning); font-weight: 700; }
 @media print { .sar-tabs, .sar-submit, .btn-row { display: none !important; } }

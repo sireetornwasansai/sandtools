@@ -6,7 +6,7 @@ import { notice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { modal, confirmBox } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
-import { URGENCY, SECRECY, STAGE, TO_STATUS, ACTION, EVENT, thaiDate, thaiDateTime, dueLabel, stageTone, toCsv, fileToBase64 } from './saraban-engine.js';
+import { URGENCY, SECRECY, STAGE, TO_STATUS, ACTION, EVENT, thaiDate, thaiDateTime, thaiDateLong, ageLabel, stageIndex, STAGE_STEPS, buildRegisterHtml, buildReceiptHtml, dueLabel, stageTone, toCsv, fileToBase64 } from './saraban-engine.js';
 import { receiveView, sendView, unitPicker } from './saraban-forms.js';
 
 /**
@@ -40,7 +40,7 @@ export async function mount(root) {
   }
   const me = cfg.me; const unitName = (c) => { const u = cfg.units.find((x) => x.code === c); return u ? u.short || u.name : c; };
   const staff = me.staff; const reader = me.staff || me.exec;
-  const TABS = [['home', 'ภาพรวม', reader], ['my', 'งานของฉัน', true], ['receive', 'ลงรับ', staff], ['send', 'ส่งออก', staff], ['register', 'ทะเบียน', reader], ['track', 'ติดตาม', true], ['numbers', 'เลขทะเบียน', staff], ['units', 'หน่วยงาน', me.admin]].filter((t) => t[2]);
+  const TABS = [['home', 'ศูนย์สารบรรณ', reader], ['my', 'งานของฉัน', true], ['receive', 'ลงรับ', staff], ['send', 'ส่งออก', staff], ['register', 'ทะเบียน', reader], ['track', 'ติดตาม', true], ['numbers', 'เลขทะเบียน', staff], ['units', 'หน่วยงาน', me.admin]].filter((t) => t[2]);
   const bar = h('div', { class: 'sar-tabs', role: 'tablist', 'aria-label': 'เมนูสารบรรณ' }); const view = h('div', { class: 'sar-view' });
   let current = ''; let ver = 0;
   const X = { call, cfg, openDoc, go, refresh: (t) => go(t || current), me, unitName };
@@ -67,6 +67,17 @@ export async function mount(root) {
         h('div', { class: 'sar-badges' }, d.urgency !== 'normal' ? badge(URGENCY[d.urgency], d.urgency === 'urgent' ? 'warn' : 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, badge(STAGE[d.stage] || d.stage, stageTone(d.stage, 0)), d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null, ...(extra || []))));
   }
   function empty(text) { return h('p', { class: 'muted sar-empty' }, text); }
+  /** Print a finished HTML sheet (register / received stamp) from a new tab — no inline scripts needed. */
+  function printHtml(html) {
+    const w = window.open(URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' })), '_blank');
+    if (!w) { toast('เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาตป๊อปอัปแล้วลองอีกครั้ง', 'error'); return; }
+    w.addEventListener('load', () => { try { w.focus(); w.print(); } catch { /* Ctrl+P still works */ } });
+  }
+  /** ลงรับ → ส่งต่อ → ดำเนินการ → เสร็จสิ้น (received letters only; void / sent letters have no bar). */
+  function progressBar(d) {
+    const at = d.kind === 'out' ? -1 : stageIndex(d.stage); if (at < 0) return null;
+    return h('ol', { class: 'sar-progress', 'aria-label': `ความคืบหน้า: ${STAGE[d.stage] || d.stage}` }, STAGE_STEPS.map(([k, l], i) => h('li', { class: i < at ? 'done' : i === at ? (d.stage === 'returned' ? 'warn' : 'now') : '', 'aria-current': i === at ? 'step' : null }, l)));
+  }
   /** Small generic dialog: fields [{name,label,type,options,value,hint,rows}] → Promise<values|null>. */
   function ask(title, fields, confirm = 'ตกลง', { danger = false, intro } = {}) {
     return new Promise((resolve) => {
@@ -89,8 +100,8 @@ export async function mount(root) {
       if (q.items.length) {
         const box = h('div', { class: 'card sar-queue' }, h('h3', { class: 'sar-h3' }, `รอลงรับจากกลุ่ม Telegram (${q.items.length})`), h('p', { class: 'muted' }, 'ตรวจข้อมูลที่ระบบดึงมา แล้วกด “ลงรับ” เพื่อออกเลขรับในทะเบียนเดียวกัน — ฉบับที่ไม่ใช่หนังสือถึงหน่วยงานกด “ไม่นำเข้า”'));
         q.items.forEach((i) => box.append(h('div', { class: 'sar-qrow' }, h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, i.subject || '(ไม่มีเรื่อง)'), h('div', { class: 'muted sar-sub' }, [i.bookNo, i.from, i.bookDate ? `ลงวันที่ ${thaiDate(i.bookDate)}` : '', i.received ? thaiDateTime(i.received) : ''].filter(Boolean).join(' · ')),
-          h('div', { class: 'sar-badges' }, i.urgentHint ? badge('มีคำว่าด่วน', 'bad') : null, ...(i.suggest || []).slice(0, 2).map((g) => badge(`น่าจะเกี่ยวกับ ${g.name}`, 'info')), ...(i.urls || []).slice(0, 2).map((u) => h('a', { class: 'sar-badge sar-muted', href: safeUrl(u), target: '_blank', rel: 'noopener noreferrer' }, `เปิดลิงก์ · ${host(u)}`)))),
-        h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { inboxId: i.id, subject: i.subject, docNo: i.bookNo, docDate: i.bookDate, party: i.from, channel: 'telegram', file: i.file || (i.urls || [])[0] || '' }) }, 'ลงรับ'),
+          h('div', { class: 'sar-badges' }, i.urgency ? badge(URGENCY[i.urgency], i.urgency === 'urgent' ? 'warn' : 'bad') : i.urgentHint ? badge('มีคำว่าด่วน', 'bad') : null, i.registered ? badge(`อาจลงรับแล้ว เลขรับ ${i.registered}`, 'warn') : null, i.age != null ? badge(`รอ ${ageLabel(i.age)}`, i.age >= 3 ? 'bad' : 'muted') : null, ...(i.suggest || []).slice(0, 2).map((g) => badge(`น่าจะเกี่ยวกับ ${g.name}`, 'info')), ...(i.urls || []).slice(0, 2).map((u) => h('a', { class: 'sar-badge sar-muted', href: safeUrl(u), target: '_blank', rel: 'noopener noreferrer' }, `เปิดลิงก์ · ${host(u)}`)))),
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { inboxId: i.id, subject: i.subject, docNo: i.bookNo, docDate: i.bookDate, party: i.from, urgency: i.urgency || 'normal', channel: 'telegram', file: i.file || (i.urls || [])[0] || '' }) }, 'ลงรับ'),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => { const a = await ask('ไม่นำเข้าหนังสือนี้', [{ name: 'reason', label: 'เหตุผล *', type: 'textarea', rows: 2, required: true, min: 5, placeholder: 'เช่น ไม่เกี่ยวข้องกับโรงพยาบาล / ซ้ำกับฉบับที่ลงรับแล้ว' }], 'ไม่นำเข้า', { danger: true }); if (a && await act(() => call('reject', { id: i.id, reason: a.reason }), 'ย้ายไป “ไม่นำเข้า” แล้ว')) go('receive'); } }, 'ไม่นำเข้า')))));
         el.append(box);
       }
@@ -101,10 +112,16 @@ export async function mount(root) {
   /* ----------------------------- ภาพรวม ----------------------------- */
   async function homeView(el) {
     const d = await call('dash'); const k = d.kpi;
+    let q = null; if (staff && cfg.queue && d.queue && d.queue.enabled && d.queue.n) { try { q = await call('queue'); } catch { q = null; } }
     const card = (label, value, tone, tab, params) => h('button', { class: `sar-kpi tone-${tone}`, type: 'button', onclick: () => go(tab, params) }, h('strong', null, String(value)), h('span', null, label));
     const max = Math.max(1, ...d.days.map((x) => Math.max(x.in, x.out)));
     el.append(
-      d.queue.enabled && d.queue.n ? h('div', { class: 'card sar-queue-banner' }, h('div', null, h('strong', null, `มี ${d.queue.n} ฉบับรอลงรับจากกลุ่ม Telegram`), d.queue.urgent ? h('span', { class: 'sar-badge sar-bad' }, `${d.queue.urgent} ฉบับมีคำว่า “ด่วน”`) : null), staff ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => go('receive') }, 'ไปลงรับ') : null) : null,
+      h('p', { class: 'muted' }, `${thaiDateLong(d.today)} · ${d.org}`),
+      q && q.items.length ? h('div', { class: 'card sar-queue' }, h('div', { class: 'sar-qhead' }, h('h3', { class: 'sar-h3' }, `คิวรอลงรับ (${d.queue.n})`), d.queue.urgent ? badge(`${d.queue.urgent} ฉบับมีคำว่า “ด่วน”`, 'bad') : null),
+        ...q.items.slice(0, 6).map((i) => h('div', { class: 'sar-qrow' }, h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, i.subject || '(ไม่มีเรื่อง)'), h('div', { class: 'muted sar-sub' }, [i.bookNo, i.from].filter(Boolean).join(' · ')),
+          h('div', { class: 'sar-badges' }, i.urgency ? badge(URGENCY[i.urgency], i.urgency === 'urgent' ? 'warn' : 'bad') : null, i.registered ? badge(`อาจลงรับแล้ว ${i.registered}`, 'warn') : null, badge(`รอ ${ageLabel(i.age)}`, i.age >= 3 ? 'bad' : 'muted'))),
+          h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { inboxId: i.id, subject: i.subject, docNo: i.bookNo, docDate: i.bookDate, party: i.from, urgency: i.urgency || 'normal', channel: 'telegram', file: i.file || (i.urls || [])[0] || '' }) }, 'ลงรับ'))),
+        d.queue.n > 6 ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => go('receive') }, `ดูทั้งหมด ${d.queue.n} ฉบับ`)) : null) : null,
       h('div', { class: 'sar-kpis' }, card('ลงรับวันนี้', k.inToday, 'info', 'register'), card('ส่งออกวันนี้', k.outToday, 'info', 'register', { kind: 'out' }), card('ยังไม่เสนอ/ส่งต่อ', k.unrouted, k.unrouted ? 'warn' : 'ok', 'register', { stage: 'registered' }),
         card('เลยกำหนด', k.overdue, k.overdue ? 'bad' : 'ok', 'register', { stage: 'overdue' }), card('ด่วนที่ยังค้าง', k.urgentOpen, k.urgentOpen ? 'bad' : 'ok', 'register', { urgent: true }), card('ส่งคืน รอส่งต่อใหม่', k.returned, k.returned ? 'warn' : 'ok', 'register', { stage: 'returned' })),
       h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ปริมาณหนังสือ 14 วันล่าสุด'), h('div', { class: 'sar-bars', role: 'img', 'aria-label': 'แผนภูมิแท่งจำนวนหนังสือรับและส่งรายวัน' }, d.days.map((x) => h('div', { class: 'sar-bar', title: `${thaiDate(x.day)}: รับ ${x.in} ส่ง ${x.out}` }, h('i', { class: 'in', style: `height:${Math.round((x.in / max) * 100)}%` }), h('i', { class: 'out', style: `height:${Math.round((x.out / max) * 100)}%` }), h('span', null, x.day.slice(8))))), h('p', { class: 'muted' }, h('span', { class: 'sar-dot in' }), 'รับ ', h('span', { class: 'sar-dot out' }), 'ส่ง')),
@@ -139,7 +156,7 @@ export async function mount(root) {
     const search = h('input', { type: 'search', placeholder: 'ค้นหาเลขรับ เลขที่หนังสือ เรื่อง หน่วยงาน…', 'aria-label': 'ค้นหา' }); search.addEventListener('input', debounce(() => { st.q = search.value.trim(); load(true); }, 350));
     const from = h('input', { type: 'date', 'aria-label': 'ตั้งแต่วันที่ลงทะเบียน' }); const to = h('input', { type: 'date', 'aria-label': 'ถึงวันที่ลงทะเบียน' }); from.addEventListener('change', () => { st.from = from.value; load(true); }); to.addEventListener('change', () => { st.to = to.value; load(true); });
     const csv = h('button', { class: 'btn', type: 'button', onclick: () => exportCsv() }, svgIcon(ICONS.download, 18), 'ส่งออก Excel (CSV)');
-    el.append(h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, yearSel, stageSel, from, to, urg), search, h('div', { class: 'btn-row' }, csv)), info, list, h('div', { class: 'btn-row' }, more));
+    el.append(h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, yearSel, stageSel, from, to, urg), search, h('div', { class: 'btn-row' }, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)'))), info, list, h('div', { class: 'btn-row' }, more));
     async function load(reset) {
       if (reset) { st.offset = 0; list.replaceChildren(); }
       const r = await call('list', { ...st, limit: 40 });
@@ -149,6 +166,11 @@ export async function mount(root) {
       st.offset += r.items.length; more.hidden = !r.more;
     }
     more.addEventListener('click', () => load(false).catch((e) => toast(errText(e), 'error')));
+    async function printReg() {
+      const r = await act(() => call('rows', st, 60000)); if (!r) return;
+      printHtml(buildRegisterHtml({ org: cfg.org, kind: r.kind, year: r.year, rows: r.rows }));
+      if (r.truncated) toast('พิมพ์ได้สูงสุด 5,000 รายการ — กรองช่วงวันที่แล้วพิมพ์ใหม่', 'info', 6000);
+    }
     async function exportCsv() {
       const r = await act(() => call('rows', st, 60000)); if (!r) return;
       const out = r.kind === 'out';
@@ -168,7 +190,7 @@ export async function mount(root) {
       try {
         const r = await call('track', { q: v });
         if (!r.items.length) { out.append(empty('ไม่พบหนังสือ — ลองพิมพ์เลขรับ (เช่น 125) หรือส่วนหนึ่งของชื่อเรื่อง')); return; }
-        r.items.forEach((d) => out.append(h('div', { class: 'card sar-track' }, docRow(d), d.steps && d.steps.length ? h('div', { class: 'sar-steps' }, d.steps.map((s) => h('span', { class: `sar-step st-${s.status}` }, `${s.unit}: ${TO_STATUS[s.status]}`))) : null)));
+        r.items.forEach((d) => out.append(h('div', { class: 'card sar-track' }, docRow(d), progressBar(d), d.steps && d.steps.length ? h('div', { class: 'sar-steps' }, d.steps.map((s) => h('span', { class: `sar-step st-${s.status}` }, `${s.unit}: ${TO_STATUS[s.status]}`))) : null)));
       } catch (e) { out.append(notice('error', 'ค้นหาไม่สำเร็จ', errText(e))); }
     };
     q.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); }); q.addEventListener('input', debounce(run, 500));
@@ -267,7 +289,7 @@ export async function mount(root) {
       files.length ? h('div', { class: 'sar-files' }, files) : null,
       recv.length ? h('div', null, h('h3', { class: 'sar-h3' }, 'การส่งต่อและผู้ปฏิบัติ'), recv) : null,
       h('div', null, h('h3', { class: 'sar-h3' }, 'ประวัติ'), h('ol', { class: 'sar-timeline' }, (r.events || []).map((e) => h('li', null, h('strong', null, EVENT[e.type] || e.type), ` ${e.unit ? `[${unitName(e.unit)}] ` : ''}${e.text || ''}`, h('div', { class: 'muted' }, `${thaiDateTime(e.at)} · ${e.by}`)))))],
-    [r.can.route ? btn('ส่งต่อ', () => routeDlg(false), 'btn btn-primary') : null, r.can.command ? btn('สั่งการ', () => routeDlg(true), 'btn btn-primary') : null, r.can.edit ? btn('แก้ไขข้อมูล', editDlg) : null, r.can.attach ? btn('แนบไฟล์', () => attach.click()) : null,
+    [r.can.route ? btn('ส่งต่อ', () => routeDlg(false), 'btn btn-primary') : null, r.can.command ? btn('สั่งการ', () => routeDlg(true), 'btn btn-primary') : null, r.can.edit ? btn('แก้ไขข้อมูล', editDlg) : null, r.can.attach ? btn('แนบไฟล์', () => attach.click()) : null, !out && d.stage !== 'void' && r.access !== 'masked' ? btn('พิมพ์ตรารับ', () => printHtml(buildReceiptHtml({ org: cfg.org, doc: d }))) : null,
       r.can.cancel ? btn('ยกเลิกเลข', cancelDlg, 'btn btn-danger') : null, btn('ปิด', () => m.close()), attach], { wide: true, onClose: () => { if (closeDetail === m.close) closeDetail = null; } });
     closeDetail = m.close;
   }

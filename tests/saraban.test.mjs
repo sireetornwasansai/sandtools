@@ -305,3 +305,18 @@ test('dash: counts and masked access; setup seeds hospital units', () => {
   f.ctx.setupSaraban(); f.ctx.setupSaraban();
   assert.ok(f.sheets.SarUnits.length > 10 && f.sheets.SarUnits.length < 20, 'seeded once, not twice');
 });
+
+/* ---------------------------- v1.8.0: คิวรอลงรับ — age, urgency, already-registered hint ---------------------------- */
+test('queue: urgency read from the words, age in days, and a letter already in the register is flagged', () => {
+  const e = env({ INBOX_STAFF_EMAILS: 'clerk@x.go.th' }); units(e); const c = e.as(clerk);
+  const hook = (mid, text) => e.ctx.inbHook({ secret: 's3cret', u: { chat: { id: -1001, title: 'กลุ่มงานธุรการ' }, mid, date: 1760400000, text, urls: ['https://a.th/' + mid], doc: null } });
+  hook(1, 'ด่วนที่สุด\nที่ ศธ 04010/ว9 ลงวันที่ 9 ตุลาคม 2569\nเรื่อง ขอข้อมูลด่วน https://a.th/1');
+  hook(2, 'หนังสือเวียน\nที่ ศธ 04010/ว77 ลงวันที่ 9 ตุลาคม 2569\nเรื่อง ทั่วไป https://a.th/2');
+  c('receive', F({ docNo: 'ศธ 04010/ว77', subject: 'ทั่วไป' }));
+  const q = c('queue', {}); assert.equal(q.items.length, 2);
+  const urgent = q.items.find((i) => /ขอข้อมูลด่วน/.test(i.subject)); const plain = q.items.find((i) => /ทั่วไป/.test(i.subject));
+  assert.equal(urgent.urgency, 'most'); assert.equal(plain.urgency, '');
+  assert.equal(plain.registered, '1/2569', 'same เลขที่หนังสือ is already in the register'); assert.equal(urgent.registered, '');
+  assert.ok(Number.isInteger(urgent.age) && urgent.age >= 0);
+  assert.equal(c('queue', {}).today, e.ctx.sarToday());
+});

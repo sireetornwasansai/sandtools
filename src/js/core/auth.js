@@ -36,7 +36,7 @@ export function preloadLogin() { if (config.googleClientId) loadScript('https://
 export function revalidateInBackground() {
   const s = getSession();
   if (!s || Date.now() - (s.vAt || 0) < REVALIDATE_MS) return;
-  gasCall('me', { session: s.token }, 15000).then(() => setSession({ ...s, vAt: Date.now() })).catch((e) => {
+  gasCall('me', { session: s.token }, 15000).then((r) => setSession({ ...s, vAt: Date.now(), user: { ...s.user, home: (r && r.data && r.data.home) || '' } })).catch((e) => {
     if (e instanceof ApiError && ['NETWORK', 'TIMEOUT'].includes(e.code)) return;   // offline / slow backend: keep working
     signOut(); location.reload();
   });

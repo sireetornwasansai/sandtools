@@ -1,5 +1,5 @@
 /**
- * SAND Office Tools — สารบรรณอิเล็กทรอนิกส์ (ลงรับ · ส่งออก · ทะเบียน · เลขทะเบียน · ส่งต่อ/สั่งการ · ติดตาม).  v1.7.0
+ * SAND Office Tools — สารบรรณอิเล็กทรอนิกส์ (ลงรับ · ส่งออก · ทะเบียน · เลขทะเบียน · ส่งต่อ/สั่งการ · ติดตาม).  v1.8.0
  *
  * ONE register for the whole organisation. The older page "หนังสือรับเข้า" (Inbox.gs) is now only the INTAKE QUEUE:
  * a letter that clerks accept there (or from the Saraban page) gets its เลขรับ from the SAME counter (this file),
@@ -901,13 +901,18 @@ function sarParties(sc, b) {
   }
   return { items: out };
 }
+/** v1.8.0 — urgency read from the words of a queued letter ('' when it says nothing). */
+function sarGuessUrgency(text) { var t = String(text || ''); return /ด่วนที่สุด/.test(t) ? 'most' : /ด่วนมาก/.test(t) ? 'very' : /(^|[\s(])ด่วน($|[\s)])/.test(t) ? 'urgent' : ''; }
+/** v1.8.0 — เลขที่หนังสือ (normalised) → เลขรับ of the live receive entries, so a queued letter that is already registered can be flagged. */
+function sarDocNoIndex() { var idx = Object.create(null); sarAll(sarTab(SAR_TAB)).forEach(function (o) { if (o.kind === 'in' && o.status !== 'void' && o.status !== 'reserved' && o.docNo) idx[sarNorm(o.docNo)] = o.reg; }); return idx; }
 function sarQueue(sc) {
   sarNeedStaff(sc);
   if (typeof inbAll !== 'function') return { enabled: false, items: [] };
   var units = sarUnits(sc), rows = inbAll(inbSheet()).filter(function (q) { return q.status === 'pending'; }).sort(function (a, c) { return a.received < c.received ? 1 : -1; }).slice(0, 100);
-  return { enabled: true, items: rows.map(function (q) {
-    var urgent = /ด่วน/.test(q.subject + ' ' + q.text);
-    return { id: q.id, subject: q.subject, bookNo: q.bookNo, bookDate: q.bookDate, from: q.from, file: q.file, urls: q.urls, received: q.received, msgTime: q.msgTime, urgentHint: urgent, source: q.source, suggest: sarSuggestUnits(q.subject, units) };
+  var dups = sarDocNoIndex();
+  return { enabled: true, today: sc.today, items: rows.map(function (q) {
+    var urgent = /ด่วน/.test(q.subject + ' ' + q.text), age = sarDaysBetween(String(q.received).slice(0, 10), sc.today);
+    return { id: q.id, subject: q.subject, bookNo: q.bookNo, bookDate: q.bookDate, from: q.from, file: q.file, urls: q.urls, received: q.received, msgTime: q.msgTime, urgentHint: urgent, urgency: sarGuessUrgency(q.subject + ' ' + q.text), age: age >= 0 ? age : 0, registered: (q.bookNo && dups[sarNorm(q.bookNo)]) || '', source: q.source, suggest: sarSuggestUnits(q.subject, units) };
   }) };
 }
 function sarDash(sc) {

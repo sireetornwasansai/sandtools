@@ -145,6 +145,8 @@ async function boot() {
     if (getSession()) revalidateInBackground();   // open the app straight away from the stored session; verify later without blocking
     else { preloadLogin(); await renderLogin(app); }
   }
+  // Landing page by e-mail: the backend marks accounts listed in HOME_SARABAN_EMAILS (user.home) — they open on สารบรรณ instead of the tool grid.
+  const me = currentUser(); if (me && me.home === 'saraban' && /^#?\/?$/.test(location.hash)) location.replace('#/saraban');
   buildShell();
   installGlobalHandlers();
   await route();

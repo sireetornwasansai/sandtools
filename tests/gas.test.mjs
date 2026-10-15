@@ -149,3 +149,14 @@ test('passlogin: rate limited, and the local account is not accepted via the Goo
   const e2 = makeEnv(base); // a forged session for the local e-mail is useless without LOCAL_HASH
   assert.equal(e2.post({ action: 'me', session: 'x.y' }).success, false);
 });
+
+/* ---------------- v1.8.0: landing page by e-mail ---------------- */
+test('home: HOME_SARABAN_EMAILS opens สารบรรณ for the listed accounts only (login and me agree)', () => {
+  const on = makeEnv({ ...base, HOME_SARABAN_EMAILS: 'someone@example.go.th, SOMCHAI@example.go.th' }, ok(goodClaims()));
+  const r = on.post({ action: 'login', idToken: 't' }); assert.equal(r.data.user.home, 'saraban');
+  assert.equal(on.post({ action: 'me', session: r.data.session }).data.home, 'saraban');
+  const off = makeEnv({ ...base, HOME_SARABAN_EMAILS: 'other@example.go.th' }, ok(goodClaims()));
+  const r2 = off.post({ action: 'login', idToken: 't' }); assert.equal(r2.data.user.home, '');
+  assert.equal(off.post({ action: 'me', session: r2.data.session }).data.home, '');
+  const none = makeEnv(base, ok(goodClaims())); assert.equal(none.post({ action: 'login', idToken: 't' }).data.user.home, '');
+});

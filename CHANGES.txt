@@ -1,3 +1,10 @@
+v1.8.0 — สารบรรณ: ศูนย์สารบรรณ · คิวรอลงรับ · พิมพ์ทะเบียน/ตรารับ · ติดตามแบบแถบความคืบหน้า · หน้าแรกตามอีเมล
+แก้:  gas/Saraban.gs (คิวรอลงรับส่ง age / urgency / registered) · gas/Code.gs (login/me ส่ง home ตาม HOME_SARABAN_EMAILS)
+      src/js/modules/saraban.js · saraban-engine.js · inbox.js · core/auth.js · main.js · css/saraban.css · tests · docs/SARABAN.md
+ตั้งค่า: Script property HOME_SARABAN_EMAILS (อีเมลคั่นด้วย ,) — บัญชีเหล่านี้เปิดหน้า สารบรรณ เป็นหน้าแรก (ต้อง Deploy เวอร์ชันใหม่ของ Apps Script)
+ไม่ต้องแตะ: gas/Analytics.gs (ใช้ฉบับล่าสุดของคุณ), Library.gs, Links.gs, Inbox.gs
+หมายเหตุ: เทสต์ passlogin 4 ข้อล้มอยู่เดิม (Code.gs ของคุณไม่มี LOCAL_* ส่วนเทสต์ต้องการ) — ไม่เกี่ยวกับสารบรรณ
+
 ไฟล์ใหม่:  gas/Saraban.gs · src/js/modules/saraban.js · saraban-forms.js · saraban-engine.js · src/css/saraban.css
            tests/saraban.test.mjs · tests/unit/saraban-engine.test.mjs · docs/SARABAN.md
 ไฟล์แก้:   gas/Code.gs (v1.7.0: action saraban, อัปโหลดไฟล์ใหญ่) · gas/Inbox.gs (ใช้ตัวนับเลขเดียวกับสารบรรณ) · gas/appsscript.json (ตามฉบับจริงของคุณ)

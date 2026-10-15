@@ -55,7 +55,8 @@ export async function mount(root) {
   const s = getSession();
   const body = h('div');
   root.append(h('div', { class: 'page' }, h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'หนังสือรับเข้า'),
-    h('p', null, 'หนังสือเวียนที่ระบบเก็บมาจากกลุ่ม Telegram แบบเงียบ ๆ — ตรวจข้อมูล แล้วกด “รับหนังสือ” เพื่อออกเลขรับ'))), body));
+    h('p', null, 'หนังสือเวียนที่ระบบเก็บมาจากกลุ่ม Telegram แบบเงียบ ๆ — ตรวจข้อมูล แล้วกด “รับหนังสือ” เพื่อออกเลขรับ'))),
+    h('p', { class: 'hint' }, 'หน้านี้ใช้เลขรับชุดเดียวกับสารบรรณ — ', h('a', { href: '#/saraban?tab=receive' }, 'เปิดคิวรอลงรับในสารบรรณ'), ' เพื่อลงรับพร้อมตรารับและส่งต่อได้ทันที'), body));
   if (!s) { body.append(notice('warn', 'ต้องเข้าสู่ระบบก่อน', 'หน้านี้ใช้ได้เฉพาะเจ้าหน้าที่ธุรการและผู้ดูแลระบบ')); return; }
 
   let status = 'pending'; let query = ''; let data = { counts: {}, items: [], year: 0 };

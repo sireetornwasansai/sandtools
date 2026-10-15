@@ -1,5 +1,5 @@
 /**
- * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.7.0 — สารบรรณ: one register for receive / send, shared with the Inbox page)
+ * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.8.0 — สารบรรณ: one register for receive / send, shared with the Inbox page)
  *
  * This project has SIX script files — keep them together:
  *   Code.gs     (this file)  entry points, login/session, usage log, file archive, history
@@ -112,7 +112,7 @@ function login(idToken) {
   if (!isEmailAllowed(email, claims.hd)) throw httpError('DOMAIN_NOT_ALLOWED', 'บัญชีนี้ไม่ได้อยู่ในโดเมนที่อนุญาต');
   var ttl = intProp('SESSION_TTL_MIN', 43200) * 60;
   var exp = Math.floor(Date.now() / 1000) + ttl;
-  var user = { email: email, name: String(claims.name || ''), picture: String(claims.picture || '') };
+  var user = { email: email, name: String(claims.name || ''), picture: String(claims.picture || ''), home: homeFor(email) };
   return { session: signSession({ sub: String(claims.sub), email: email, exp: exp }), exp: exp, user: user };
 }
 
@@ -121,8 +121,10 @@ function me(session) {
   if (!p) throw httpError('INVALID_SESSION', 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
   // Re-check the allow-list on every call so removing a domain/email takes effect immediately.
   if (!isEmailAllowed(p.email, null)) throw httpError('DOMAIN_NOT_ALLOWED', 'บัญชีนี้ไม่ได้อยู่ในโดเมนที่อนุญาต');
-  return { email: p.email, exp: p.exp };
+  return { email: p.email, exp: p.exp, home: homeFor(p.email) };
 }
+/** Landing page by e-mail: HOME_SARABAN_EMAILS (Script property, comma separated) open on the สารบรรณ page instead of the tool grid. */
+function homeFor(email) { return listProp('HOME_SARABAN_EMAILS').indexOf(String(email || '').toLowerCase()) >= 0 ? 'saraban' : ''; }
 
 /* ------------------------- usage log + file archive ------------------------ */
 // Both actions require a valid session. Rows go to the Google Sheet (LOG_SHEET_ID), files to the Drive folder (DRIVE_FOLDER_ID).

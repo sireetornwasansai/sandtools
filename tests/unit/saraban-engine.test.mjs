@@ -50,3 +50,20 @@ test('csv: BOM for Excel, quoting, formula guard', () => {
   assert.ok(c.startsWith('\ufeff')); assert.ok(c.includes('"a,""b"""')); assert.ok(c.includes("'=SUM(A1)"));
   assert.equal(plainText('# หัวข้อ\n**ตัวหนา** | ตาราง'), 'หัวข้อ\nตัวหนา ตาราง');
 });
+
+import { thaiDateLong, ageLabel, escHtml, stageIndex, STAGE_STEPS, buildRegisterHtml, buildReceiptHtml } from '../../src/js/modules/saraban-engine.js';
+test('v1.8.0 dates, age, stage index, escaping', () => {
+  assert.equal(thaiDateLong('2026-10-14'), 'วันพุธที่ 14 ตุลาคม พ.ศ. 2569'); assert.equal(thaiDateLong('x'), '');
+  assert.equal(ageLabel(0), 'วันนี้'); assert.equal(ageLabel(1), 'เมื่อวาน'); assert.equal(ageLabel(5), '5 วันก่อน'); assert.equal(ageLabel(-1), ''); assert.equal(ageLabel(undefined), '');
+  assert.deepEqual(STAGE_STEPS.map((s) => s[0]), ['registered', 'routed', 'inprogress', 'done']);
+  assert.equal(stageIndex('registered'), 0); assert.equal(stageIndex('inprogress'), 2); assert.equal(stageIndex('done'), 3); assert.equal(stageIndex('returned'), 0); assert.equal(stageIndex('void'), -1);
+  assert.equal(escHtml('<a href="x">&\'</a>'), '&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;'); assert.equal(escHtml(null), '');
+});
+test('v1.8.0 print sheets: register (A4 landscape, escaped, void struck) and received stamp', () => {
+  const rows = [{ reg: '5/2569', at: '2026-10-14 09:30:00', docNo: 'ศธ 1/ว2', docDate: '2026-10-09', party: 'สสจ.<x>', subject: 'ขอข้อมูล', urgency: 'very', stage: 'routed', action: '', note: '' }, { reg: '6/2569', at: '2026-10-14 10:00:00', docNo: '', docDate: '', party: 'ก', subject: 'ยกเลิก', urgency: 'normal', stage: 'void', action: '', note: '' }];
+  const g = buildRegisterHtml({ org: 'รพ.สันทราย', kind: 'in', year: 2569, rows });
+  assert.match(g, /ทะเบียนหนังสือรับ ประจำปี พ.ศ. 2569/); assert.match(g, /A4 landscape/); assert.match(g, /สสจ\.&lt;x&gt;/); assert.match(g, /\(ด่วนมาก\)/); assert.match(g, /class="void"/); assert.ok(!g.includes('<x>'));
+  assert.match(buildRegisterHtml({ org: 'o', kind: 'out', year: 2569, rows: [] }), /ทะเบียนหนังสือส่ง[\s\S]*ไม่มีรายการ/);
+  const r = buildReceiptHtml({ org: 'รพ.สันทราย', doc: { reg: '5/2569', at: '2026-10-14 09:30:00' } });
+  assert.match(r, /เลขรับ 5\/2569/); assert.match(r, /14 ต\.ค\. 2569/); assert.match(r, /เวลา 09\.30 น\./);
+});

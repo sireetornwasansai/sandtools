@@ -111,3 +111,37 @@ export function fileToBase64(file) {
 }
 /** Which tab / which row the recipient screen should highlight. */
 export function stageTone(stage, overdue) { return overdue ? 'bad' : stage === 'done' || stage === 'sent' ? 'ok' : stage === 'void' ? 'muted' : stage === 'returned' ? 'warn' : stage === 'registered' ? 'warn' : 'info'; }
+
+/* ------------------------------ v1.8.0: dates, stages, print sheets ------------------------------ */
+
+const WEEKDAYS = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+/** "2026-10-14" → "วันพุธที่ 14 ตุลาคม พ.ศ. 2569". */
+export function thaiDateLong(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); if (!m) return '';
+  const wd = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+  return `วัน${WEEKDAYS[wd]}ที่ ${Number(m[3])} ${MONTH_FULL[Number(m[2]) - 1]} พ.ศ. ${Number(m[1]) + 543}`;
+}
+/** Days waiting → "วันนี้" / "เมื่อวาน" / "3 วันก่อน" ('' when unknown). */
+export function ageLabel(n) { n = Number(n); if (!Number.isFinite(n) || n < 0) return ''; return n === 0 ? 'วันนี้' : n === 1 ? 'เมื่อวาน' : `${n} วันก่อน`; }
+export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+/** The four steps a received letter walks through (the progress bar on the tracking page). */
+export const STAGE_STEPS = [['registered', 'ลงรับ'], ['routed', 'ส่งต่อ'], ['inprogress', 'ดำเนินการ'], ['done', 'เสร็จสิ้น']];
+/** Index (0-3) of the step a letter has reached; returned letters wait at 0; void/unknown → -1. */
+export function stageIndex(stage) {
+  if (stage === 'returned') return 0;
+  return STAGE_STEPS.findIndex((s) => s[0] === stage);
+}
+
+const PRINT_CSS = '@page{size:A4 landscape;margin:12mm}body{font:12px/1.45 "TH Sarabun New","Sarabun",Tahoma,sans-serif;color:#000}h1{font-size:18px;margin:0 0 2px;text-align:center}p.sub{margin:0 0 8px;text-align:center}table{width:100%;border-collapse:collapse}th,td{border:1px solid #000;padding:3px 5px;vertical-align:top}th{background:#eee}td.c{text-align:center;white-space:nowrap}.void td{color:#777;text-decoration:line-through}.hint{margin:8px 0;color:#555}@media print{.hint{display:none}}';
+/** Printable register (ทะเบียนหนังสือรับ/ส่ง), A4 landscape. rows are the objects returned by the `rows` op. */
+export function buildRegisterHtml({ org, kind, year, rows }) {
+  const out = kind === 'out'; const list = rows || [];
+  const body = list.length ? list.map((d) => `<tr${d.stage === 'void' ? ' class="void"' : ''}><td class="c">${escHtml(d.reg)}</td><td class="c">${escHtml(thaiDate(String(d.at || '').slice(0, 10)))}</td><td>${escHtml(d.docNo)}</td><td class="c">${escHtml(thaiDate(d.docDate))}</td><td>${escHtml(d.party)}</td><td>${escHtml(d.subject)}${d.urgency && d.urgency !== 'normal' ? ` <b>(${escHtml(URGENCY[d.urgency])})</b>` : ''}</td><td>${escHtml(d.action || STAGE[d.stage] || '')}</td><td>${escHtml(d.note)}</td></tr>`).join('') : '<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>';
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ทะเบียนหนังสือ${out ? 'ส่ง' : 'รับ'} ${escHtml(year)}</title><style>${PRINT_CSS}</style></head><body><h1>ทะเบียนหนังสือ${out ? 'ส่ง' : 'รับ'} ประจำปี พ.ศ. ${escHtml(year)}</h1><p class="sub">${escHtml(org)}</p><p class="hint">พิมพ์ด้วย A4 landscape — กด Ctrl+P</p><table><thead><tr><th>เลข${out ? 'ส่ง' : 'รับ'}</th><th>วันที่ลงทะเบียน</th><th>ที่หนังสือ</th><th>ลงวันที่</th><th>${out ? 'ถึง' : 'จาก'}</th><th>เรื่อง</th><th>การปฏิบัติ</th><th>หมายเหตุ</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
+}
+/** ตรารับหนังสือ — the received stamp (box with org, เลขรับ, date, time) printed on a half sheet. */
+export function buildReceiptHtml({ org, doc }) {
+  const at = String(doc.at || ''); const t = /[ T](\d{2}):(\d{2})/.exec(at);
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ตรารับ ${escHtml(doc.reg)}</title><style>@page{size:A5 landscape;margin:10mm}body{font:16px/1.7 "TH Sarabun New","Sarabun",Tahoma,sans-serif}.box{width:9cm;border:2px solid #000;padding:.5cm;margin:1cm auto;text-align:center}.box b{font-size:20px}</style></head><body><div class="box"><b>${escHtml(org)}</b><br>เลขรับ ${escHtml(doc.reg)}<br>วันที่ ${escHtml(thaiDate(at.slice(0, 10)))}${t ? `<br>เวลา ${t[1]}.${t[2]} น.` : ''}</div></body></html>`;
+}
