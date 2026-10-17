@@ -76,7 +76,7 @@ export function mountSiteFloor(host, opts = {}) {
   let jr = []; let floorRange = range; let ins = null; let ILAY = []; let focus = -1; let entering = false; let iseq = 0; const cam = { z: 1, tx: 0, ty: 0, tz: 1, ttx: 0, tty: 0 };
   let view = VIEW_IDS.includes(localStorage.getItem(VIEW_KEY)) ? localStorage.getItem(VIEW_KEY) : 'dept'; const W = { map: {}, days: 0, src: '', at: 0, busy: false }; let DL = []; let HL = null; let PW = []; let whits = []; let hoverT = null; let wseq = 0; let hb = null; let BL = []; let hoverB = ''; let bhits = []; let xhit = null;   // hb = building entered in the hospital view (null = campus seen from outside) · BL = building of every project   // view: 'dept' = department plan (rooms = pages) · 'hospital' = whole-hospital plan (rooms = systems)
   let liveOn = localStorage.getItem(LIVE_KEY) !== '0';   // real-time: the clock follows the real time and the numbers refresh by themselves
-  let WX = 12; let WY = 12; let CYc = CORR; let corrH = 0.5;   // size of the floor being drawn · y of its main corridor / road · half width of it
+  let WX = 12; let WY = 12; let WD = 0; let CYc = CORR; let corrH = 0.5;   // size of the floor being drawn · y of its main corridor / road · half width of it
   let tw = 60; let ox = 0; let oy = 0; let dpr = 1; let pal = PAL.light; let font = 'sans-serif'; let ctx; let timer = 0;
 
   // ---------- DOM ----------
@@ -221,9 +221,10 @@ export function mountSiteFloor(host, opts = {}) {
   const VIEW_HINT = { dept: 'เดินเข้าแผนกตามทางเดิน แล้วแยกเข้าห้องส่วนย่อย (หน้าของระบบ) ทั้งสองข้าง — เห็นทันทีว่าคนใช้ส่วนไหน ไม่ต้องกดเข้าไปทีละระบบ', hospital: 'ผังโรงพยาบาลสันทราย — คลิกที่ตึกเพื่อเข้าไปดูแผนกภายใน · ตึกอุบัติเหตุ (ทางซ้ายของโรงพยาบาล) = ระบบยานพาหนะ · ตึกโรงพยาบาลหลัก = ระบบอื่นทั้งหมด' };
   /** Size of the floor + the corridor / road that the gates stand on. Inside a system the old square floor is used. */
   function setWorld() {
+    WD = 0;
     if (ins || !sites.length) { WX = G; WY = G; CYc = CORR; corrH = 0.5; }
     else if (view === 'dept') { const w = deptWorld(sites.length); WX = w.GX; WY = w.GY; CYc = w.CY; corrH = DEPT.CORR / 2; }
-    else { const w = (HL || campusLayout()).world; WX = w.GX; WY = w.GY; CYc = HL ? HL.sy : w.GY / 2; corrH = 0.5; }
+    else { const w = (HL || campusLayout()).world; WX = w.GX; WY = w.GY; WD = w.D || 0; CYc = HL ? HL.sy : w.GY / 2; corrH = 0.5; }
     ENT[0] = 0.6; ENT[1] = CYc; EXIT[0] = WX - 0.6; EXIT[1] = CYc;
   }
   function rebuildPlan() {
@@ -254,12 +255,12 @@ export function mountSiteFloor(host, opts = {}) {
       HL.rooms.forEach((r) => { if (!r) return; const gd = [r.door[0] - 0.4, r.door[0] + 0.4]; seg('x', r.y0, r.y1, r.x0, T, r.wcol); seg('x', r.y0, r.y1, r.x1, T, r.wcol); seg('y', r.x0, r.x1, r.front ? r.y0 : r.y1, T, r.wcol, gd); });
     } else if (!ins && HL) {
       const HC = '#2f8f4e'; const xe = HL.campus.x1; const ye = HL.campus.y1;   // hedge round the back and the left side only: the front and the right side face the public roads
-      seg('y', 0.25, xe, 0.25, 0.62, HC, null, true); seg('x', 0.25, ye, 0.25, 0.62, HC, null, true);
+      const yb0 = (HL.world && HL.world.D) ? -HL.world.D : 0; seg('y', 0.25, xe, yb0 + 0.25, 0.62, HC, HL.rear ? HL.rear.x : null, true); seg('x', yb0 + 0.25, ye, 0.25, 0.62, HC, null, true);
     }
     return out;
   }
   const W_NOTE_DEPT = ' · ห้องในแผนก = หน้าย่อยของระบบนั้น (สีผนัง = แผนก) คนที่เข้ามาจะเดินตามทางเดินไปยังห้องที่ใช้จริง — คลิกห้องเพื่อเข้าไปดูภายในระบบ';
-  const W_NOTE_OUT = ' · ผังบริเวณโรงพยาบาลจากภายนอก: เห็นเฉพาะตึก — คนเดินเข้าทางประตูหน้าไปยังตึกของระบบที่ใช้จริง (ตึกอุบัติเหตุทางซ้าย = ระบบยานพาหนะ · ตึกหลัก = ระบบอื่น) คลิกตึกเพื่อเข้าไปดูแผนกภายใน';
+  const W_NOTE_OUT = ' · ผังบริเวณโรงพยาบาลจากภายนอก: เห็นเฉพาะตึก — คนเดินเข้าทางประตูหน้าไปยังตึกของระบบที่ใช้จริง (ตึกอุบัติเหตุทางซ้าย = ระบบยานพาหนะ · ตึกหลัก = ระบบอื่น) คลิกตึกเพื่อเข้าไปดูแผนกภายใน · ตึกด้านหลัง 3 หลัง (คลิกแล้วเข้าตึกหลัก) · พื้นที่ก่อสร้างหลังตึกอุบัติเหตุ · คนเดินในผัง (หมอ พยาบาล ผู้ป่วย ญาติ คนงาน) เป็นภาพบรรยากาศ ไม่ใช่ข้อมูลจริง';
   const W_NOTE_IN = ' · ภายในอาคาร: หนึ่งห้อง = หนึ่งแผนก/ระบบ คนเดินเข้าทางประตูอาคารไปยังห้องของระบบที่ใช้จริง — คลิกห้องเพื่อเข้าไปดูภายในระบบ · กด Esc หรือปุ่ม “ออกจากอาคาร” เพื่อกลับผังบริเวณ';
   /** Which page does each drawn person use? A real day knows it (pk); otherwise it is drawn in proportion to the page views. */
   const mixC = {}; let mixAt = 0;
@@ -442,7 +443,7 @@ export function mountSiteFloor(host, opts = {}) {
   function resize() {
     const r = scroller.getBoundingClientRect(); const avail = Math.max(280, Math.round(r.width)); const w = Math.max(avail, 600); let hgt; dpr = Math.min(2, devicePixelRatio || 1);
     if (ins || !sites.length) { hgt = Math.round(w * 0.58); tw = Math.min(w / 12.6, (hgt * 0.8) / (G / 2)); ox = w / 2; oy = hgt * 0.14; }
-    else { const sum = WX + WY; tw = (1.94 * w) / sum; oy = tw * (view === 'hospital' ? 1.15 : 1.1); ox = w / 2 + ((WY - WX) * tw) / 4; hgt = Math.round(oy + (sum * tw) / 4 + tw * 0.95); }
+    else { const sum = WX + WY + WD; tw = (1.94 * w) / sum; oy = tw * (view === 'hospital' ? (hospOut() ? 1.25 : 1.15) : 1.1) + (WD * tw) / 4; ox = w / 2 + ((WY - WD - WX) * tw) / 4; hgt = Math.round(oy + ((WX + WY) * tw) / 4 + tw * 0.95); }
     cv.width = w * dpr; cv.height = hgt * dpr; cv.style.width = `${w}px`; cv.style.height = `${hgt}px`;
     scroller.scrollLeft = (w - avail) / 2; lastMin = -1; if (ins && focus >= 0) setCam(FOCUS_ZOOM, center(focus, ILAY)); else setCam(1, [0, 0]);
   }
@@ -476,9 +477,9 @@ export function mountSiteFloor(host, opts = {}) {
   }
   // ---------- hospital building: floor slab, service corridor, emblem ----------
   function hospitalBase(now) {
-    const th = Z(0.32); const A = P(0, WY); const B = P(WX, WY); const C = P(WX, 0); const ch = corrH; const rect = (y0, y1, x0 = 0.2, x1 = WX - 0.2) => [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)];
+    const th = Z(0.32); const A = P(0, WY); const B = P(WX, WY); const C = P(WX, hospOut() ? -WD : 0); const ch = corrH; const rect = (y0, y1, x0 = 0.2, x1 = WX - 0.2) => [P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)];
     poly([A, B, [B[0], B[1] + th], [A[0], A[1] + th]], shade(pal.slab, 0.9)); poly([B, C, [C[0], C[1] + th], [B[0], B[1] + th]], shade(pal.slab, 0.72));   // building slab (visible sides)
-    poly([P(0, 0), P(WX, 0), P(WX, WY), P(0, WY)], hospOut() ? pal.grass : pal.floor); if (hospOn()) return;   // the campus draws its own ground in campusGround()
+    { const yb = hospOut() ? -WD : 0; poly([P(0, yb), P(WX, yb), P(WX, WY), P(0, WY)], hospOut() ? pal.grass : pal.floor); } if (hospOn()) return;   // the campus draws its own ground in campusGround()
     ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.beginPath(); for (let i = 0; i <= Math.floor(WX); i++) { const a2 = P(i, 0); const b2 = P(i, WY); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); } for (let i = 0; i <= Math.floor(WY); i++) { const c2 = P(0, i); const d2 = P(WX, i); ctx.moveTo(c2[0], c2[1]); ctx.lineTo(d2[0], d2[1]); } ctx.stroke();
     ctx.globalAlpha = 0.9; poly(rect(CYc - ch, CYc + ch), pal.corr); ctx.globalAlpha = 1; poly(rect(CYc - ch, CYc + ch), null, pal.grid, 1.5);
     ctx.save(); ctx.strokeStyle = pal.brand; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(1.5, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); ctx.beginPath(); const l0 = P(1.7, CYc); const l1 = P(WX - 1.7, CYc); ctx.moveTo(l0[0], l0[1]); ctx.lineTo(l1[0], l1[1]); ctx.stroke(); ctx.restore();
@@ -663,16 +664,6 @@ export function mountSiteFloor(host, opts = {}) {
         for (let x = x0 + 0.2; x < x1 - 0.3; x += 0.42) { if (skipDoor && r === 0 && Math.abs(x + 0.15 - gx) < 0.6) continue; faceY(x, x + 0.3, y1 + 0.006, za, zb, GLASS); }
         for (let y = y0 + 0.2; y < y1 - 0.3; y += 0.42) faceX(x1 + 0.006, y, y + 0.3, za, zb, GLASS); }
     };
-    out.push({ d: 7.2 + 1.6, f: () => {   // tall ward block at the back: balconies + purple vertical bars
-      box(7.2, 1.6, 2.5, 2.2, 4.4, CREAM);
-      for (const z of [0.2, 1.0, 1.8, 2.6, 3.4]) { faceY(5.97, 8.43, 2.701, z + 0.72, z + 0.82, TAN); for (let x = 6.05; x < 8.35; x += 0.4) faceY(x, x + 0.26, 2.702, z + 0.1, z + 0.58, GLASS); }
-      for (let x = 6.0; x < 8.45; x += 0.4) faceY(x, x + 0.06, 2.703, 0.1, 4.3, PUR);
-      for (const z of [0.9, 1.7, 2.5, 3.3, 4.1]) faceX(8.451, 0.55, 2.65, z, z + 0.1, TAN);
-    } });
-    out.push({ d: 8.4 + 2.9, f: () => {   // tan tower
-      box(8.4, 2.9, 1.2, 1.6, 3.6, TAN); box(8.4, 2.9, 1.28, 1.68, 0.1, TAN2, 3.6);
-      for (const z of [0.5, 1.3, 2.1, 2.9]) { for (const x of [7.95, 8.3, 8.65]) faceY(x, x + 0.22, 3.702, z, z + 0.45, GLASS); for (const y of [2.25, 2.65, 3.05]) faceX(9.002, y, y + 0.22, z, z + 0.45, GLASS); }
-    } });
     out.push({ d: 7.5 + 4.55, f: () => {   // tier 1 + the entrance with its canopy
       tier(7.5, 4.55, 3.0, 3.2, 0, 1.25, 2, true);
       faceY(gx - 0.45, gx + 0.45, 6.152, 0, 0.8, DOOR); faceY(gx - 0.4, gx - 0.03, 6.153, 0.04, 0.74, GLASS); faceY(gx + 0.03, gx + 0.4, 6.153, 0.04, 0.74, GLASS);
@@ -693,7 +684,7 @@ export function mountSiteFloor(host, opts = {}) {
     } });
     out.forEach((it) => items.push({ d: TO[0] + TO[1] + K * (it.d - FROM[0] - FROM[1]), f: () => placed(K, FROM, TO, it.f) }));
   }
-  const LAWNS = [[0.2, 0.2, 10.9, 3.85], [7.6, 4.0, 11.0, 7.9], [15.7, 4.7, 19.4, 11.7]];   // grass of the campus (x0, y0, x1, y1)
+  const LAWNS = [[0.2, -5.2, 10.9, 3.85], [7.6, 4.0, 11.0, 7.9], [15.7, 4.7, 20.8, 11.7], [10.9, -5.2, 20.8, 0.3]];   // grass of the campus (x0, y0, x1, y1)
   // ---------- hospital campus: ground, roads, traffic, parking ----------
   /** A prism over a world polygon (any winding) · only the faces turned to the viewer are drawn · `top` overrides the roof colour. */
   const qs = (c, f) => wsh(c, Math.round(f * 50) / 50);
@@ -747,8 +738,8 @@ export function mountSiteFloor(host, opts = {}) {
   function buildCampus(L) {
     const R = L.road.w; const f0 = L.road.front[0]; const e0 = L.road.east[0];
     const yN = f0 + R * 0.27; const yS = f0 + R * 0.73; const xW = e0 + R * 0.27; const xE = e0 + R * 0.73;
-    const paths = [roundPath([[0.2, yN], [xW, yN], [xW, -0.2]], 0.7), roundPath([[xE, -0.2], [xE, yS], [0.2, yS]], 0.7)];
-    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < 3; k++) cars.push({ pa, off: (k / 3) * pa.len + pi * 2.1, sp: 1.5 + 0.35 * hash01(pi * 9 + k), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
+    const Dd = L.world.D || 0; const paths = [roundPath([[0.2, yN], [xW, yN], [xW, -Dd - 0.2]], 0.7), roundPath([[xE, -Dd - 0.2], [xE, yS], [0.2, yS]], 0.7)];
+    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < 4; k++) cars.push({ pa, off: (k / 3) * pa.len + pi * 2.1, sp: 1.5 + 0.35 * hash01(pi * 9 + k), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
     const ems = { pa: paths[0], off: paths[0].len * 0.25, sp: 2.3, v: { kind: 'ems' } };
     const parked = []; let n = 0;
     L.lots.forEach((lot, li) => {
@@ -756,9 +747,9 @@ export function mountSiteFloor(host, opts = {}) {
       for (let row = 0; row < 2; row++) for (let b = 0; b < nb; b++) { n += 1; if (li === 1 && row === 0 && b < 2) continue; if (hash01(n * 7 + li) > 0.58) continue; parked.push({ x: x0 + (b + 0.5) * bw, y: (row ? yb : ya) + 0.55, ang: row ? -Math.PI / 2 : Math.PI / 2, v: { kind: hash01(n) > 0.8 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(n * 3) * CAR_COLS.length)], lit: false } }); }
       lot.bw = bw; lot.nb = nb; lot.bx = x0; lot.ya = ya; lot.yb = yb;
     });
-    const lamps = []; for (let x = 2.2; x < e0 - 1; x += 4.6) if (Math.abs(x - L.gate[0]) > 1.6) lamps.push({ x, y: f0 - 0.14 }); for (let y = 2.4; y < f0 - 1; y += 4.6) lamps.push({ x: e0 - 0.14, y });
+    const lamps = []; for (let x = 2.2; x < e0 - 1; x += 4.6) if (Math.abs(x - L.gate[0]) > 1.6) lamps.push({ x, y: f0 - 0.14 }); for (let y = 2.4 - Math.floor((Dd + 1) / 4.6) * 4.6; y < f0 - 1; y += 4.6) lamps.push({ x: e0 - 0.14, y });
     const trees = []; for (let x = 1.4; x < e0 - 1; x += 3.1) if (Math.abs(x - L.gate[0]) > 2.2 && !lamps.some((q) => Math.abs(q.x - x) < 0.9)) trees.push({ x, y: f0 - L.road.walk / 2 - 0.02 });
-    for (let y = 3.2; y < f0 - 1.2; y += 3.1) if (Math.abs(y - shelterY(f0)) > 1.4 && !lamps.some((q) => q.x > e0 - 1 && Math.abs(q.y - y) < 0.9)) trees.push({ x: e0 - L.road.walk / 2 - 0.02, y });
+    for (let y = 3.2 - Math.floor((Dd + 1) / 3.1) * 3.1; y < f0 - 1.2; y += 3.1) if (Math.abs(y - shelterY(f0)) > 1.4 && !lamps.some((q) => q.x > e0 - 1 && Math.abs(q.y - y) < 0.9)) trees.push({ x: e0 - L.road.walk / 2 - 0.02, y });
     return { paths, cars, ems, parked, lamps, trees, shelter: { x: e0 - L.road.walk / 2, y: shelterY(f0) } };
   }
   let CMP = null; let CMPfor = null;
@@ -769,13 +760,23 @@ export function mountSiteFloor(host, opts = {}) {
   }
   /** The flat ground of the campus (drawn under everything): paving, the two public roads with their markings, the car parks. */
   function campusGround() {
-    const L = HL; const { GX, GY } = L.world; const camp = L.campus; const ro = L.road; const R = ro.w; const f0 = ro.front[0]; const e0 = ro.east[0]; const wk = ro.walk; const gx = L.gate[0];
+    const L = HL; const { GX, GY } = L.world; const camp = L.campus; const ro = L.road; const R = ro.w; const f0 = ro.front[0]; const e0 = ro.east[0]; const wk = ro.walk; const gx = L.gate[0]; const Y0 = camp.y0;
     const rc = (x0, y0, x1, y1, col, a = 1) => { ctx.globalAlpha = a; poly(rectPts(x0, y0, x1, y1), col); ctx.globalAlpha = 1; };
     const line = (x0, y0, x1, y1, col, lw, dash) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, tw * lw); ctx.lineCap = 'butt'; ctx.setLineDash(dash ? [tw * 0.14, tw * 0.12] : []); const a = P(x0, y0); const b = P(x1, y1); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.restore(); };
     // paving of the whole campus, the lawns, the avenue to the main entrance and the paths to the emergency building
-    rc(0.15, 0.15, camp.x1 - 0.1, f0 - wk, pal.walk);
+    rc(0.15, Y0 + 0.15, camp.x1 - 0.1, f0 - wk, pal.walk);
     for (const [x0, y0, x1, y1] of LAWNS) rc(x0, y0, x1, y1, pal.grass);
     rc(L.avenue.x0, L.bld.main.y1 - 0.2, L.avenue.x1, f0 - wk, pal.corr, 0.7);
+    if (L.site) {
+      const D = L.world.D; const rx = L.rear.x; const ry = L.rear.y;
+      rc(7.6, -4.75, 17.6, 4.8, pal.walk);   // paving round the rear buildings and the car park
+      rc(7.6, -1.25, 17.6, 0.2, pal.road); ctx.save(); ctx.strokeStyle = pal.roadLine; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); { const a2 = P(7.8, -0.52); const b2 = P(17.4, -0.52); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); } ctx.restore();   // service road between the rear buildings and the car park
+      rc(rx[0] + 0.25, ry - 0.05, rx[1] - 0.25, 4.8, pal.corr, 0.8); rc(7.6, 4.1, 17.6, 4.6, pal.corr, 0.8);   // rear exit road + the path along the back of the main building
+      rc(7.4, 4.1, 8.4, 9.3, pal.corr, 0.8); rc(4.5, 8.4, 13.9, 9.3, pal.corr, 0.8);   // link roads: emergency building ↔ main building (front) and up the side to the skywalk
+      ctx.save(); ctx.strokeStyle = pal.roadLine; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); { const a = P(4.7, 8.85); const b = P(13.4, 8.85); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); } ctx.restore();
+      rc(rx[0] - 0.3, ry - 0.95, rx[1] + 0.3, ry + 0.05, pal.road);   // the road beyond the rear exit
+      siteGround();
+    }
     { let pa = L.entry; for (const q of L.walk.er) { rc(Math.min(pa[0], q[0]) - 0.42, Math.min(pa[1], q[1]) - 0.42, Math.max(pa[0], q[0]) + 0.42, Math.max(pa[1], q[1]) + 0.42, pal.corr, 0.7); pa = q; } }
     ctx.save(); ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.globalAlpha = 0.7; ctx.beginPath(); for (let y = L.bld.main.y1 + 0.2; y < f0 - wk; y += 0.6) { const a = P(L.avenue.x0, y); const b = P(L.avenue.x1, y); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke(); ctx.restore();
     // car parks beside the building (right one: ambulance bay with red hatching)
@@ -785,15 +786,15 @@ export function mountSiteFloor(host, opts = {}) {
     });
     { const lot = L.lots[1]; const bx0 = lot.bx; const bx1 = lot.bx + 2 * lot.bw; rc(bx0, lot.ya, bx1, lot.ya + 1.05, '#dc2626', 0.26); ctx.save(); ctx.strokeStyle = '#dc2626'; ctx.globalAlpha = 0.6; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.beginPath(); for (let k = 0; k < 7; k++) { const xa = bx0 + (k / 6) * (bx1 - bx0); const a = P(xa, lot.ya); const c = P(Math.min(bx1, xa + 0.5), lot.ya + 1.05); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); } ctx.stroke(); ctx.restore(); }
     // sidewalks + kerbs, then the two public roads as one L-shaped asphalt area
-    rc(0, f0 - wk, e0, f0, pal.curb); rc(e0 - wk, 0, e0, f0 - wk, pal.curb); line(0, f0, GX, f0, pal.kerb, 0.03); line(e0, 0, e0, f0, pal.kerb, 0.03);
-    rc(0, f0, GX, GY, pal.road); rc(e0, 0, GX, f0, pal.road);
+    rc(0, f0 - wk, e0, f0, pal.curb); rc(e0 - wk, Y0, e0, f0 - wk, pal.curb); line(0, f0, GX, f0, pal.kerb, 0.03); line(e0, Y0, e0, f0, pal.kerb, 0.03);
+    rc(0, f0, GX, GY, pal.road); rc(e0, Y0, GX, f0, pal.road);
     ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = pal.roadWear; for (const lane of [f0 + R * 0.27, f0 + R * 0.73]) { const a = P(0, lane - 0.17); const b = P(e0, lane - 0.17); const c = P(e0, lane + 0.17); const d = P(0, lane + 0.17); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.fill(); } ctx.restore();   // darker wheel tracks
-    line(0, f0 + 0.1, e0 - 0.02, f0 + 0.1, pal.roadLine, 0.022); line(0, GY - 0.1, GX, GY - 0.1, pal.roadLine, 0.022); line(e0 + 0.1, 0, e0 + 0.1, f0 - 0.02, pal.roadLine, 0.022); line(GX - 0.1, 0, GX - 0.1, f0, pal.roadLine, 0.022);
-    line(0, f0 + R / 2, e0 - 0.5, f0 + R / 2, pal.roadLine, 0.026, true); line(e0 + R / 2, 0, e0 + R / 2, f0 - 0.5, pal.roadLine, 0.026, true);
+    line(0, f0 + 0.1, e0 - 0.02, f0 + 0.1, pal.roadLine, 0.022); line(0, GY - 0.1, GX, GY - 0.1, pal.roadLine, 0.022); line(e0 + 0.1, Y0, e0 + 0.1, f0 - 0.02, pal.roadLine, 0.022); line(GX - 0.1, Y0, GX - 0.1, f0, pal.roadLine, 0.022);
+    line(0, f0 + R / 2, e0 - 0.5, f0 + R / 2, pal.roadLine, 0.026, true); line(e0 + R / 2, Y0, e0 + R / 2, f0 - 0.5, pal.roadLine, 0.026, true);
     for (let y = f0 + 0.2; y < GY - 0.25; y += 0.32) rc(gx - 1.0, y, gx + 1.0, y + 0.17, pal.zebra);   // zebra crossing at the main entrance
     { const yc = Math.min(f0 - 1.2, shelterY(f0) + 1.7); for (let x = e0 + 0.2; x < GX - 0.25; x += 0.32) rc(x, yc - 0.55, x + 0.17, yc + 0.55, pal.zebra); }   // zebra crossing on the right-hand road
     line(e0 + R * 0.5 + 0.08, f0 - 0.3, GX - 0.14, f0 - 0.3, pal.zebra, 0.035);   // stop line
-    poly(rectPts(0, 0, GX, GY), null, pal.brand, 2);
+    poly(rectPts(0, Y0, GX, GY), null, pal.brand, 2);
   }
   /** Moving cars + parked cars + street furniture, pushed into the depth-sorted list. */
   function campusItems(items, now, emsLive) {
@@ -818,7 +819,7 @@ export function mountSiteFloor(host, opts = {}) {
       for (const [txt, fs, dy, ox = 0] of lines) { let f = fs * u; ctx.font = `700 ${f}px ${font}`; const mw = ctx.measureText(txt).width; const mxw = (w - 0.1 - 2 * Math.abs(ox)) * u; if (mw > mxw) { f *= mxw / mw; ctx.font = `700 ${f}px ${font}`; } ctx.fillText(txt, (w / 2 + ox) * u, dy * u); }
     });
   }
-  const TREES = [[1.2, 1.3], [3.4, 0.9], [6.2, 1.6], [8.6, 1.0], [9.3, 2.6], [8.4, 5.2], [9.7, 6.9], [16.5, 6.0], [18.5, 7.4], [16.8, 9.8], [18.6, 10.8]];
+  const TREES = [[8.4, 5.1], [9.7, 6.9], [10.3, 5.6], [16.5, 6.0], [18.5, 7.4], [16.8, 9.8], [18.6, 10.8], [20.0, 9.2], [19.4, 5.6], [20.2, 11.2], [17.4, 5.4], [0.9, 8.0], [1.0, 6.2]];
   /** The emergency (accident) building, after the photo: low tan block of 3 floors with continuous window bands, a taller block at the right-hand end, a brown canopy with a red "อุบัติเหตุ–ฉุกเฉิน / EMERGENCY" sign,
    *  red traffic barriers in front and an ambulance at the side. It stands at the LEFT of the main hospital building. */
   function erBuilding(items, now, emsLive) {
@@ -853,15 +854,161 @@ export function mountSiteFloor(host, opts = {}) {
   }
   /** The name wall at the front gate (white wall, dark bands, ministry emblem): "โรงพยาบาลสันทราย · Sansai Hospital". */
   function signWall(items) {
-    const x0 = 15.1; const w = 3.2; const y = 12.0;
+    const x0 = 15.0; const w = 3.8; const y = 12.0; const WH = 1.05; const WALL = Cc('#efece4');
+    items.push({ d: x0 + w / 2 + y - 0.5, f: () => { for (let k = 0; k < 3; k++) box(x0 + 0.5 + k * 1.3, y - 0.45, 1.15, 0.2, 1.5 + (k % 2) * 0.12, Cc('#6d4aa0')); } });   // purple roof panels of the building behind the sign
     items.push({ d: x0 + w + y + 0.05, f: () => {
-      box(x0 + w / 2, y, w, 0.22, 0.95, Cc('#ece8dd'));
-      const fy = y + 0.112; signY(x0, fy, 0, w, 0.95, Cc('#ece8dd'), [['โรงพยาบาลสันทราย', 0.24, 0.36, 0.3], ['Sansai Hospital', 0.19, 0.62, 0.3]], '#111827');
-      wallY(x0, fy + 0.004, 0.95, (u) => {
-        ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.moveTo(0, 0.78 * u); ctx.lineTo(w * u, 0.7 * u); ctx.lineTo(w * u, 0.78 * u); ctx.lineTo(0, 0.86 * u); ctx.fill(); ctx.beginPath(); ctx.moveTo(0, 0.04 * u); ctx.lineTo(w * u, 0.04 * u); ctx.lineTo(w * u, 0.12 * u); ctx.lineTo(0, 0.12 * u); ctx.fill();
-        ctx.fillStyle = '#14532d'; ctx.beginPath(); ctx.arc(0.5 * u, 0.48 * u, 0.3 * u, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, 0.025 * u); ctx.beginPath(); ctx.arc(0.5 * u, 0.48 * u, 0.25 * u, 0, 7); ctx.moveTo(0.5 * u, 0.28 * u); ctx.lineTo(0.5 * u, 0.68 * u); ctx.stroke();
+      box(x0 + w / 2, y, w, 0.24, WH, WALL); box(x0 + w / 2, y, w + 0.08, 0.28, 0.05, Cc('#cfcabd'), WH);
+      const fy = y + 0.122; faceY(x0, x0 + w, fy, 0, WH, WALL);
+      wallY(x0, fy + 0.004, WH, (u) => {
+        ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.moveTo(0, 0.36 * u); ctx.lineTo(0.55 * u, 0.04 * u); ctx.lineTo(w * u, 0.04 * u); ctx.lineTo(w * u, 0.1 * u); ctx.lineTo(0.6 * u, 0.1 * u); ctx.lineTo(0, 0.43 * u); ctx.fill();   // black swoosh across the top
+        ctx.beginPath(); ctx.moveTo(0, 0.9 * u); ctx.lineTo(0.42 * u, 0.74 * u); ctx.lineTo(w * u, 0.74 * u); ctx.lineTo(w * u, 0.79 * u); ctx.lineTo(0.46 * u, 0.79 * u); ctx.lineTo(0, 0.96 * u); ctx.fill();   // thin line below
+        const ex = 0.95 * u; const ey = 0.47 * u; const r = 0.27 * u; ctx.fillStyle = '#14532d'; ctx.beginPath(); ctx.arc(ex, ey, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, 0.022 * u); ctx.beginPath(); ctx.arc(ex, ey, r * 0.88, 0, 7); ctx.stroke();
+        ctx.lineWidth = Math.max(1, 0.03 * u); ctx.beginPath(); ctx.moveTo(ex, ey - r * 0.62); ctx.lineTo(ex, ey + r * 0.62); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ex - r * 0.5, ey - r * 0.38); ctx.quadraticCurveTo(ex, ey - r * 0.7, ex + r * 0.5, ey - r * 0.38); ctx.stroke();   // staff + wings of the ministry emblem
+        ctx.beginPath(); for (let k = 0; k <= 12; k++) { const t2 = k / 12; const px = ex + Math.sin(t2 * Math.PI * 3) * r * 0.22; const py = ey - r * 0.5 + t2 * r * 1.0; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.stroke();   // snake
+        ctx.fillStyle = '#111827'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; let f = 0.25 * u; ctx.font = `700 ${f}px ${font}`; const t1 = 'โรงพยาบาลสันทราย'; const mx = (w - 1.55) * u; const m1 = ctx.measureText(t1).width; if (m1 > mx) { f *= mx / m1; ctx.font = `700 ${f}px ${font}`; } ctx.fillText(t1, 2.55 * u, 0.38 * u);
+        f = 0.2 * u; ctx.font = `700 ${f}px ${font}`; ctx.fillText('Sansai Hospital', 2.55 * u, 0.62 * u);
       });
     } });
+    items.push({ d: x0 + w + y + 0.4, f: () => { box(x0 + w / 2, y + 0.38, w + 0.1, 0.34, 0.16, Cc('#b9855f')); box(x0 + w / 2, y + 0.38, w - 0.06, 0.26, 0.1, Cc('#2f8f4e'), 0.16); for (const k of [0.6, 1.9, 3.2]) box(x0 + k, y + 0.28, 0.1, 0.08, 0.06, '#fde68a', 0.1); } });   // planter with hedge + ground spotlights
+  }
+  // ---------- rear buildings: three tall hospital blocks behind the front tiers (after the street-view photo) ----------
+  function highrise(x0, y0, x1, y1, fl, fh, wall, trim, kind) {
+    const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const W = x1 - x0; const D = y1 - y0; const H = fl * fh; const GL = Cc('#9dbbd4'); const BAL = Cc('#ece0c4');
+    box(cx, cy, W, D, H, wall); box(cx, cy, W + 0.1, D + 0.1, 0.1, trim, H); box(cx - W * 0.18, cy - D * 0.1, W * 0.42, D * 0.4, 0.34, Cc('#94a3b8'), H + 0.1); box(cx + W * 0.25, cy + D * 0.1, W * 0.2, D * 0.2, 0.22, Cc('#cbd5e1'), H + 0.1);
+    for (let f = 0; f < fl; f++) {
+      const za = f * fh + 0.17; const zb = za + fh * 0.5;
+      for (let x = x0 + 0.2; x < x1 - 0.32; x += 0.36) { if (f === 0 && Math.abs(x + 0.12 - cx) < 0.5) continue; faceY(x, x + 0.23, y1 + 0.006, za, zb, GL); }
+      for (let y = y0 + 0.2; y < y1 - 0.32; y += 0.36) faceX(x1 + 0.006, y, y + 0.23, za, zb, GL);
+      if (kind === 'balcony') { faceY(x0, x1, y1 + 0.008, za + fh * 0.5, za + fh * 0.6, BAL); faceX(x1 + 0.008, y0, y1, za + fh * 0.5, za + fh * 0.6, BAL); }
+      else { faceY(x0, x1, y1 + 0.008, f * fh + fh * 0.84, f * fh + fh * 0.92, trim); faceX(x1 + 0.008, y0, y1, f * fh + fh * 0.84, f * fh + fh * 0.92, trim); }
+    }
+    if (kind === 'bars') for (let x = x0 + 0.1; x < x1 - 0.05; x += 0.36) faceY(x + 0.24, x + 0.28, y1 + 0.009, 0.1, H - 0.1, Cc('#7a4bc4'));
+    faceY(cx - 0.4, cx + 0.4, y1 + 0.01, 0, 0.55, '#475569'); faceY(cx - 0.36, cx - 0.03, y1 + 0.011, 0.04, 0.5, GL); faceY(cx + 0.03, cx + 0.36, y1 + 0.011, 0.04, 0.5, GL);
+  }
+  function rearBuildings(items) {
+    const B = [[7.8, -4.5, 11.0, -1.5, 6, 0.8, '#e6c79a', '#b9854a', 'bands'], [11.4, -4.5, 13.8, -1.8, 9, 0.78, '#ead9b8', '#9266d8', 'bars'], [14.0, -4.2, 16.1, -1.4, 8, 0.78, '#e0b987', '#b68f3c', 'balcony']];
+    B.forEach(([x0, y0, x1, y1, fl, fh, w, t, k]) => items.push({ d: x1 + y1 - 0.6, f: () => highrise(x0, y0, x1, y1, fl, fh, Cc(w), Cc(t), k) }));
+    // glazed link between the two eastern blocks + a bridge to the rear exit path
+    items.push({ d: 14.0 - 2.2, f: () => { box(13.9, -2.2, 0.5, 0.9, 0.5, Cc('#cfd8e1'), 1.6); faceY(13.66, 14.14, -1.749, 1.7, 2.0, Cc('#a9c9e2')); } });
+  }
+  // ---------- rear exit: barrier, guard booth, sign, a short road leaving the campus ----------
+  function rearGate(items, now) {
+    const [g0, g1] = HL.rear.x; const y = HL.rear.y; const gc = (g0 + g1) / 2;
+    for (const x of [g0 - 0.12, g1 + 0.12]) items.push({ d: x + y + 0.05, f: () => box(x, y, 0.2, 0.2, 0.95, Cc('#ece8dd')) });
+    items.push({ d: gc + y + 0.1, f: () => {
+      const open = reduced ? 0 : Math.max(0, Math.sin(now / 4200));   // the arm lifts now and then
+      const z0 = 0.62 + open * 0.0; const n = 6; for (let k = 0; k < n; k++) { const a = g0 + (k / n) * (g1 - g0); const b = g0 + ((k + 1) / n) * (g1 - g0); if (open > 0.6) { faceX(g0 - 0.02, y - 0.02 * k, y, 0.62 + k * 0.1, 0.7 + k * 0.1, k % 2 ? '#f8fafc' : '#dc2626'); } else faceY(a, b, y + 0.02, z0, z0 + 0.08, k % 2 ? '#f8fafc' : '#dc2626'); }
+      signY(g0 - 0.2, y + 0.04, 1.0, g1 - g0 + 0.4, 0.4, Cc('#0f766e'), [['ทางออกด้านหลัง', 0.14, 0.16], ['REAR EXIT', 0.095, 0.31]]);
+    } });
+    items.push({ d: g1 + 0.45 + y + 0.6, f: () => { box(g1 + 0.45, y + 0.3, 0.5, 0.46, 0.62, Cc('#f3ead2')); box(g1 + 0.45, y + 0.3, 0.58, 0.54, 0.07, Cc('#0f766e'), 0.62); faceY(g1 + 0.27, g1 + 0.63, y + 0.531, 0.28, 0.5, Cc('#a9c9e2')); } });
+  }
+  // ---------- construction site behind the emergency building ----------
+  const DIRT = '#c4a77c'; const CONC = '#b9bec6';
+  function siteGround() {
+    const S = HL.site; const rc = (x0, y0, x1, y1, col, a = 1) => { ctx.globalAlpha = a; poly(rectPts(x0, y0, x1, y1), col); ctx.globalAlpha = 1; };
+    rc(S.x0, S.y0, S.x1, S.y1, Cc(DIRT)); rc(S.x0 + 0.2, S.y0 + 0.2, 3.0, S.y0 + 1.6, Cc('#a98a5f'), 0.55); rc(3.6, -1.9, S.x1 - 0.3, -0.7, Cc('#a98a5f'), 0.45); rc(1.2, -1.5, 2.4, -0.6, Cc('#8f7450'), 0.5); rc(2.6, 1.6, 5.2, 3.3, Cc('#a98a5f'), 0.35);
+    ctx.save(); ctx.strokeStyle = Cc('#8a6d45'); ctx.globalAlpha = 0.6; ctx.lineWidth = Math.max(1, tw * 0.03); ctx.setLineDash([tw * 0.2, tw * 0.1]); for (const dx of [-0.16, 0.16]) { const a = P(3.8 + dx, S.y1); const b = P(3.8 + dx, -0.4); const c = P(2.4 + dx, -1.3); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.stroke(); } ctx.restore();   // tyre tracks from the gate
+    poly(rectPts(S.x0, S.y0, S.x1, S.y1), null, Cc('#d97706'), 1.4);
+  }
+  function mound(x, y, r, h, col) { const [sx, sy] = P(x, y); const rr = tw * r * 0.5; ctx.fillStyle = shade(col, 0.78); ctx.beginPath(); ctx.ellipse(sx, sy, rr, rr * 0.5, 0, 0, 7); ctx.fill(); ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(sx - rr, sy); ctx.quadraticCurveTo(sx - rr * 0.3, sy - Z(h) * 1.1, sx, sy - Z(h)); ctx.quadraticCurveTo(sx + rr * 0.3, sy - Z(h) * 1.1, sx + rr, sy); ctx.ellipse(sx, sy, rr, rr * 0.5, 0, 0, Math.PI); ctx.fill(); }
+  function fencePanels(items) {
+    const S = HL.site; const gap = [3.2, 4.4]; const SH = Cc('#e2e8f0'); const OR = Cc('#f59e0b'); const POST = Cc('#64748b');
+    for (let x = S.x0; x < S.x1 - 1e-6; x += 0.6) { const m = x + 0.3; if (m > gap[0] && m < gap[1]) continue; items.push({ d: m + S.y1 + 0.04, f: () => { faceY(x, x + 0.6, S.y1 + 0.01, 0, 0.5, ((x / 0.6) | 0) % 2 ? SH : Cc('#cbd5e1')); faceY(x, x + 0.6, S.y1 + 0.012, 0.42, 0.5, OR); box(x, S.y1, 0.06, 0.06, 0.56, POST); } }); }
+    for (let y = S.y0; y < S.y1 - 1e-6; y += 0.6) items.push({ d: S.x1 + y + 0.34, f: () => { faceX(S.x1 + 0.01, y, y + 0.6, 0, 0.5, ((y / 0.6) | 0) % 2 ? SH : Cc('#cbd5e1')); faceX(S.x1 + 0.012, y, y + 0.6, 0.42, 0.5, OR); box(S.x1, y, 0.06, 0.06, 0.56, POST); } });
+    for (const gx of gap) items.push({ d: gx + S.y1 + 0.05, f: () => { box(gx, S.y1, 0.14, 0.14, 0.8, Cc('#facc15')); for (let k = 0; k < 4; k++) faceY(gx - 0.07, gx + 0.07, S.y1 + 0.08, k * 0.2, k * 0.2 + 0.1, '#111827'); } });
+    items.push({ d: 1.6 + S.y1 + 0.2, f: () => signY(0.9, S.y1 + 0.03, 0.62, 1.6, 0.46, Cc('#f59e0b'), [['เขตก่อสร้าง', 0.17, 0.17], ['ห้ามผู้ไม่เกี่ยวข้องเข้า', 0.1, 0.34]], '#111827') });
+    for (const [x, y] of [[0.9, 3.45], [5.8, 3.4]]) items.push({ d: x + y, f: () => { box(x, y, 0.1, 0.1, 0.3, '#f97316'); box(x, y, 0.04, 0.04, 0.18, '#f8fafc', 0.3); } });   // traffic cones
+  }
+  /** The concrete frame of the new building: columns, slabs, rebar sticking out of the top floor, a green safety net on the lower floors. */
+  function buildingFrame() {
+    const xs = [1.7, 2.9, 4.1]; const ys = [1.0, 1.9, 2.8]; const FH = 0.8; const CN = Cc(CONC); const CN2 = Cc('#9aa1ab'); const cx = 2.9; const cy = 1.9;
+    for (let l = 0; l < 4; l++) {
+      for (const y of ys) for (const x of xs) box(x, y, 0.15, 0.15, FH, CN, l * FH);
+      if (l < 3) { box(cx, cy, 2.75, 2.1, 0.08, CN2, (l + 1) * FH - 0.08); faceY(1.52, 4.28, 2.951, (l + 1) * FH - 0.16, (l + 1) * FH - 0.08, CN); }
+    }
+    for (const y of ys) for (const x of xs) { for (const [dx, dy] of [[-0.04, -0.04], [0.04, 0.04]]) box(x + dx, y + dy, 0.025, 0.025, 0.2, '#f97316', 4 * FH); }
+    ctx.globalAlpha = 0.3; faceY(1.52, 4.28, 2.96, 0, 1.55, '#22c55e'); ctx.globalAlpha = 1;
+    for (let x = 1.52; x < 4.28; x += 0.3) faceY(x, x + 0.015, 2.965, 0, 1.55, 'rgba(22,101,52,.45)');
+    for (const x of [2.3, 3.5]) box(x, 1.9, 0.5, 0.35, 0.04, '#d6a35a', 3 * FH + 0.02);   // timber formwork on the second slab
+  }
+  /** Tower crane: striped mast, a jib that slowly swings, a counter-weight, trolley, cable and a hanging load. */
+  function crane(now) {
+    const cx = 5.4; const cy = 1.7; const H = 5.0; const Y = '#fbbf24'; const swing = reduced ? 0.25 : 0.25 + 0.32 * Math.sin(now / 5200); const L1 = 2.6; const L2 = 0.95;
+    for (let k = 0; k * 0.3 < H; k++) box(cx, cy, 0.2, 0.2, 0.3, k % 2 ? '#111827' : Y, k * 0.3);
+    box(cx, cy, 0.34, 0.34, 0.28, '#f59e0b', H); box(cx - 0.3, cy - 0.05, 0.3, 0.22, 0.22, '#e5e7eb', H + 0.05);
+    const T = [cx - L1 * Math.cos(swing), cy - L1 * Math.sin(swing) * 0.6 + L1 * 0.05]; const C = [cx + L2 * Math.cos(swing), cy + L2 * Math.sin(swing) * 0.6]; const top = H + 0.18;
+    const A = P(cx, cy, Z(top)); const Bt = P(T[0], T[1], Z(top)); const Cp = P(C[0], C[1], Z(top)); const apex = P(cx, cy, Z(top + 0.55));
+    ctx.save(); ctx.lineCap = 'round'; ctx.strokeStyle = Y; ctx.lineWidth = Math.max(2, tw * 0.05); ctx.beginPath(); ctx.moveTo(Cp[0], Cp[1]); ctx.lineTo(Bt[0], Bt[1]); ctx.stroke();
+    ctx.strokeStyle = '#111827'; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.beginPath(); for (let k = 1; k < 9; k++) { const u = k / 9; const x = Cp[0] + (Bt[0] - Cp[0]) * u; const y = Cp[1] + (Bt[1] - Cp[1]) * u; ctx.moveTo(x, y); ctx.lineTo(x + tw * 0.03, y - tw * 0.07 * (k % 2 ? 1 : 0.4)); } ctx.stroke();
+    ctx.strokeStyle = '#64748b'; ctx.lineWidth = Math.max(1, tw * 0.014); ctx.beginPath(); ctx.moveTo(apex[0], apex[1]); ctx.lineTo(Bt[0], Bt[1]); ctx.moveTo(apex[0], apex[1]); ctx.lineTo(Cp[0], Cp[1]); ctx.stroke(); ctx.restore();
+    box(C[0], C[1], 0.36, 0.26, 0.3, '#475569', top - 0.3);   // counter-weight
+    const u = reduced ? 0.6 : 0.62 + 0.18 * Math.sin(now / 3100 + 1); const hx2 = cx + (T[0] - cx) * u; const hy2 = cy + (T[1] - cy) * u; const drop = reduced ? 1.9 : 1.55 + 0.45 * (0.5 + 0.5 * Math.sin(now / 2300));
+    const j = P(hx2, hy2, Z(top)); const hk = P(hx2, hy2, Z(drop + 0.35)); ctx.save(); ctx.strokeStyle = '#334155'; ctx.lineWidth = Math.max(1, tw * 0.012); ctx.beginPath(); ctx.moveTo(j[0], j[1]); ctx.lineTo(hk[0], hk[1]); ctx.stroke(); ctx.restore();
+    box(hx2, hy2, 0.12, 0.12, 0.08, '#dc2626', drop + 0.3); box(hx2, hy2, 0.34, 0.2, 0.22, '#9ca3af', drop);   // hook + a load of concrete blocks
+  }
+  function digger(now) {
+    const x = 1.5; const y = 3.0; const sw = reduced ? 0 : Math.sin(now / 1500);
+    box(x, y, 0.95, 0.5, 0.16, '#1f2937'); box(x, y, 0.6, 0.46, 0.2, '#f59e0b', 0.16); box(x + 0.12, y, 0.3, 0.3, 0.2, '#fbbf24', 0.36); faceY(x + 0.02, x + 0.22, y + 0.152, 0.38, 0.52, '#a9c9e2');
+    const a = P(x + 0.28, y, Z(0.5)); const b = P(x + 0.28, y - 0.55 - 0.1 * sw, Z(0.95)); const c = P(x + 0.28, y - 0.95, Z(0.2 + 0.22 * (0.5 + 0.5 * sw)));
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = Math.max(2, tw * 0.05); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.stroke(); ctx.fillStyle = '#374151'; ctx.beginPath(); ctx.arc(c[0], c[1], Math.max(2, tw * 0.05), 0, 7); ctx.fill(); ctx.restore();
+  }
+  function tipper(x, y) {
+    box(x, y, 0.5, 0.46, 0.2, '#111827'); box(x, y, 0.42, 0.4, 0.26, '#f97316', 0.12); box(x + 0.45, y, 0.55, 0.44, 0.34, '#facc15', 0.14);
+    faceY(x + 0.36, x + 0.62, y + 0.221, 0.34, 0.46, '#a9c9e2'); for (const dx of [-0.2, 0.2, 0.55]) for (const dy of [-0.22, 0.22]) box(x + dx, y + dy, 0.14, 0.05, 0.14, '#0f172a');
+  }
+  function siteProps(items0, now) {
+    const SY = -4; const items = []; const done = () => items.forEach((it) => items0.push({ d: it.d + SY, f: () => placed(1, [0, 0], [0, SY], it.f) }));
+    items.push({ d: 2.9 + 1.9 + 0.8, f: buildingFrame }); items.push({ d: 5.4 + 1.7 + 0.5, f: () => crane(now) }); items.push({ d: 1.5 + 3.0 + 0.3, f: () => digger(now) });
+    items.push({ d: 3.9 + 3.2 + 0.5, f: () => tipper(3.7, 3.2) });
+    items.push({ d: 5.0 + 1.0 + 0.3, f: () => { mound(5.0, 1.0, 0.9, 0.38, Cc('#b08d5c')); mound(5.5, 1.35, 0.55, 0.26, Cc('#c9a56f')); } });
+    items.push({ d: 4.9 + 2.9 + 0.3, f: () => { for (let k = 0; k < 3; k++) box(4.9, 2.9 + k * 0.0, 0.8, 0.28, 0.1, '#cbd5e1', k * 0.1); for (let k = 0; k < 4; k++) box(5.5, 2.5 + k * 0.12, 0.5, 0.08, 0.08, '#94a3b8'); box(0.95, 1.7, 0.4, 0.8, 0.28, '#b45309'); box(0.95, 1.7, 0.4, 0.8, 0.04, '#d97706', 0.28); } });
+    items.push({ d: 0.9 + 2.3, f: () => { box(1.0, 2.4, 0.5, 0.5, 0.5, '#0ea5e9'); box(1.0, 2.4, 0.32, 0.32, 0.04, '#f8fafc', 0.5); } });   // site cabin
+    done();
+  }
+  // ---------- simulated life: doctors, nurses, patients (some in wheelchairs / with a drip), visitors, children and site workers walking the footpaths — atmosphere only, not data ----------
+  const SKINS = ['#f1c9a5', '#e0ac82', '#c68e64', '#8d5a3b'];
+  const VIS_COLS = ['#f97316', '#6366f1', '#ec4899', '#84cc16', '#0ea5e9', '#a855f7', '#f59e0b', '#ef4444'];
+  function ambFig(x, y, kind, now, seed, sc = 0.95) {
+    const [sx, sy] = P(x, y); const s = tw * 0.075 * sc * (kind === 'kid' ? 0.72 : 1); const bob = reduced || kind === 'wheel' || kind === 'stand' ? 0 : Math.abs(Math.sin(now / 170 + seed * 3)) * s * 0.16; const by = sy - bob; const skin = SKINS[seed % SKINS.length];
+    ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.2, s * 0.55, 0, 0, 7); ctx.fill();
+    const body = (col, ol) => { ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, by - s * 3.3, s * 1.7, s * 3.3, s * 0.7); ctx.fill(); if (ol) { ctx.strokeStyle = ol; ctx.lineWidth = Math.max(1, s * 0.16); ctx.stroke(); } };
+    const head = (hy) => { ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(sx, hy, s * 0.85, 0, 7); ctx.fill(); };
+    const hair = (hy) => { ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(sx, hy - s * 0.04, s * 0.88, Math.PI * 1.02, Math.PI * 1.98); ctx.fill(); };
+    if (kind === 'wheel') {
+      ctx.strokeStyle = '#1f2937'; ctx.lineWidth = Math.max(1.4, s * 0.24); ctx.beginPath(); ctx.arc(sx - s * 0.55, sy - s * 0.95, s * 0.95, 0, 7); ctx.stroke(); ctx.beginPath(); ctx.arc(sx + s * 0.85, sy - s * 0.4, s * 0.45, 0, 7); ctx.stroke();
+      ctx.fillStyle = '#475569'; ctx.fillRect(sx - s * 0.95, sy - s * 1.35, s * 1.8, s * 0.32);
+      ctx.fillStyle = '#bae6fd'; ctx.beginPath(); ctx.roundRect(sx - s * 0.7, by - s * 2.95, s * 1.4, s * 1.9, s * 0.5); ctx.fill(); ctx.fillStyle = '#93c5fd'; ctx.fillRect(sx - s * 0.75, by - s * 1.55, s * 1.5, s * 0.5);
+      head(by - s * 3.55); hair(by - s * 3.55); return;
+    }
+    if (kind === 'patient' && seed % 2 === 0) {   // drip stand
+      ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = Math.max(1, s * 0.14); ctx.beginPath(); ctx.moveTo(sx + s * 1.5, sy); ctx.lineTo(sx + s * 1.5, by - s * 5); ctx.moveTo(sx + s * 1.1, by - s * 5); ctx.lineTo(sx + s * 1.9, by - s * 5); ctx.stroke();
+      ctx.fillStyle = '#e0f2fe'; ctx.beginPath(); ctx.roundRect(sx + s * 1.25, by - s * 4.8, s * 0.5, s * 0.9, s * 0.2); ctx.fill(); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(1, s * 0.1); ctx.stroke();
+    }
+    if (kind === 'doctor') { body('#f8fafc', '#cbd5e1'); ctx.strokeStyle = '#334155'; ctx.lineWidth = Math.max(1, s * 0.15); ctx.beginPath(); ctx.arc(sx, by - s * 2.6, s * 0.5, 0.1, Math.PI - 0.1); ctx.stroke(); }
+    else if (kind === 'nurse') body('#14b8a6', '#0f766e');
+    else if (kind === 'patient') { body('#bfdbfe', '#93c5fd'); ctx.fillStyle = '#93c5fd'; ctx.fillRect(sx - s * 0.85, by - s * 1.6, s * 1.7, s * 0.28); }
+    else if (kind === 'worker') { body('#6b7280'); ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, by - s * 3.3, s * 1.7, s * 2.2, s * 0.6); ctx.fill(); ctx.fillStyle = '#e5e7eb'; ctx.fillRect(sx - s * 0.85, by - s * 2.3, s * 1.7, s * 0.2); }
+    else body(VIS_COLS[seed % VIS_COLS.length]);
+    head(by - s * 4); if (kind === 'worker') { ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(sx, by - s * 4.05, s * 0.95, Math.PI, 0); ctx.fill(); ctx.fillRect(sx - s * 1.1, by - s * 4.05, s * 2.2, s * 0.18); }
+    else if (kind === 'nurse') { hair(by - s * 4); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(sx - s * 0.6, by - s * 4.95, s * 1.2, s * 0.5, s * 0.15); ctx.fill(); }
+    else hair(by - s * 4);
+    if (kind === 'visitor' && seed % 3 === 0) { ctx.fillStyle = '#7c3aed'; ctx.beginPath(); ctx.roundRect(sx + s * 0.9, by - s * 1.9, s * 0.8, s * 0.9, s * 0.2); ctx.fill(); }
+  }
+  let AMB = null; let AMBfor = null;
+  function buildAmbient(L) {
+    const P0 = L.paths; if (!P0) return { walkers: [], stand: [] }; const pa = {}; for (const k of Object.keys(P0)) pa[k] = roundPath(P0[k], 0.25);
+    const W = []; const add = (path, kinds, base = 0) => kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); });
+    add('front', ['visitor', 'patient', 'visitor', 'kid', 'nurse']); add('ave', ['doctor', 'visitor', 'wheel', 'visitor', 'nurse', 'patient']); add('toEr', ['wheel', 'patient', 'nurse', 'visitor', 'doctor']);
+    add('link', ['nurse', 'doctor', 'wheel']); add('east', ['visitor', 'kid', 'visitor']); add('rear', ['doctor', 'visitor', 'nurse']); add('lotW', ['visitor', 'visitor']);
+    add('back', ['doctor', 'visitor']); add('lot', ['visitor', 'nurse', 'visitor']); add('bldg', ['doctor', 'visitor', 'nurse']); add('s5', ['worker']);
+    add('s1', ['worker', 'worker']); add('s2', ['worker']); add('s3', ['worker']); add('s4', ['worker', 'worker']);
+    const stand = [[4.1, 7.55, 'nurse', 1], [4.45, 7.62, 'patient', 2], [5.0, 7.5, 'visitor', 3], [13.0, 9.45, 'visitor', 4], [13.7, 9.5, 'doctor', 5], [12.5, 9.4, 'wheel', 6], [9.2, 6.4, 'kid', 7], [9.55, 6.55, 'visitor', 8], [3.2, 3.6, 'worker', 9], [4.0, 3.55, 'worker', 10], [16.4, 12.45, 'visitor', 11], [17.0, 12.5, 'kid', 12], [10.4, 4.3, 'visitor', 13], [12.6, 4.35, 'nurse', 14], [9.6, -0.9, 'doctor', 15], [12.9, -0.8, 'visitor', 16], [14.4, -0.9, 'wheel', 17]];
+    return { walkers: W, stand };
+  }
+  function ambientItems(items, now) {
+    const L = HL; if (AMBfor !== L) { AMB = buildAmbient(L); AMBfor = L; } const T = reduced ? 4 : now / 1000;
+    for (const w of AMB.walkers) { const len = w.q.len; const u = (((w.off + T * w.sp) % (2 * len)) + 2 * len) % (2 * len); const s = u < len ? u : 2 * len - u; const q = pathAt(w.q, s); items.push({ d: q.x + q.y + 0.01, f: () => ambFig(q.x, q.y, w.kind, now, w.seed, w.kind === 'worker' ? 0.9 : 0.95) }); }
+    for (const [x, y, kind, seed] of AMB.stand) items.push({ d: x + y + 0.01, f: () => ambFig(x, y, kind === 'wheel' ? 'wheel' : kind, now, seed, 0.95) });
   }
   function campusScene(items, labels, F, now, kit) {
     const L = HL; const f0 = L.road.front[0]; const e0 = L.road.east[0]; const gx = L.gate[0]; campusGround();
@@ -871,14 +1018,16 @@ export function mountSiteFloor(host, opts = {}) {
       ctx.globalAlpha = hov ? 0.32 : 0.15; poly(pad, bd.col); ctx.globalAlpha = 1; poly(pad, null, hov ? pal.ink : bd.col, hov ? 2.6 : 1.4);
       const [dx, dy] = P(b.door[0], b.door[1] + 0.4); ctx.globalAlpha = reduced ? 0.5 : 0.35 + 0.25 * Math.sin(now / 400); ctx.fillStyle = bd.col; ctx.beginPath(); ctx.ellipse(dx, dy, tw * 0.3, tw * 0.15, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
       bhits.push({ id: bd.id, d: b.c[0] + b.c[1], ...bbox([...rectPts(b.x0, b.y0, b.x1, b.y1), P(b.x0, b.y0, Z(b.h)), P(b.x1, b.y0, Z(b.h))]) });
+      if (bd.id === 'main' && L.back) { const k = L.back; bhits.push({ id: 'main', d: k.x0 + k.y0, ...bbox([...rectPts(k.x0, k.y0, k.x1, k.y1), P(k.x0, k.y0, Z(7.4)), P(k.x1, k.y0, Z(6.4))]) }); }
       const inside = ids.reduce((a, i) => a + F.at[i].length, 0); const cum = ids.reduce((a, i) => a + F.cum[i] * pfNow(), 0); const [lx, ly] = P(b.door[0], b.door[1] + 0.4, 0);
       labels.push({ x: lx, y: ly + tw * 0.34, text: `${bd.icon} ${bd.name} · ${ids.length ? `${ids.length} ระบบ` : 'ยังไม่มีระบบ'}`, col: bd.col, sc: 1 });
       labels.push({ x: lx, y: ly + tw * 0.34 + hh + 3, text: ids.length ? `ในอาคาร ${fmt(inside)} คน · เปิดหน้า ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(cum)} · คลิกเพื่อเข้า` : 'คลิกเพื่อเข้าไปดู', col: hov ? bd.col : null, sc: 0.8 });
     });
     { const [dx, dy] = P(gx, f0 - 0.35, 0); labels.push({ x: dx, y: dy, text: 'ทางเข้าหลัก', col: pal.brand, sc: 0.8 }); }
     { const [rx, ry] = P(3.4, f0 + L.road.w * 0.5, 0); labels.push({ x: rx, y: ry, text: 'ทางหลวง 1260', col: null, sc: 0.6 }); const [ex, ey] = P(e0 + L.road.w * 0.5, 6.5, 0); labels.push({ x: ex, y: ey, text: 'ทางหลวง 1001', col: null, sc: 0.6 }); }
-    L.lots.forEach((lot, li) => { const [px2, py2] = P((lot.x0 + lot.x1) / 2, lot.y1 - 0.5, 0); labels.push({ x: px2, y: py2, text: li ? '🅿 ที่จอดรถ · จอดรถพยาบาล' : '🅿 ที่จอดรถเจ้าหน้าที่', col: null, sc: 0.6 }); });
+    L.lots.forEach((lot, li) => { const [px2, py2] = P((lot.x0 + lot.x1) / 2, lot.y1 - 0.5, 0); labels.push({ x: px2, y: py2, text: ['🅿 ที่จอดรถเจ้าหน้าที่', '🅿 ที่จอดรถ · จอดรถพยาบาล', '🅿 ที่จอดรถด้านหลังตึกหลัก'][li] || '🅿 ที่จอดรถ', col: null, sc: 0.6 }); });
     erBuilding(items, now, emsLive); hospBuilding(items); skywalk(items); signWall(items);
+    if (L.site) { rearBuildings(items); rearGate(items, now); fencePanels(items); siteProps(items, now); ambientItems(items, now); const [fx, fy] = P(3.0, -2.1, Z(3.7)); labels.push({ x: fx, y: fy, text: '🚧 กำลังก่อสร้างอาคารใหม่', col: '#d97706', sc: 0.85 }); const [rx0, ry0] = P(L.rear.x[0] + 0.55, L.rear.y, Z(1.5)); labels.push({ x: rx0, y: ry0 - tw * 0.1, text: '🚪 ทางออกด้านหลัง', col: '#0f766e', sc: 0.7 }); }
     TREES.forEach(([x, y]) => items.push({ d: x + y, f: () => tree(x, y) }));
     campusItems(items, now, emsLive);
   }

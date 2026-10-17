@@ -615,19 +615,28 @@ export function bldOf(s, theme = themeOf(s)) {
   if (HOSP_BLDS.some((b) => b.id === id)) return id;
   return theme === 'ems' ? 'er' : 'main';
 }
-export const CAMPUS = { XE: 19.6, YE: 12.6 };
+export const CAMPUS = { XE: 21.0, YE: 12.6, D: 5.4 };   // D = extra depth added BEHIND the original campus (negative y): car park + the rear buildings + the rear exit   // the model floor is wider than the first version: room for the rear buildings, the plaza on the east side and the rear exit
 /** The campus from outside: two buildings (emergency building on the left, main hospital building right of it), the entrance avenue, the paths between them, two car parks, the front road (ทล.1260) and the east road (ทล.1001).
  *  `walk[id]` = the points a visitor passes after `entry` up to the building's door. */
 export function campusLayout() {
-  const H = HOSP; const { XE, YE } = CAMPUS; const GX = XE + H.WALK + H.ROAD; const GY = YE + H.WALK + H.ROAD; const gx = 13.4;
+  const H = HOSP; const { XE, YE } = CAMPUS; const GX = XE + H.WALK + H.ROAD; const GY = YE + H.WALK + H.ROAD; const gx = 13.4; const D = CAMPUS.D;
   const main = { id: 'main', x0: 11.3, x1: 15.5, y0: 1.9, y1: 9.5, door: [gx, 8.7], h: 5.4 };
   const er = { id: 'er', x0: 2.0, x1: 7.4, y0: 4.0, y1: 7.0, door: [4.7, 7.0], h: 3.9 };
   for (const b of [main, er]) b.c = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
   const entry = [gx, YE + 0.2];
+  const back = { x0: 7.6, x1: 16.2, y0: -4.6, y1: -1.3 };   // the three tall buildings at the very back (behind the car park): one click zone → the main building
+  const site = { x0: 0.6, y0: -D + 0.8, x1: 6.4, y1: 3.7 };  // construction site behind the emergency building (a new building is going up)
+  const rear = { x: [16.35, 17.45], y: -D + 0.25 };           // rear exit of the hospital (gap in the back hedge)
+  /** Footpaths (world points): the simulated patients, doctors, nurses and visitors walk along them (ping-pong) — atmosphere only, not data. */
+  const paths = {
+    front: [[1.0, YE + 0.2], [XE - 1.0, YE + 0.2]], ave: [[gx, YE + 0.2], [gx, 9.0]], toEr: [[gx, 10.1], [10.5, 10.1], [10.5, 8.85], [er.door[0], 8.85], [er.door[0], er.door[1] + 0.35]],
+    link: [[10.5, 8.85], [7.9, 8.85], [7.9, 4.35]], east: [[gx, YE + 0.2], [18.0, YE + 0.2], [18.0, 7.0], [20.2, 7.0]], lotW: [[3.0, YE + 0.2], [3.0, 12.0], [4.7, 11.7]],
+    rear: [[rear.x[0] + 0.55, rear.y + 0.5], [rear.x[0] + 0.55, 4.35], [8.4, 4.35]], back: [[7.9, 4.35], [15.8, 4.35]], lot: [[8.4, 0.2], [16.0, 0.2]], bldg: [[8.2, -0.7], [16.3, -0.7]],
+    s1: [[1.4, -2.2], [4.6, -2.2]], s2: [[1.0, -3.4], [1.0, -0.5]], s3: [[5.4, -3.4], [5.4, -0.5]], s4: [[1.3, -0.5], [5.0, -0.5]], s5: [[3.8, 3.3], [3.8, -0.5]] };
   const walk = { main: [[gx, main.door[1] + 0.1]], er: [[gx, 10.1], [10.5, 10.1], [10.5, 8.85], [er.door[0], 8.85], [er.door[0], er.door[1] + 0.3]] };
-  return { interior: false, rooms: [], wings: [], bld: { main, er }, walk, entry, gate: [gx, YE], sy: YE / 2, avenue: { x0: gx - 1.2, x1: gx + 1.2 },
-    campus: { x0: 0, y0: 0, x1: XE, y1: YE }, road: { w: H.ROAD, front: [GY - H.ROAD, GY], east: [GX - H.ROAD, GX], walk: H.WALK },
-    lots: [{ x0: 0.6, x1: 9.8, y0: 9.35, y1: 12.45 }, { x0: 16.2, x1: 19.3, y0: 0.8, y1: 4.4 }], world: { GX, GY } };
+  return { interior: false, rooms: [], wings: [], bld: { main, er }, back, site, rear, paths, walk, entry, gate: [gx, YE], sy: YE / 2, avenue: { x0: gx - 1.2, x1: gx + 1.2 },
+    campus: { x0: 0, y0: -D, x1: XE, y1: YE }, road: { w: H.ROAD, front: [GY - H.ROAD, GY], east: [GX - H.ROAD, GX], walk: H.WALK },
+    lots: [{ x0: 0.6, x1: 9.8, y0: 9.35, y1: 12.45 }, { x0: 17.7, x1: 20.9, y0: 0.8, y1: 4.4 }, { x0: 8.0, x1: 16.3, y0: 0.4, y1: 3.9 }], world: { GX, GY, D } };
 }
 export const INT = { SIDE: 0.45, LOBBY: 2.3, ROOM_W: 2.0, ROOM_D: 2.0, GAP_X: 0.7, SP: 1.3, AVE: 2.4, AVE_GAP: 0.45, FRONT: 1.6, FRONT_ER: 2.6, EDGE: 0.3, MARGIN: 0.7 };
 /** Inside one building: lobby at the back, a back row and a front row of departments (one room = one system) on both sides of the avenue, the walking street (spine) between the rows, the entrance in the front wall.
