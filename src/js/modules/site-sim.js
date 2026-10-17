@@ -739,8 +739,8 @@ export function mountSiteFloor(host, opts = {}) {
   function buildCampus(L) {
     const R = L.road.w; const f0 = L.road.front[0]; const e0 = L.road.east[0];
     const yN = f0 + R * 0.27; const yS = f0 + R * 0.73; const xW = e0 + R * 0.27; const xE = e0 + R * 0.73;
-    const Dd = L.world.D || 0; const paths = [roundPath([[0.2, yN], [xW, yN], [xW, -Dd - 0.2]], 0.7), roundPath([[xE, -Dd - 0.2], [xE, yS], [0.2, yS]], 0.7)];
-    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < 4; k++) cars.push({ pa, off: (k / 3) * pa.len + pi * 2.1, sp: 1.5 + 0.35 * hash01(pi * 9 + k), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
+    const Dd = L.world.D || 0; const paths = [roundPath([[0.2, yN], [xW, yN], [xW, -Dd - 0.2]], 0.7), roundPath([[xE, -Dd - 0.2], [xE, yS], [0.2, yS]], 0.7), roundPath(L.road2, 0.7)];
+    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < (pi === 2 ? 3 : 4); k++) cars.push({ pa, off: (k / 3) * pa.len + pi * 2.1, sp: 1.5 + 0.35 * hash01(pi * 9 + k), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
     const ems = { pa: paths[0], off: paths[0].len * 0.25, sp: 2.3, v: { kind: 'ems' } };
     const parked = []; let n = 0;
     L.lots.forEach((lot, li) => {
@@ -771,9 +771,9 @@ export function mountSiteFloor(host, opts = {}) {
     rc(L.avenue.x0, L.bld.main.y1 - 0.2, L.avenue.x1, f0 - wk, pal.corr, 0.7);
     {   // the central connecting walkway (ทางเชื่อมกลาง): front gate → back of the campus, with the service lanes leaving it to the east, the covered links to the towers and the ground of the construction site
       const sp = L.avenue; const yBack = -L.world.D + 0.55; const dash = (x0, x1, y) => { ctx.save(); ctx.strokeStyle = pal.roadLine; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); const a2 = P(x0, y); const b2 = P(x1, y); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); ctx.restore(); };
-      for (const ln of L.lanes) { rc(ln.x0, ln.y0, ln.x1, ln.y1, pal.road); dash(ln.x0 + 0.2, ln.x1 - 0.2, (ln.y0 + ln.y1) / 2); }
+      for (const ln of L.lanes) { rc(ln.x0, ln.y0, ln.x1, ln.y1, pal.road); if (ln.x1 - ln.x0 >= ln.y1 - ln.y0) dash(ln.x0 + 0.2, ln.x1 - 0.2, (ln.y0 + ln.y1) / 2); else { ctx.save(); ctx.strokeStyle = pal.roadLine; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); const a2 = P((ln.x0 + ln.x1) / 2, ln.y0 + 0.2); const b2 = P((ln.x0 + ln.x1) / 2, ln.y1 - 0.2); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); ctx.restore(); } }
       rc(sp.x0, yBack, sp.x1, f0 - wk, pal.corr, 0.8); poly(rectPts(sp.x0, yBack, sp.x1, f0 - wk), null, pal.grid, 1.2);
-      for (const k of L.towers) { const ym = (k.y0 + k.y1) / 2; rc(sp.x1 - 0.1, ym - 0.45, k.x0, ym + 0.45, pal.corr, 0.8); }
+      for (const l of L.links) rc(Math.min(l.x0, l.x1) - 0.05, l.y - 0.45, Math.max(l.x0, l.x1) + 0.05, l.y + 0.45, pal.corr, 0.8);
       siteGround();
     }
     for (const wp of [L.walk.er, L.walk.main]) { let pa = L.entry; for (const q of wp) { rc(Math.min(pa[0], q[0]) - 0.42, Math.min(pa[1], q[1]) - 0.42, Math.max(pa[0], q[0]) + 0.42, Math.max(pa[1], q[1]) + 0.42, pal.corr, 0.7); pa = q; } }
@@ -818,9 +818,10 @@ export function mountSiteFloor(host, opts = {}) {
       for (const [txt, fs, dy, ox = 0] of lines) { let f = fs * u; ctx.font = `700 ${f}px ${font}`; const mw = ctx.measureText(txt).width; const mxw = (w - 0.1 - 2 * Math.abs(ox)) * u; if (mw > mxw) { f *= mxw / mw; ctx.font = `700 ${f}px ${font}`; } ctx.fillText(txt, (w / 2 + ox) * u, dy * u); }
     });
   }
-  const TREES = [[1.6, 3.7], [3.4, 2.2], [2.2, 0.4], [4.2, -1.4], [1.8, -3.2], [4.6, -4.6], [2.4, -5.8], [7.6, 3.4], [9.8, 3.9], [10.5, 1.6], [8.0, 0.6], [10.2, -0.8], [7.0, -1.2],
+  const TREES0 = [[1.6, 3.7], [3.4, 2.2], [2.2, 0.4], [4.2, -1.4], [1.8, -3.2], [4.6, -4.6], [2.4, -5.8], [7.6, 3.4], [9.8, 3.9], [10.5, 1.6], [8.0, 0.6], [10.2, -0.8], [7.0, -1.2],
     [1.0, 9.4], [6.6, 10.9], [9.4, 10.9], [16.2, 11.2], [18.2, 11.6], [20.4, 10.4], [22.6, 11.4], [24.6, 10.6], [21.8, 9.6], [22.8, 1.8], [24.2, 0.6], [22.6, -0.8], [24.4, 2.6],
     [17.0, -15.5], [19.5, -15.6], [22.6, -14.6], [24.0, -12.8], [23.8, -15.4], [11.0, -13.0], [9.0, -12.2], [11.2, -15.2]];
+  const TREES = TREES0.filter(([x, y]) => !(x > 21.9 && x < 24.3 && y > -11.6 && y < 12.0) && !(x > 14.6 && y > 10.2 && y < 12.0));
   /** The emergency (accident) building, after the photo: low tan block of 3 floors with continuous window bands, a taller block at the right-hand end, a brown canopy with a red "อุบัติเหตุ–ฉุกเฉิน / EMERGENCY" sign,
    *  red traffic barriers in front and an ambulance at the side. It stands at the LEFT of the main hospital building. */
   function erBuilding(items, now, emsLive) {
@@ -848,10 +849,19 @@ export function mountSiteFloor(host, opts = {}) {
     items.push({ d: x1 - 0.5 + by + 0.05, f: () => vehicle(x1 - 0.5, by, -Math.PI / 2, { kind: 'ems' }, now, emsLive) });
   }
   /** Covered skywalk between the emergency building and the main building (steel columns, a glazed band). */
-  function skywalk(items) {
-    const x0 = HL.bld.er.x1; const x1 = HL.bld.main.door[0] - 1.8; const y = 6.4; const xm = (x0 + x1) / 2; const GLASS = Cc('#a9c9e2'); const a = HL.avenue;
-    for (const x of [a.x0 - 0.2, a.x1 + 0.2]) items.push({ d: x + y + 0.3, f: () => box(x, y, 0.2, 0.2, 1.7, Cc('#94a3b8')) });   // the columns stand on both sides of the walkway: the bridge crosses over it
-    items.push({ d: x1 + y + 0.5, f: () => { box(xm, y, x1 - x0, 0.8, 0.55, Cc('#cfd8e1'), 1.7); faceY(x0 + 0.1, x1 - 0.1, y + 0.401, 1.82, 2.12, GLASS); box(xm, y, x1 - x0 + 0.1, 0.9, 0.05, Cc('#94a3b8'), 2.25); } });
+  function skywalk(items) {   // upper level of the two-storey central walkway
+    const a = HL.avenue; const gx = HL.gate[0]; const GLASS = Cc('#a9c9e2'); const DECK = Cc('#cfd8e1'); const RAIL = Cc('#94a3b8'); const Zd = 1.65; const yA = 9.2; const yB = -14.3;
+    // the open deck above the whole walkway: parapets on both sides, columns every 3 units
+    for (let y = yA; y > yB + 1e-6; y -= 1.0) { const y0 = Math.max(yB, y - 1.0); const ym = (y + y0) / 2;
+      items.push({ d: gx + ym + 0.3, f: () => { box(gx, ym, a.x1 - a.x0, y - y0 + 0.02, 0.1, DECK, Zd); faceX(a.x1 - 0.02, y0, y, Zd + 0.1, Zd + 0.26, RAIL); faceX(a.x0 + 0.04, y0, y, Zd + 0.1, Zd + 0.26, RAIL); } }); }
+    for (const y of [8.6, 5.6, 2.6, -0.4, -3.4, -6.4, -9.4, -12.4, -14.1]) for (const x of [a.x0 - 0.1, a.x1 + 0.1]) items.push({ d: x + y + 0.35, f: () => box(x, y, 0.18, 0.18, Zd, RAIL) });
+    // glazed bridges from the deck into EVERY building
+    for (const l of HL.links) { const xa = Math.min(l.x0, l.x1); const xb = Math.max(l.x0, l.x1); const xm = (xa + xb) / 2;
+      items.push({ d: xb + l.y + 0.5, f: () => { box(xm, l.y, xb - xa, 0.8, 0.55, Cc('#cfd8e1'), 1.7); faceY(xa + 0.05, xb - 0.05, l.y + 0.401, 1.82, 2.12, GLASS); box(xm, l.y, xb - xa + 0.1, 0.9, 0.05, RAIL, 2.25); } }); }
+    // stairs down to the ground at the front end of the deck (towards the gate)
+    for (let k = 0; k < 8; k++) { const y = yA + 0.14 + 0.27 * k; const ht = Zd + 0.1 - 0.2 * (k + 1); if (ht <= 0.02) break; items.push({ d: gx + 0.6 + y + 0.05, f: () => box(gx + 0.6, y, 0.9, 0.27, ht, Cc('#e2e8f0')) }); }
+    // lift + stair core at the back end of the deck
+    items.push({ d: gx - 14.55 + 0.6, f: () => { box(gx, -14.95, 1.7, 0.8, 2.1, Cc('#f3ead2')); box(gx, -14.95, 1.8, 0.9, 0.07, Cc('#0f766e'), 2.1); faceY(gx - 0.35, gx + 0.35, -14.55 + 0.006, 0, 1.0, GLASS); signY(gx - 0.6, -14.55 + 0.012, 1.25, 1.2, 0.4, Cc('#0f766e'), [['ลิฟต์ · บันได', 0.13, 0.2]]); } });
   }
   /** The name wall at the front gate (white wall, dark bands, ministry emblem): "โรงพยาบาลสันทราย · Sansai Hospital". */
   function signWall(items) {
@@ -890,12 +900,13 @@ export function mountSiteFloor(host, opts = {}) {
   function towerItems(items) {
     HL.towers.forEach((k) => items.push({ d: k.x1 + k.y1 - 0.6, f: () => highrise(k.x0, k.y0, k.x1, k.y1, k.fl, k.fh, Cc(k.wall), Cc(k.trim), k.kind) }));
   }
+  /** Lower level: a covered path from the central walkway to every building (emergency, main, both inpatient towers). */
   function linkItems(items) {
-    const xa = HL.avenue.x1 - 0.1; const ROOF = Cc('#0f766e'); const POST = Cc('#94a3b8');
-    HL.towers.forEach((k) => { const ym = (k.y0 + k.y1) / 2; const len = k.x0 - xa;
-      items.push({ d: xa + ym + 0.35, f: () => box(xa + 0.1, ym + 0.42, 0.12, 0.12, 1.0, POST) });
-      items.push({ d: k.x0 + ym + 0.2, f: () => { box(xa + len / 2, ym, len, 1.0, 0.07, ROOF, 1.0); box(xa + len / 2, ym, len + 0.08, 1.08, 0.03, Cc('#5eead4'), 1.07); } });
-      items.push({ d: k.x0 - 0.1 + ym + 0.45, f: () => box(k.x0 - 0.15, ym + 0.42, 0.12, 0.12, 1.0, POST) });
+    const ROOF = Cc('#0f766e'); const POST = Cc('#94a3b8');
+    HL.links.forEach((l) => { const xa = Math.min(l.x0, l.x1); const xb = Math.max(l.x0, l.x1); const len = xb - xa; const ym = l.y;
+      items.push({ d: xa + ym + 0.35, f: () => box(xa + 0.08, ym + 0.42, 0.12, 0.12, 1.0, POST) });
+      items.push({ d: xb + ym + 0.2, f: () => { box(xa + len / 2, ym, len, 1.0, 0.07, ROOF, 1.0); box(xa + len / 2, ym, len + 0.08, 1.08, 0.03, Cc('#5eead4'), 1.07); } });
+      items.push({ d: xb + ym + 0.45, f: () => box(xb - 0.08, ym + 0.42, 0.12, 0.12, 1.0, POST) });
     });
   }
   // ---------- side exit: barrier, guard booth, sign, in the east hedge beside inpatient tower 2, onto road 1001 ----------
@@ -984,8 +995,8 @@ export function mountSiteFloor(host, opts = {}) {
   // ---------- simulated life: doctors, nurses, patients (some in wheelchairs / with a drip), visitors, children and site workers walking the footpaths — atmosphere only, not data ----------
   const SKINS = ['#f1c9a5', '#e0ac82', '#c68e64', '#8d5a3b'];
   const VIS_COLS = ['#f97316', '#6366f1', '#ec4899', '#84cc16', '#0ea5e9', '#a855f7', '#f59e0b', '#ef4444'];
-  function ambFig(x, y, kind, now, seed, sc = 0.95) {
-    const [sx, sy] = P(x, y); const s = tw * 0.075 * sc * (kind === 'kid' ? 0.72 : 1); const bob = reduced || kind === 'wheel' || kind === 'stand' ? 0 : Math.abs(Math.sin(now / 170 + seed * 3)) * s * 0.16; const by = sy - bob; const skin = SKINS[seed % SKINS.length];
+  function ambFig(x, y, kind, now, seed, sc = 0.95, zl = 0) {
+    const [sx, sy] = P(x, y, zl ? Z(zl) : 0); const s = tw * 0.075 * sc * (kind === 'kid' ? 0.72 : 1); const bob = reduced || kind === 'wheel' || kind === 'stand' ? 0 : Math.abs(Math.sin(now / 170 + seed * 3)) * s * 0.16; const by = sy - bob; const skin = SKINS[seed % SKINS.length];
     ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.2, s * 0.55, 0, 0, 7); ctx.fill();
     const body = (col, ol) => { ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, by - s * 3.3, s * 1.7, s * 3.3, s * 0.7); ctx.fill(); if (ol) { ctx.strokeStyle = ol; ctx.lineWidth = Math.max(1, s * 0.16); ctx.stroke(); } };
     const head = (hy) => { ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(sx, hy, s * 0.85, 0, 7); ctx.fill(); };
@@ -1013,17 +1024,17 @@ export function mountSiteFloor(host, opts = {}) {
   let AMB = null; let AMBfor = null;
   function buildAmbient(L) {
     const P0 = L.paths; if (!P0) return { walkers: [], stand: [] }; const pa = {}; for (const k of Object.keys(P0)) pa[k] = roundPath(P0[k], 0.25);
-    const W = []; const add = (path, kinds, base = 0) => kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); });
+    const W = []; const add = (path, kinds, base = 0) => kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, z: path === 'deck' ? 1.75 : 0, kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); });
     add('front', ['visitor', 'patient', 'visitor', 'kid', 'nurse']); add('ave', ['doctor', 'visitor', 'wheel', 'visitor', 'nurse', 'patient']); add('toEr', ['wheel', 'patient', 'nurse', 'visitor', 'doctor']);
-    add('link', ['nurse', 'doctor', 'wheel']); add('east', ['visitor', 'kid', 'visitor']); add('rear', ['doctor', 'visitor', 'nurse']); add('lotW', ['visitor', 'visitor']);
-    add('back', ['doctor', 'visitor']); add('spine', ['doctor', 'visitor', 'nurse', 'wheel']); add('lotL', ['visitor', 'nurse']); add('lot', ['visitor', 'nurse', 'visitor']); add('bldg', ['doctor', 'visitor', 'nurse']); add('s5', ['worker']);
+    add('link', ['nurse', 'doctor', 'wheel']); add('lotW', ['visitor', 'visitor']);
+    add('spine', ['doctor', 'visitor', 'nurse', 'wheel']); add('deck', ['visitor', 'doctor', 'nurse', 'wheel']); add('lotL', ['visitor', 'nurse']); add('lot', ['visitor', 'nurse', 'visitor']); add('s5', ['worker']);
     add('s1', ['worker', 'worker']); add('s2', ['worker']); add('s3', ['worker']); add('s4', ['worker', 'worker']);
-    const dy = L.site ? L.site.dy : 0; const stand = [[6.0, 8.5, 'nurse', 1], [6.4, 8.62, 'patient', 2], [9.8, 8.5, 'visitor', 3], [17.0, 9.45, 'visitor', 4], [17.7, 9.5, 'doctor', 5], [16.5, 9.4, 'wheel', 6], [9.2, 2.4, 'kid', 7], [9.55, 2.55, 'visitor', 8], [3.2, 3.6 + dy, 'worker', 9], [4.0, 3.55 + dy, 'worker', 10], [18.4, 12.85, 'visitor', 11], [19.0, 12.9, 'kid', 12], [12.4, 4.0, 'visitor', 13], [14.4, 3.9, 'nurse', 14], [20.5, -1.4, 'doctor', 15], [17.8, -1.3, 'visitor', 16], [24.0, -10.0, 'wheel', 17]];
+    const dy = L.site ? L.site.dy : 0; const stand = [[6.0, 8.5, 'nurse', 1], [6.4, 8.62, 'patient', 2], [9.8, 8.5, 'visitor', 3], [17.0, 9.45, 'visitor', 4], [17.7, 9.5, 'doctor', 5], [16.5, 9.4, 'wheel', 6], [9.2, 2.4, 'kid', 7], [9.55, 2.55, 'visitor', 8], [3.2, 3.6 + dy, 'worker', 9], [4.0, 3.55 + dy, 'worker', 10], [18.4, 12.85, 'visitor', 11], [19.0, 12.9, 'kid', 12], [12.4, 4.0, 'visitor', 13], [14.4, 3.9, 'nurse', 14], [20.5, -1.4, 'doctor', 15], [17.8, -1.3, 'visitor', 16], [21.2, 0.8, 'wheel', 17]];
     return { walkers: W, stand };
   }
   function ambientItems(items, now) {
     const L = HL; if (AMBfor !== L) { AMB = buildAmbient(L); AMBfor = L; } const T = reduced ? 4 : now / 1000;
-    for (const w of AMB.walkers) { const len = w.q.len; const u = (((w.off + T * w.sp) % (2 * len)) + 2 * len) % (2 * len); const s = u < len ? u : 2 * len - u; const q = pathAt(w.q, s); items.push({ d: q.x + q.y + 0.01, f: () => ambFig(q.x, q.y, w.kind, now, w.seed, w.kind === 'worker' ? 0.9 : 0.95) }); }
+    for (const w of AMB.walkers) { const len = w.q.len; const u = (((w.off + T * w.sp) % (2 * len)) + 2 * len) % (2 * len); const s = u < len ? u : 2 * len - u; const q = pathAt(w.q, s); items.push({ d: q.x + q.y + (w.z ? 1.4 : 0.01), f: () => ambFig(q.x, q.y, w.kind, now, w.seed, w.kind === 'worker' ? 0.9 : 0.95, w.z) }); }
     for (const [x, y, kind, seed] of AMB.stand) items.push({ d: x + y + 0.01, f: () => ambFig(x, y, kind === 'wheel' ? 'wheel' : kind, now, seed, 0.95) });
   }
   function campusScene(items, labels, F, now, kit) {
@@ -1046,7 +1057,7 @@ export function mountSiteFloor(host, opts = {}) {
     towerItems(items); linkItems(items); sideGate(items, now); fencePanels(items); siteProps(items, now); ambientItems(items, now);
     { const [fx, fy] = P(3.0, -2.1 + L.site.dy, Z(3.7)); labels.push({ x: fx, y: fy, text: '🚧 กำลังก่อสร้างอาคารใหม่', col: '#d97706', sc: 0.85 }); }
     for (const k of L.towers) { const [tx, ty] = P((k.x0 + k.x1) / 2, k.y1, Z(k.fl * k.fh + 0.2)); labels.push({ x: tx, y: ty - tw * 0.1, text: '🛏 ' + k.name, col: '#9a6b2f', sc: 0.85 }); }
-    { const [sx, sy] = P(L.rear.x - 0.9, L.rear.y[0] - 0.2, Z(1.5)); labels.push({ x: sx, y: sy - tw * 0.1, text: '🚪 ทางออกด้านข้าง', col: '#0f766e', sc: 0.7 }); const [wx, wy] = P(gx, -6.0, 0); labels.push({ x: wx, y: wy, text: 'ทางเชื่อมกลาง', col: pal.brand, sc: 0.7 }); }
+    { const [sx, sy] = P(L.rear.x - 0.9, L.rear.y[0] - 0.2, Z(1.5)); labels.push({ x: sx, y: sy - tw * 0.1, text: '🚪 ทางออกด้านข้าง', col: '#0f766e', sc: 0.7 }); const [wx, wy] = P(gx, -6.0, 0); labels.push({ x: wx, y: wy, text: 'ทางเชื่อมกลาง 2 ชั้น (บน · ล่าง)', col: pal.brand, sc: 0.7 }); }
     TREES.forEach(([x, y]) => items.push({ d: x + y, f: () => tree(x, y) }));
     campusItems(items, now, emsLive);
   }

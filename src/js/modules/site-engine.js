@@ -632,8 +632,8 @@ export function campusLayout() {
   const entry = [gx, YE + 0.2];
   /** The two inpatient towers (ตึกผู้ป่วยใน): one click zone each → the main building (all systems live there). */
   const towers = [
-    { id: 'ipd1', name: 'ตึกผู้ป่วยใน 1', x0: 15.8, x1: 21.6, y0: -0.4, y1: 2.9, fl: 8, fh: 0.78, wall: '#e0b987', trim: '#b68f3c', kind: 'balcony' },
-    { id: 'ipd2', name: 'ตึกผู้ป่วยใน 2', x0: 15.8, x1: 21.6, y0: -15.0, y1: -11.7, fl: 9, fh: 0.78, wall: '#ead9b8', trim: '#9266d8', kind: 'bars' },
+    { id: 'ipd1', name: 'ตึกสายลม', x0: 15.8, x1: 21.6, y0: -0.4, y1: 2.9, fl: 8, fh: 0.78, wall: '#e0b987', trim: '#b68f3c', kind: 'balcony' },
+    { id: 'ipd2', name: 'ตึกแสงเดือน', x0: 15.8, x1: 21.6, y0: -15.0, y1: -11.7, fl: 9, fh: 0.78, wall: '#ead9b8', trim: '#9266d8', kind: 'bars' },
   ];
   const DY = -10.7;   // the construction site stands at the back-left (behind the staff car park), 10.7 behind where the first version had it
   const site = { x0: 0.6, y0: -4.6 + DY, x1: 6.4, y1: 3.7 + DY, dy: DY };
@@ -641,18 +641,22 @@ export function campusLayout() {
   const sign = { x0: 2.0, w: 3.8, y: 12.0, gap: [1.8, 6.0] };   // hospital name wall: on the road in front of the emergency building
   /** Car parks. rows = y of each row of stalls (cars nose-to-nose in pairs with a drive aisle between). */
   const lot = (x0, x1, y0, n, extra = {}) => { const rows = n === 4 ? [y0 + 0.15, y0 + 2.1, y0 + 3.65, y0 + 5.6] : [y0 + 0.15, y0 + 2.1]; return { x0, x1, y0, y1: rows[rows.length - 1] + 1.15, rows, ...extra }; };
-  const lots = [lot(0.6, 4.8, 4.4, 2, { ems: true, name: '🅿 ที่จอดรถ · จอดรถพยาบาล' }), lot(21.2, 25.6, 5.0, 2, { name: '🅿 ที่จอดรถผู้มารับบริการ' }), lot(6.8, 11.2, -9.0, 4, { name: '🅿 ที่จอดรถกลาง (ซ้าย)' }), lot(15.6, 25.0, -9.0, 4, { name: '🅿 ที่จอดรถกลาง (ขวา)' })];
-  const lanes = [{ x0: gx + 1.2, x1: 25.6, y0: 3.1, y1: 4.5 }, { x0: gx + 1.2, x1: 25.6, y0: -2.2, y1: -0.55 }, { x0: gx + 1.2, x1: XE - 0.1, y0: rear.y[0], y1: rear.y[1] }];   // service lanes that leave the walkway to the east
+  const lots = [lot(0.6, 4.8, 4.4, 2, { ems: true, name: '🅿 ที่จอดรถ · จอดรถพยาบาล' }), lot(6.8, 11.2, -9.0, 4, { name: '🅿 ที่จอดรถกลาง (ซ้าย)' }), lot(15.6, 21.8, -9.0, 4, { name: '🅿 ที่จอดรถกลาง (ขวา)' })];
+  // ONE long hospital road on the RIGHT side only: in at the main gate, along the front, straight back along the east side to the side exit — no road behind or in front of the buildings
+  const RX = 23.2; const lanes = [{ x0: gx + 1.2, x1: RX + 0.8, y0: 10.5, y1: 11.9 }, { x0: RX - 0.8, x1: RX + 0.8, y0: rear.y[0], y1: 11.9 }, { x0: RX + 0.8, x1: XE - 0.1, y0: rear.y[0], y1: rear.y[1] }];
+  const road2 = [[gx + 1.5, 11.2], [RX, 11.2], [RX, (rear.y[0] + rear.y[1]) / 2], [XE - 0.9, (rear.y[0] + rear.y[1]) / 2]];   // the way the cars drive on it
+  /** Links from the central walkway to EVERY building, on two levels: ground (covered path) and upper (glazed bridge). */
+  const links = [{ id: 'er', x0: er.x1, x1: gx - 1.2, y: 6.9 }, { id: 'main', x0: gx + 1.2, x1: main.x0, y: 6.9 }, ...towers.map((k) => ({ id: k.id, x0: gx + 1.2, x1: k.x0, y: (k.y0 + k.y1) / 2 }))];
   /** Footpaths (world points): the simulated patients, doctors, nurses and visitors walk along them (ping-pong) — atmosphere only, not data. */
   const sp = (a) => a.map(([x, y]) => [x, y + DY]);
   const paths = {
-    front: [[1.0, YE + 0.2], [XE - 1.0, YE + 0.2]], ave: [[gx - 0.5, YE + 0.2], [gx - 0.5, 3.8]], spine: [[gx + 0.5, 3.6], [gx + 0.5, -10.2]],
+    front: [[1.0, YE + 0.2], [XE - 1.0, YE + 0.2]], ave: [[gx - 0.5, YE + 0.2], [gx - 0.5, 3.8]], spine: [[gx + 0.5, 3.6], [gx + 0.5, -14.0]], deck: [[gx - 0.5, 9.0], [gx - 0.5, -14.0]],
     toEr: [[gx - 0.5, 10.1], [er.door[0] - 0.5, 10.1], [er.door[0] - 0.5, er.door[1] + 0.35]], link: [[gx + 0.5, 10.1], [main.door[0] + 0.6, 10.1], [main.door[0] + 0.6, main.door[1] + 0.4]],
-    east: [[22.4, YE + 0.2], [22.4, 9.0], [23.6, 8.6]], lotW: [[2.6, YE + 0.2], [2.6, 8.4]],
-    rear: [[XE - 1.0, -10.2], [19.0, -10.2], [19.0, -11.5]], back: [[15.4, 3.75], [24.6, 3.75]], lot: [[15.9, -7.35], [24.4, -7.35]], lotL: [[7.0, -7.35], [11.0, -7.35]], bldg: [[15.4, -1.3], [24.6, -1.3]],
+    lotW: [[2.6, YE + 0.2], [2.6, 8.4]],
+    lot: [[15.9, -7.35], [21.4, -7.35]], lotL: [[7.0, -7.35], [11.0, -7.35]],
     s1: sp([[1.4, -2.2], [4.6, -2.2]]), s2: sp([[1.0, -3.4], [1.0, -0.5]]), s3: sp([[5.4, -3.4], [5.4, -0.5]]), s4: sp([[1.3, -0.5], [5.0, -0.5]]), s5: sp([[3.8, 3.3], [3.8, -0.5]]) };
   const walk = { main: [[gx, main.door[1] + 0.9], [main.door[0], main.door[1] + 0.9], [main.door[0], main.door[1] + 0.1]], er: [[gx, 10.1], [er.door[0], 10.1], [er.door[0], er.door[1] + 0.3]] };
-  return { interior: false, rooms: [], wings: [], bld: { main, er }, towers, site, rear, sign, lanes, paths, walk, entry, gate: [gx, YE], sy: YE / 2, avenue: { x0: gx - 1.2, x1: gx + 1.2 },
+  return { interior: false, rooms: [], wings: [], bld: { main, er }, towers, site, rear, sign, lanes, road2, links, paths, walk, entry, gate: [gx, YE], sy: YE / 2, avenue: { x0: gx - 1.2, x1: gx + 1.2 },
     campus: { x0: 0, y0: -D, x1: XE, y1: YE }, road: { w: H.ROAD, front: [GY - H.ROAD, GY], east: [GX - H.ROAD, GX], walk: H.WALK }, lots, world: { GX, GY, D } };
 }
 export const INT = { SIDE: 0.45, LOBBY: 2.3, ROOM_W: 2.0, ROOM_D: 2.0, GAP_X: 0.7, SP: 1.3, AVE: 2.4, AVE_GAP: 0.45, FRONT: 1.6, FRONT_ER: 2.6, EDGE: 0.3, MARGIN: 0.7 };
