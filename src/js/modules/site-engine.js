@@ -594,7 +594,67 @@ export function hospitalLayout(items) {
 }
 /** Where the rank-th person of a hospital room stands (2 columns x 3 rows, beside the room's model). */
 export function hospStand(r, rank) { const q = rank % 6; return [r.ax - 0.3 * (q % 2), r.c[1] + (((q >> 1) % 3) - 1) * 0.44]; }
-/** People come OUT of the main hospital building (the staff): through its front door at the top of the avenue. */
-export function hospDoor(L) { return [L.gate[0], L.gate[1] + 0.12]; }
+/** People come OUT of the main hospital building (the staff): through its front door at the top of the avenue — inside a building they come in through its entrance in the front wall. */
+export function hospDoor(L) { return L.interior ? [L.entry[0], L.entry[1] - 0.15] : [L.gate[0], L.gate[1] + 0.12]; }
 /** Down the avenue to the walking street (spine), along it to the room's door; reverse it for the way back. */
-export function hospRoute(L, r) { return [[L.gate[0], L.sy], [r.door[0], L.sy], r.door]; }
+export function hospRoute(L, r) { return [[L.interior ? L.entry[0] : L.gate[0], L.sy], [r.door[0], L.sy], r.door]; }
+
+/* ================= View 2 · v3 — the hospital campus seen from outside (buildings only) + the inside of each building (departments) =================
+ *  Nothing is visible of the systems until the visitor clicks a building and walks in:
+ *   · main = อาคารโรงพยาบาลหลัก — every system except the vehicle one (wings: บริหารทั่วไป left of the avenue · พัฒนาคุณภาพ right of it)
+ *   · er   = อาคารอุบัติเหตุ–ฉุกเฉิน, standing at the LEFT of the hospital — the vehicle (ยานพาหนะ / รถพยาบาล) system lives here
+ *  A project can be moved with a `bld:main` / `bld:er` tag. */
+export const HOSP_BLDS = [
+  { id: 'main', name: 'อาคารโรงพยาบาลหลัก', short: 'ตึกโรงพยาบาลหลัก', icon: '🏥', col: '#7a4bc4' },
+  { id: 'er', name: 'อาคารอุบัติเหตุ–ฉุกเฉิน', short: 'ตึกอุบัติเหตุ', icon: '🚑', col: '#dc2626' },
+];
+export const BLD = (id) => HOSP_BLDS.find((b) => b.id === id) || HOSP_BLDS[0];
+/** Which building a project stands in: a `bld:main` / `bld:er` tag wins, otherwise the vehicle system (theme ems) → emergency building, everything else → main building. */
+export function bldOf(s, theme = themeOf(s)) {
+  const tag = (s.tags || []).map((t) => String(t).toLowerCase()).find((t) => t.startsWith('bld:')); const id = tag ? tag.slice(4) : '';
+  if (HOSP_BLDS.some((b) => b.id === id)) return id;
+  return theme === 'ems' ? 'er' : 'main';
+}
+export const CAMPUS = { XE: 19.6, YE: 12.6 };
+/** The campus from outside: two buildings (emergency building on the left, main hospital building right of it), the entrance avenue, the paths between them, two car parks, the front road (ทล.1260) and the east road (ทล.1001).
+ *  `walk[id]` = the points a visitor passes after `entry` up to the building's door. */
+export function campusLayout() {
+  const H = HOSP; const { XE, YE } = CAMPUS; const GX = XE + H.WALK + H.ROAD; const GY = YE + H.WALK + H.ROAD; const gx = 13.4;
+  const main = { id: 'main', x0: 11.3, x1: 15.5, y0: 1.9, y1: 9.5, door: [gx, 8.7], h: 5.4 };
+  const er = { id: 'er', x0: 2.0, x1: 7.4, y0: 4.0, y1: 7.0, door: [4.7, 7.0], h: 3.9 };
+  for (const b of [main, er]) b.c = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+  const entry = [gx, YE + 0.2];
+  const walk = { main: [[gx, main.door[1] + 0.1]], er: [[gx, 10.1], [10.5, 10.1], [10.5, 8.85], [er.door[0], 8.85], [er.door[0], er.door[1] + 0.3]] };
+  return { interior: false, rooms: [], wings: [], bld: { main, er }, walk, entry, gate: [gx, YE], sy: YE / 2, avenue: { x0: gx - 1.2, x1: gx + 1.2 },
+    campus: { x0: 0, y0: 0, x1: XE, y1: YE }, road: { w: H.ROAD, front: [GY - H.ROAD, GY], east: [GX - H.ROAD, GX], walk: H.WALK },
+    lots: [{ x0: 0.6, x1: 9.8, y0: 9.35, y1: 12.45 }, { x0: 16.2, x1: 19.3, y0: 0.8, y1: 4.4 }], world: { GX, GY } };
+}
+export const INT = { SIDE: 0.45, LOBBY: 2.3, ROOM_W: 2.0, ROOM_D: 2.0, GAP_X: 0.7, SP: 1.3, AVE: 2.4, AVE_GAP: 0.45, FRONT: 1.6, FRONT_ER: 2.6, EDGE: 0.3, MARGIN: 0.7 };
+/** Inside one building: lobby at the back, a back row and a front row of departments (one room = one system) on both sides of the avenue, the walking street (spine) between the rows, the entrance in the front wall.
+ *  @param {{group:string, bld:string, pv:number}[]} items one per project → `rooms` aligned with `items` (null = not in this building); busiest nearest the avenue, alternating back / front row.
+ *  The main building splits its rooms into the two wings (HOSP_GROUPS); the emergency building alternates left / right and keeps an ambulance bay in front. */
+export function interiorLayout(items, only) {
+  const H = INT; const er = only === 'er'; const rooms = Array(items.length).fill(null);
+  const idx = items.map((it, i) => i).filter((i) => items[i].bld === only).sort((a, b) => items[b].pv - items[a].pv || a - b);
+  const left = []; const right = [];
+  if (er) idx.forEach((i, k) => (k % 2 ? right : left).push(i)); else idx.forEach((i) => (HG(items[i].group).side < 0 ? left : right).push(i));
+  const colsOf = (n) => Math.max(er ? 1 : 2, Math.ceil(n / 2)); const wid = (c) => c * H.ROOM_W + (c - 1) * H.GAP_X;
+  const nl = colsOf(left.length); const nr = colsOf(right.length);
+  const AX0 = H.EDGE + H.SIDE + wid(nl) + H.AVE_GAP; const AX1 = AX0 + H.AVE; const XE = AX1 + H.AVE_GAP + wid(nr) + H.SIDE;
+  const yb0 = H.EDGE + H.LOBBY; const yb1 = yb0 + H.ROOM_D; const yf0 = yb1 + H.SP; const yf1 = yf0 + H.ROOM_D; const YE = yf1 + (er ? H.FRONT_ER : H.FRONT);
+  const GX = XE + H.MARGIN; const GY = YE + H.MARGIN; const wings = []; const free = [];
+  const cell = (side, k) => { const col = k >> 1; const front = !!(k & 1); const rx0 = side < 0 ? AX0 - H.AVE_GAP - (col + 1) * H.ROOM_W - col * H.GAP_X : AX1 + H.AVE_GAP + col * (H.ROOM_W + H.GAP_X); const y0 = front ? yf0 : yb0; return { front, x0: rx0, x1: rx0 + H.ROOM_W, y0, y1: y0 + H.ROOM_D }; };
+  [[-1, left], [1, right]].forEach(([side, arr]) => {
+    const g = er ? null : HOSP_GROUPS.find((q) => q.side === side); const nc = colsOf(arr.length);
+    arr.forEach((i, k) => {
+      const q = cell(side, k); const c = [(q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2];
+      rooms[i] = { i, group: g ? g.id : side < 0 ? 'admin' : 'quality', wcol: er ? '#dc2626' : g.col, front: q.front, x0: q.x0, x1: q.x1, y0: q.y0, y1: q.y1, c, w: H.ROOM_W, d: H.ROOM_D, door: [c[0], q.front ? q.y0 : q.y1], ax: q.x0 + H.ROOM_W * 0.76, px: q.x0 + H.ROOM_W * 0.33 };
+    });
+    if (er) for (let k = arr.length; k < 2 * nc; k++) { const q = cell(side, k); free.push({ ...q, c: [(q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2] }); }
+    if (g) wings.push({ id: g.id, side, count: arr.length, cols: nc, x0: side < 0 ? AX0 - H.AVE_GAP - wid(nc) : AX1 + H.AVE_GAP, x1: side < 0 ? AX0 - H.AVE_GAP : AX1 + H.AVE_GAP + wid(nc) });
+  });
+  const gx = (AX0 + AX1) / 2;
+  return { interior: true, bldId: only, rooms, wings, free, count: idx.length, sy: (yb1 + yf0) / 2, avenue: { x0: AX0, x1: AX1 }, entry: [gx, YE], gate: [gx, YE],
+    shell: { x0: H.EDGE, y0: H.EDGE, x1: XE, y1: YE }, lobby: { y0: H.EDGE, y1: yb0 }, rows: { back: [yb0, yb1], front: [yf0, yf1] },
+    bay: er ? { x0: AX1 + H.AVE_GAP, x1: XE - H.SIDE, y0: yf1 + 0.2, y1: YE - 0.15 } : null, world: { GX, GY } };
+}
