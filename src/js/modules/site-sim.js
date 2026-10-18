@@ -705,7 +705,7 @@ export function mountSiteFloor(host, opts = {}) {
     };
     wing(b.x0, ax - hwC, false, 'อาคารผู้ป่วยนอก', 'OUTPATIENT DEPARTMENT', '#7a4bc4'); wing(ax + hwC, b.x1, true, 'OPD', 'แผนกผู้ป่วยนอก', '#0f766e');
   }
-  const LAWNS = [[12.9, 3.0, 17.0, 8.7], [0.2, -15.8, 11.6, 4.2], [14.8, -15.8, 26.5, 4.3], [15.2, 9.5, 26.5, 12.2], [0.2, 9.0, 5.0, 12.2]];   // grass of the campus (x0, y0, x1, y1)
+  const LAWNS = [[0.2, -15.8, 11.6, 4.2], [14.8, -15.8, 26.5, 4.3], [15.2, 9.5, 26.5, 12.2], [0.2, 9.0, 5.0, 12.2]];   // grass of the campus (x0, y0, x1, y1)
   // ---------- hospital campus: ground, roads, traffic, parking ----------
   /** A prism over a world polygon (any winding) · only the faces turned to the viewer are drawn · `top` overrides the roof colour. */
   const qs = (c, f) => wsh(c, Math.round(f * 50) / 50);
@@ -760,7 +760,7 @@ export function mountSiteFloor(host, opts = {}) {
     const R = L.road.w; const f0 = L.road.front[0]; const e0 = L.road.east[0];
     const yN = f0 + R * 0.27; const yS = f0 + R * 0.73; const xW = e0 + R * 0.27; const xE = e0 + R * 0.73;
     const Dd = L.world.D || 0; const paths = [roundPath([[0.2, yN], [xW, yN], [xW, -Dd - 0.2]], 0.7), roundPath([[xE, -Dd - 0.2], [xE, yS], [0.2, yS]], 0.7), ...L.drives.map((d) => roundPath(d, 0.55))];   // 0-1 public roads · 2+ the hospital's own (staff) road
-    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < (pi < 2 ? 4 : pi === 2 ? 3 : 2); k++) cars.push({ pa, off: (k / 3) * pa.len + pi * 2.1, sp: (pi < 2 ? 1 : 0.62) * (1.5 + 0.35 * hash01(pi * 9 + k)), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
+    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < (pi < 2 ? 4 : [2, 1, 0, 2, 1, 1][pi - 2] ?? 1); k++) cars.push({ pi, pa, off: (k / 3) * pa.len + pi * 2.1, sp: (pi < 2 ? 1 : 0.62) * (1.5 + 0.35 * hash01(pi * 9 + k)), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
     const ems = { pa: paths[0], off: paths[0].len * 0.25, sp: 2.3, v: { kind: 'ems' } };
     const parked = []; let n = 0;
     L.lots.forEach((lot, li) => {
@@ -785,7 +785,7 @@ export function mountSiteFloor(host, opts = {}) {
   }
   /** The flat ground of the campus (drawn under everything): paving, the two public roads with their markings, the car parks. */
   function campusGround() {
-    const L = HL; const RXS = 25.8; const { GX, GY } = L.world; const camp = L.campus; const ro = L.road; const R = ro.w; const f0 = ro.front[0]; const e0 = ro.east[0]; const wk = ro.walk; const gx = L.gate[0]; const Y0 = camp.y0;
+    const L = HL; const RXS = 25.8; const WXA = 8.8; const { GX, GY } = L.world; const camp = L.campus; const ro = L.road; const R = ro.w; const f0 = ro.front[0]; const e0 = ro.east[0]; const wk = ro.walk; const gx = L.gate[0]; const Y0 = camp.y0;
     const rc = (x0, y0, x1, y1, col, a = 1) => { ctx.globalAlpha = a; poly(rectPts(x0, y0, x1, y1), col); ctx.globalAlpha = 1; };
     const line = (x0, y0, x1, y1, col, lw, dash) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, tw * lw); ctx.lineCap = 'butt'; ctx.setLineDash(dash ? [tw * 0.14, tw * 0.12] : []); const a = P(x0, y0); const b = P(x1, y1); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.restore(); };
     // paving of the whole campus, the lawns, the avenue to the main entrance and the paths to the emergency building
@@ -800,12 +800,13 @@ export function mountSiteFloor(host, opts = {}) {
       siteGround();
       const arrow = (x, y, dx, dy) => { const t = (a, b) => P(x + dx * a - dy * b, y + dy * a + dx * b); poly([t(-0.3, -0.07), t(0.1, -0.07), t(0.1, -0.17), t(0.34, 0), t(0.1, 0.17), t(0.1, 0.07), t(-0.3, 0.07)], pal.roadLine); };   // painted one-way arrows (as on the photo of the outpatient road)
       ctx.globalAlpha = 0.85;
-      for (const y of [10.7, 9.8]) arrow(gx, y, 0, -1);                                                   // the entrance: IN (north)
-      for (const x of [16.0, 18.4, 20.8, 23.0]) arrow(x, 9.6, 1, 0);                                      // the long road in front of the outpatient building: east, to the ramp
-      arrow(23.2, 10.65, 0, 1);                                                                           // …and down into the front road
-      for (const x of [21.5, 17.5, 8.0, 5.8]) arrow(x, 11.75, -1, 0);                                    // the front road: west, to the emergency building
-      for (const y of [6.6, 9.5]) arrow(3.5, y, 0, 1);                                                    // the road beside the emergency building: OUT (south)
-      for (const x of [6.0, 9.0]) arrow(x, -1.55, 1, 0); for (const y of [-4.5, -8.5]) arrow(12.1, y, 0, -1); for (const x of [9.0, 6.0]) arrow(x, -11.8, -1, 0); for (const y of [-8.0, -4.5]) arrow(3.5, y, 0, 1);   // the ring road: anticlockwise
+      arrow(gx, 12.45, 0, -1);                                                                                              // the entrance: IN (north)
+      for (const x of [16.0, 19.2, 21.8]) arrow(x, 11.3, 1, 0);                                                             // the front road: east, towards the outpatient loop
+      arrow(23.2, 10.7, 0, -1);                                                                                             // up at the east end …
+      for (const x of [21.2, 18.4, 15.6, 12.4, 10.6]) arrow(x, 9.7, -1, 0);                                                 // … then west along the road in front of the outpatient building (the ramp) …
+      for (const y of [6.0, 8.2, 10.6]) arrow(WXA + 0.5, y, 0, 1);                                                          // … and down the road beside the emergency building: OUT (south)
+      arrow(16.7, 10.0, 0, -1); arrow(16.7, 8.0, 0, -1); for (const x of [14.0, 12.0]) arrow(x, 7.0, -1, 0);               // the emergency car park: in at its east end, along the aisle to the west
+      for (const x of [12.0, 15.0]) arrow(x, -1.55, 1, 0); for (const y of [-4.5, -8.5]) arrow(16.6, y, 0, -1); for (const x of [14.0, 11.0]) arrow(x, -11.8, -1, 0); for (const y of [-8.0, -4.5]) arrow(WXA + 0.5, y, 0, 1);   // the ring road: anticlockwise
       ctx.globalAlpha = 1;
     }
     { const b = L.bikes; rc(b.x0, b.y0, b.x1, b.y1, pal.lot); poly(rectPts(b.x0, b.y0, b.x1, b.y1), null, pal.lotLine, 1); ctx.save(); ctx.strokeStyle = pal.lotLine; ctx.lineWidth = Math.max(1, tw * 0.014); ctx.beginPath(); for (const [ya, yb] of [[b.y0 + 0.1, b.y0 + 0.65], [b.y1 - 0.65, b.y1 - 0.1]]) for (let x = b.x0 + 0.2; x <= b.x1 - 0.15; x += 0.3) { const a = P(x, ya); const c = P(x, yb); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); } ctx.stroke(); ctx.restore(); }   // motorcycle bays
@@ -839,7 +840,7 @@ export function mountSiteFloor(host, opts = {}) {
   }
   const walkerShape = (w, p) => ({ x: p.x, y: p.y, r: w.kind === 'wheel' ? 0.27 : 0.2 });
   function trafficInit(C, A, emsLive) {
-    const L = HL; const cars = [...C.cars, C.ems]; cars.forEach((c, i) => { c.id = i; c.v0 = 0; c.vel = 0; c.wait = 0; c.q = null; c.d = carDims(c.v); c.ghost = false; });
+    const L = HL; const cars = [...C.cars, C.ems]; cars.forEach((c, i) => { c.id = i; c.base = c.pi === L.drives.length + 1 ? -300 + i : c.pi === L.drives.length ? -200 + i : c.pi === L.drives.length - 1 ? -100 + i : i; c.v0 = 0; c.vel = 0; c.wait = 0; c.q = null; c.d = carDims(c.v); c.ghost = false; });
     const statics = []; for (const p of C.parked) statics.push(rectOf({ x: p.x, y: p.y, ang: p.ang }, carDims(p.v), 0.04)); for (const b of C.bikes) statics.push({ x: b.x, y: b.y, ang: b.ang, l: 0.5, w: 0.2 });
     { const lot = L.lots.find((q) => q.ems); const bx = lot.bx + ((lot.emsAt || 0) + 1) * lot.bw; statics.push(rectOf({ x: bx, y: lot.rows[0] + 0.55, ang: Math.PI / 2 }, carDims({ kind: 'ems' }), 0.04)); }
     for (const [x, y, , , zl = 0] of A.stand) if (!zl) statics.push({ x, y, r: 0.2 });
@@ -858,13 +859,14 @@ export function mountSiteFloor(host, opts = {}) {
       if (c.ghost) { c.gt += dt; if (c.gt > 2.5) { const q0 = pathAt(c.pa, 0); const sh0 = rectOf(q0, c.d, 0.5); if (!hitsCar(sh0, c) && !hitsWalker(rectOf(q0, c.d, 0.8), null)) { c.ghost = false; c.s = 0; c.q = q0; c.vel = 0; c.wait = 0; c.hardT = 0; c.prio = undefined; } } continue; }
       const me = c.q; let block = false; let cross = false;
       for (const d of [0.6, 1.25]) { const q = pathAt(c.pa, Math.min(c.pa.len, c.s + d)); const probe = rectOf(q, c.d, 0.22);
-        for (const o of cars) { if (o === c || !shapesHit(probe, rectOf(o.q, o.d))) continue; const co = Math.cos(q.ang - o.q.ang); const ahead = (o.q.x - me.x) * Math.cos(me.ang) + (o.q.y - me.y) * Math.sin(me.ang) > 0; if (co > 0.6) { if (ahead) block = true; } else if (co > -0.6) { if ((o.prio ?? o.id) < (c.prio ?? c.id)) { block = true; cross = true; } } else if (shapesHit(rectOf(me, c.d), rectOf(o.q, o.d))) block = true; }
+        for (const o of cars) { if (o === c) continue; const orect = rectOf(o.q, o.d); const co = Math.cos(q.ang - o.q.ang); const ahead = (o.q.x - me.x) * Math.cos(me.ang) + (o.q.y - me.y) * Math.sin(me.ang) > 0;
+          if (co > 0.6) { if (ahead && shapesHit(probe, orect)) block = true; } else if (co > -0.6) { if ((o.prio ?? o.base) < (c.prio ?? c.base) && shapesHit(rectOf(q, c.d, 0.55), rectOf(o.q, o.d, 0.25))) { block = true; cross = true; } } else if (shapesHit(rectOf(me, c.d), orect)) block = true; }
         if (!block && hitsWalker(probe, null)) block = true; }
-      c.vel += ((block ? 0 : c.sp) - c.vel) * Math.min(1, dt * (block ? 9 : 3)); if (block && c.vel < 0.04) c.vel = 0; c.wait = block ? c.wait + dt : 0; if (block && cross && c.wait > 3) c.prio = c.id - 1000; else if (!block) { c.calm = (c.calm || 0) + dt; if (c.calm > 4) { c.prio = undefined; c.calm = 0; } }
+      c.vel += ((block ? 0 : c.sp) - c.vel) * Math.min(1, dt * (block ? 9 : 3)); if (block && c.vel < 0.04) c.vel = 0; c.wait = block ? c.wait + dt : 0; if (block && cross && c.wait > 3) c.prio = c.base - 1000; else if (!block) { c.calm = (c.calm || 0) + dt; if (c.calm > 4) { c.prio = undefined; c.calm = 0; } }
       const ns = c.s + c.vel * dt; const nq = pathAt(c.pa, Math.min(ns, c.pa.len)); const shape = rectOf(nq, c.d);
       if (!hitsCar(shape, c) && !hitsWalker(shape, null) && !hitsStatic(shape)) { c.s = ns; c.q = nq; c.hardT = 0; }
-      else { c.vel = 0; c.hardT = (c.hardT || 0) + dt; if (c.hardT > 2) c.prio = c.id - 1000; if (c.hardT > 3 && c.s > 0.6) { const bs = c.s - 0.7 * dt; const bq = pathAt(c.pa, bs); const bsh = rectOf(bq, c.d); if (!hitsCar(bsh, c) && !hitsWalker(bsh, null) && !hitsStatic(bsh)) { c.s = bs; c.q = bq; } } }   // squeezed against another car: back up a little and let it pass
-      if (c.s >= c.pa.len) { c.ghost = true; c.gt = 0; c.q = { x: -50, y: -50, ang: 0 }; } else if (c.wait > 20 || c.hardT > 12) { c.ghost = true; c.gt = 0; c.q = { x: -50, y: -50, ang: 0 }; }
+      else { c.vel = 0; c.hardT = (c.hardT || 0) + dt; if (c.hardT > 2) c.prio = c.base - 1000; if (c.hardT > 3 && c.s > 0.6) { const bs = c.s - 0.7 * dt; const bq = pathAt(c.pa, bs); const bsh = rectOf(bq, c.d); if (!hitsCar(bsh, c) && !hitsWalker(bsh, null) && !hitsStatic(bsh)) { c.s = bs; c.q = bq; } } }   // squeezed against another car: back up a little and let it pass
+      if (c.s >= c.pa.len) { c.ghost = true; c.ended = (c.ended || 0) + 1; c.gt = 0; c.q = { x: -50, y: -50, ang: 0 }; } else if (c.wait > 20 || c.hardT > 12) { c.ghost = true; c.gt = 0; c.q = { x: -50, y: -50, ang: 0 }; }
     }
     for (const w of walkers) {   // people walk to and fro; on the ground they never step into a car or an obstacle
       const len = w.q.len; let ns = w.s + w.dir * w.sp * dt; let dir = w.dir; if (ns >= len) { ns = len; dir = -1; } else if (ns <= 0) { ns = 0; dir = 1; }
@@ -909,12 +911,10 @@ export function mountSiteFloor(host, opts = {}) {
     [1.0, 9.4], [6.6, 10.9], [9.4, 10.9], [16.2, 11.2], [18.2, 11.6], [20.4, 10.4], [22.6, 11.4], [24.6, 10.6], [21.8, 9.6], [22.8, 1.8], [24.2, 0.6], [22.6, -0.8], [24.4, 2.6],
     [17.0, -15.5], [19.5, -15.6], [22.6, -14.6], [24.0, -12.8], [23.8, -15.4], [11.0, -13.0], [9.0, -12.2], [11.2, -15.2]];
   const TREES = TREES0.filter(([x, y]) => !(x > 24.3 && x < 26.8 && y > -11.6 && y < 12.6)                                    // hospital road, right
-    && !(x > 2.0 && x < 24.0 && y > 10.8 && y < 12.6) && !(x > 14.8 && x < 24.0 && y > 8.8 && y < 11.2) && !(x > 10.8 && x < 12.4 && y > 5.4 && y < 11.2)   // front road · drop-off loop · link road
-    && !(x < 2.8 && y > 6.8 && y < 8.9) && !(x > 2.5 && x < 3.9 && y > -6.4 && y < 12.0)                                 // new west exit · haul road / west branch
-    && !(x > 4.8 && x < 19.6 && y > -1.6 && y < 2.8) && !(x > 4.2 && x < 11.8 && y > -10.2 && y < -0.2)                   // emergency building + construction site behind it
-    && !(x > 3.6 && x < 11.8 && y > 2.6 && y < 8.6) && !(x > 16.8 && x < 24.8 && y > 3.2 && y < 8.8)                      // car park + ramp of the emergency building · outpatient building
-    && !(x > 16.8 && x < 19.2 && y > -12.2 && y < 4.2) && !(x > 19.4 && x < 24.8 && y > -0.8 && y < 3.4)                  // connecting walkway · tower 1
-    && !(x > 18.4 && x < 24.8 && y > -13.0 && y < -2.0) && !(x > 1.8 && x < 13.4 && y > -13.6 && y < -0.2) && !(x > 4.6 && x < 10.8 && y > 8.3 && y < 11.0));   // ring road round the site · motorcycle parking                                                               // car park + tower 2
+    && !(x > 7.6 && x < 17.8 && y > -13.8 && y < 8.8) && !(x > 7.6 && x < 10.0 && y > -13.8 && y < 12.6)                    // emergency building, car park in front, construction site, ring road, road beside the building
+    && !(x > 7.8 && x < 24.4 && y > 8.8 && y < 12.6) && !(x > 3.6 && x < 8.4 && y > 8.2 && y < 11.2)                      // front road · long road in front of the outpatient building · motorcycle parking
+    && !(x > 16.8 && x < 24.8 && y > 3.2 && y < 8.8) && !(x > 16.8 && x < 19.2 && y > -12.2 && y < 4.2)                    // outpatient building · connecting walkway
+    && !(x > 19.4 && x < 24.8 && y > -0.8 && y < 3.4) && !(x > 18.4 && x < 24.8 && y > -13.0 && y < -1.0));              // tower 1 · car park + tower 2
   /** The new exit in the west fence (left of the emergency building): a gantry with a board over the road. */
   function exitGates(items) {
     for (const e of HL.exits) items.push({ d: e.x + e.y1 + 0.8, f: () => { for (const y of [e.y0, e.y1]) box(e.x, y, 0.1, 0.1, 1.35, Cc('#475569')); box(e.x, (e.y0 + e.y1) / 2, 0.1, e.y1 - e.y0 + 0.1, 0.09, Cc('#0f766e'), 1.35); signX(e.y1, e.x + 0.08, 1.0, e.y1 - e.y0, 0.38, Cc('#0f766e'), [[e.name, 0.14, 0.15], ['NEW EXIT', 0.09, 0.29]]); } });
@@ -1082,8 +1082,8 @@ export function mountSiteFloor(host, opts = {}) {
     const S = HL.site; const dy = S.dy; const dx = S.dx || 0; const rc = (x0, y0, x1, y1, col, a = 1) => { ctx.globalAlpha = a; poly(rectPts(x0, y0, x1, y1), col); ctx.globalAlpha = 1; };
     rc(S.x0, S.y0, S.x1, S.y1, Cc(DIRT)); rc(S.x0 + 0.2, S.y0 + 0.2, 3.0 + dx, S.y0 + 1.6, Cc('#a98a5f'), 0.55); rc(3.6 + dx, -1.9 + dy, S.x1 - 0.3, -0.7 + dy, Cc('#a98a5f'), 0.45); rc(1.2 + dx, -1.5 + dy, 2.4 + dx, -0.6 + dy, Cc('#8f7450'), 0.5); rc(2.6 + dx, 1.6 + dy, 5.2 + dx, 3.3 + dy, Cc('#a98a5f'), 0.35);
     // the site entrance: a dirt spur from the west side of the ring road into the site
-    const hy = S.y0 + 3.7; rc(4.1, hy - 0.45, S.x0 + 1.6, hy + 0.45, Cc(DIRT), 0.85);
-    ctx.save(); ctx.strokeStyle = Cc('#8a6d45'); ctx.globalAlpha = 0.6; ctx.lineWidth = Math.max(1, tw * 0.03); ctx.setLineDash([tw * 0.2, tw * 0.1]); for (const d of [-0.16, 0.16]) { const a = P(4.1, hy + d); const b = P(S.x0 + 1.6, hy + d); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); } ctx.restore();
+    const hy = S.y0 + 3.7; rc(9.4, hy - 0.45, S.x0 + 1.6, hy + 0.45, Cc(DIRT), 0.85);
+    ctx.save(); ctx.strokeStyle = Cc('#8a6d45'); ctx.globalAlpha = 0.6; ctx.lineWidth = Math.max(1, tw * 0.03); ctx.setLineDash([tw * 0.2, tw * 0.1]); for (const d of [-0.16, 0.16]) { const a = P(9.4, hy + d); const b = P(S.x0 + 1.6, hy + d); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); } ctx.restore();
     poly(rectPts(S.x0, S.y0, S.x1, S.y1), null, Cc('#d97706'), 1.4);
   }
   function mound(x, y, r, h, col) { const [sx, sy] = P(x, y); const rr = tw * r * 0.5; ctx.fillStyle = shade(col, 0.78); ctx.beginPath(); ctx.ellipse(sx, sy, rr, rr * 0.5, 0, 0, 7); ctx.fill(); ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(sx - rr, sy); ctx.quadraticCurveTo(sx - rr * 0.3, sy - Z(h) * 1.1, sx, sy - Z(h)); ctx.quadraticCurveTo(sx + rr * 0.3, sy - Z(h) * 1.1, sx + rr, sy); ctx.ellipse(sx, sy, rr, rr * 0.5, 0, 0, Math.PI); ctx.fill(); }
@@ -1177,11 +1177,11 @@ export function mountSiteFloor(host, opts = {}) {
     add('toEr', ['wheel', 'patient', 'visitor']);
     add('lotE', ['visitor', 'nurse']); add('bikeW', ['visitor', 'nurse']);
     add('deckA', ['visitor', 'doctor', 'nurse', 'wheel', 'visitor']); add('deckB', ['nurse', 'visitor', 'wheel']); add('deckC', ['doctor', 'visitor', 'patient', 'nurse']); add('deckD', ['nurse', 'visitor', 'doctor']);   // upper storey of the connecting walkway
-    add('gA', ['visitor', 'patient', 'nurse', 'wheel', 'visitor', 'doctor', 'visitor']); add('gB', ['doctor', 'visitor', 'kid', 'visitor', 'nurse']); add('gC', ['nurse', 'visitor', 'wheel', 'patient', 'visitor']); add('gD', ['visitor', 'nurse', 'wheel', 'visitor']);   // ground storey
+    add('gA', ['visitor', 'patient', 'nurse', 'patient', 'visitor', 'doctor', 'visitor']); add('gB', ['doctor', 'visitor', 'kid', 'visitor', 'nurse']); add('gC', ['nurse', 'visitor', 'patient', 'patient', 'visitor']); add('gD', ['visitor', 'nurse', 'patient', 'visitor']);   // ground storey
     add('inA', ['visitor', 'nurse', 'visitor']); add('inB', ['visitor', 'doctor', 'visitor', 'wheel']);   // people walk from the car park into ตึกแสงเดือน (they fade out at its door) add('s5', ['worker']);
     add('s1', ['worker', 'worker']); add('s2', ['worker']); add('s3', ['worker']); add('s4', ['worker', 'worker']);
-    const dy = L.site ? L.site.dy : 0; const dx0 = L.site ? L.site.dx : 0; const stand = [[8.85, 3.1, 'nurse', 1], [9.15, 3.3, 'patient', 2], [21.6, 8.3, 'visitor', 4], [22.6, 8.3, 'doctor', 5], [18.4, 8.3, 'wheel', 6], [14.8, 6.5, 'kid', 7], [15.3, 7.0, 'visitor', 8], [3.2 + dx0 + 0.2, 3.6 + dy - 0.7, 'worker', 9], [4.0 + dx0, 3.55 + dy - 0.8, 'worker', 10], [15.2, 4.6, 'visitor', 13], [15.8, 5.2, 'nurse', 14], [22.0, -0.95, 'doctor', 15], [16.4, -1.3, 'visitor', 16], [15.6, 7.6, 'wheel', 17]];
-    if (L.corr) { const c = L.corr; stand.push([c.ax - 0.1, 2.4, 'visitor', 21, 0], [c.ax - 0.1, 2.85, 'patient', 22, 0], [c.ax - 0.1, 3.3, 'wheel', 23, 0], [c.ax - 0.1, 3.75, 'visitor', 24, 0], [c.ax - 0.42, 3.0, 'nurse', 25, 1.0], [c.ax + 0.42, 2.4, 'visitor', 26, 1.0]); }   // a queue on the ground storey, two people standing on the deck
+    const dy = L.site ? L.site.dy : 0; const dx0 = L.site ? L.site.dx : 0; const ed = L.bld.er.door[0]; const stand = [[ed + 0.85, 3.1, 'nurse', 1], [ed + 1.15, 3.3, 'patient', 2], [21.6, 8.3, 'visitor', 4], [22.6, 8.3, 'doctor', 5], [18.4, 8.3, 'wheel', 6], [5.6, 4.6, 'visitor', 13], [6.4, 5.4, 'nurse', 14], [6.0, 6.6, 'kid', 7], [6.6, 7.2, 'visitor', 8], [5.2, 7.8, 'wheel', 17], [3.2 + dx0 + 0.2, 3.6 + dy - 0.7, 'worker', 9], [4.0 + dx0, 3.55 + dy - 0.8, 'worker', 10], [22.0, -0.75, 'doctor', 15]];
+    if (L.corr) { const c = L.corr; stand.push([c.ax - 0.12, 2.4, 'visitor', 21, 0], [c.ax - 0.12, 2.85, 'patient', 22, 0], [c.ax - 0.12, 3.3, 'wheel', 23, 0], [c.ax - 0.12, 3.75, 'visitor', 24, 0], [c.ax - 0.42, 3.0, 'nurse', 25, 1.0], [c.ax + 0.42, 2.4, 'visitor', 26, 1.0]); }   // a queue on the ground storey, two people standing on the deck
     return { walkers: W, stand };
   }
   function ambientItems(items, now) {
@@ -1198,11 +1198,11 @@ export function mountSiteFloor(host, opts = {}) {
       const [dx, dy] = P(b.door[0], b.door[1] + 0.4); ctx.globalAlpha = reduced ? 0.5 : 0.35 + 0.25 * Math.sin(now / 400); ctx.fillStyle = bd.col; ctx.beginPath(); ctx.ellipse(dx, dy, tw * 0.3, tw * 0.15, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
       bhits.push({ id: bd.id, d: b.c[0] + b.c[1], ...bbox([...rectPts(b.x0, b.y0, b.x1, b.y1), P(b.x0, b.y0, Z(b.h)), P(b.x1, b.y0, Z(b.h))]) });
       if (bd.id === 'main') for (const k of L.towers) { const th = k.fl * k.fh + 0.5; bhits.push({ id: 'main', d: k.x0 + k.y0, ...bbox([...rectPts(k.x0, k.y0, k.x1, k.y1), P(k.x0, k.y0, Z(th)), P(k.x1, k.y0, Z(th))]) }); }
-      const inside = ids.reduce((a, i) => a + F.at[i].length, 0); if (inside > 0) { const nShow = Math.min(5, inside); items.push({ d: b.door[0] + b.door[1] + 3.2, f: () => usersInside(bd.id === 'er' ? b.door[0] : b.door[0], b.door[1], nShow, bd.col, now) }); } const cum = ids.reduce((a, i) => a + F.cum[i] * pfNow(), 0); const [lx, ly] = bd.id === 'er' ? P(3.2, 2.2, 0) : P(b.door[0], b.door[1] + 0.4, 0);
+      const inside = ids.reduce((a, i) => a + F.at[i].length, 0); if (inside > 0) { const nShow = Math.min(5, inside); items.push({ d: b.door[0] + b.door[1] + 3.2, f: () => usersInside(bd.id === 'er' ? b.door[0] : b.door[0], b.door[1], nShow, bd.col, now) }); } const cum = ids.reduce((a, i) => a + F.cum[i] * pfNow(), 0); const [lx, ly] = bd.id === 'er' ? P(b.x0 - 2.6, 2.4, 0) : P(b.door[0], b.door[1] + 0.4, 0);
       labels.push({ x: lx, y: ly + tw * 0.34, text: `${bd.icon} ${bd.name} · ${ids.length ? `${ids.length} ระบบ` : 'ยังไม่มีระบบ'}`, col: bd.col, sc: 1 });
       labels.push({ x: lx, y: ly + tw * 0.34 + hh + 3, text: ids.length ? `ในอาคาร ${fmt(inside)} คน · เปิดหน้า ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(cum)} · คลิกเพื่อเข้า` : 'คลิกเพื่อเข้าไปดู', col: hov ? bd.col : null, sc: 0.8 });
     });
-    { const [rlx, rly] = P(12.1, -6.5, 0); labels.push({ x: rlx, y: rly, text: '🔄 ถนนวนทวนเข็มนาฬิกา', col: null, sc: 0.65 }); }
+    { const [rlx, rly] = P(8.8, -6.5, 0); labels.push({ x: rlx, y: rly, text: '🔄 ถนนวนทวนเข็มนาฬิกา', col: null, sc: 0.65 }); }
     { const [dx, dy] = P(gx, f0 - 0.35, 0); labels.push({ x: dx, y: dy, text: '🚗 ทางเข้ารถของ รพ.', col: pal.brand, sc: 0.8 }); }
     { const [rx, ry] = P(3.4, f0 + L.road.w * 0.5, 0); labels.push({ x: rx, y: ry, text: 'ทางหลวง 1260', col: null, sc: 0.6 }); const [ex, ey] = P(e0 + L.road.w * 0.5, 6.5, 0); labels.push({ x: ex, y: ey, text: 'ทางหลวง 1001', col: null, sc: 0.6 }); }
     L.lots.forEach((lot) => { const [px2, py2] = P((lot.x0 + lot.x1) / 2, lot.y1 - 0.5, 0); labels.push({ x: px2, y: py2, text: lot.name || '🅿 ที่จอดรถ', col: null, sc: 0.6 }); });
