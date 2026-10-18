@@ -255,7 +255,7 @@ export function mountSiteFloor(host, opts = {}) {
       HL.rooms.forEach((r) => { if (!r) return; const gd = [r.door[0] - 0.4, r.door[0] + 0.4]; seg('x', r.y0, r.y1, r.x0, T, r.wcol); seg('x', r.y0, r.y1, r.x1, T, r.wcol); seg('y', r.x0, r.x1, r.front ? r.y0 : r.y1, T, r.wcol, gd); });
     } else if (!ins && HL) {
       const HC = '#2f8f4e'; const xe = HL.campus.x1; const ye = HL.campus.y1;   // tree hedge on the FRONT + EAST edges only (back and left: none) that face the public roads (gaps: main gate, hospital name wall, side exit)
-      const yb0 = (HL.world && HL.world.D) ? -HL.world.D : 0;       seg('y', 0.25, xe, ye - 0.25, 0.62, HC, [[HL.aprons[1].x0, HL.aprons[0].x1], HL.sign.gap], true); seg('x', yb0 + 0.25, ye - 0.25, xe - 0.25, 0.62, HC, HL.rear.y, true);
+      const yb0 = (HL.world && HL.world.D) ? -HL.world.D : 0;       seg('y', 0.25, xe, ye - 0.25, 0.62, HC, [[HL.aprons[1].x0, HL.aprons[0].x1], HL.sign.gap, [HL.aprons[2].x0, HL.aprons[2].x1]], true); seg('x', yb0 + 0.25, ye - 0.25, 0.22, 0.42, '#cbd5e1', [HL.exits[0].y0 + 0.1, HL.exits[0].y1 - 0.1]);   // west fence, open at the new exit seg('x', yb0 + 0.25, ye - 0.25, xe - 0.25, 0.62, HC, HL.rear.y, true);
     }
     return out;
   }
@@ -614,7 +614,7 @@ export function mountSiteFloor(host, opts = {}) {
       if (r) { stand = deptStand(r, rank); route = [[cx, CYc], [cx, r.c[1]], r.door]; const u = (W.map[sites[z].key] || { units: [] }).units[j.pg]; col = u ? roomColor(u.kind) : colOf(z); state = 'room'; }
       else { stand = headStand(d, rank); route = [[cx, CYc]]; }
     } else if (HL.interior) { const r = HL.rooms[z]; if (!r) return null; stand = hospStand(r, rank); route = hospRoute(HL, r); ent = hospDoor(HL, r); ext = ent; }
-    else { const wp = HL.walk[BL[z]]; stand = wp[wp.length - 1]; route = wp.slice(0, -1); ent = HL.entry; ext = ent; hid = true; }   // campus: walk from the front gate to the door of the building, then disappear inside
+    else { const wp = HL.walk[BL[z]]; stand = wp[wp.length - 1]; route = wp.slice(0, -1); ent = HL.entry; ext = ent; hid = true; if (tt < s0.start || tt >= s0.end) return null; return { pos: stand, state, zone: z, rank, col, a: 1, hid }; }   // campus: a visitor of the website is IN the building while the page is open (not drawn walking in and out)
     const fade = (p) => (hospOut() ? Math.min(1, Math.hypot(p[0] - ent[0], p[1] - ent[1]) / 0.9, Math.hypot(p[0] - stand[0], p[1] - stand[1]) / 0.5) : hospOn() ? Math.min(1, Math.hypot(p[0] - ent[0], p[1] - ent[1]) / 0.9) : 1);   // steps out of / back into a door: fades with the distance from it
     if (tt < s0.start) { const pos = along([ent, ...route, stand], (tt - j.enter) / Math.max(1, s0.start - j.enter)); return { pos, state: 'walk', zone: z, rank: 0, a: fade(pos) }; }
     if (tt < s0.end) return { pos: stand, state, zone: z, rank, col, a: 1, hid };
@@ -705,7 +705,7 @@ export function mountSiteFloor(host, opts = {}) {
     };
     wing(b.x0, ax - hwC, false, 'อาคารผู้ป่วยนอก', 'OUTPATIENT DEPARTMENT', '#7a4bc4'); wing(ax + hwC, b.x1, true, 'OPD', 'แผนกผู้ป่วยนอก', '#0f766e');
   }
-  const LAWNS = [[0.2, -15.8, 11.6, 4.2], [14.8, -15.8, 26.5, 4.3], [15.2, 9.5, 26.5, 12.2], [0.2, 9.0, 5.0, 12.2]];   // grass of the campus (x0, y0, x1, y1)
+  const LAWNS = [[12.9, 3.0, 17.0, 8.7], [0.2, -15.8, 11.6, 4.2], [14.8, -15.8, 26.5, 4.3], [15.2, 9.5, 26.5, 12.2], [0.2, 9.0, 5.0, 12.2]];   // grass of the campus (x0, y0, x1, y1)
   // ---------- hospital campus: ground, roads, traffic, parking ----------
   /** A prism over a world polygon (any winding) · only the faces turned to the viewer are drawn · `top` overrides the roof colour. */
   const qs = (c, f) => wsh(c, Math.round(f * 50) / 50);
@@ -760,7 +760,7 @@ export function mountSiteFloor(host, opts = {}) {
     const R = L.road.w; const f0 = L.road.front[0]; const e0 = L.road.east[0];
     const yN = f0 + R * 0.27; const yS = f0 + R * 0.73; const xW = e0 + R * 0.27; const xE = e0 + R * 0.73;
     const Dd = L.world.D || 0; const paths = [roundPath([[0.2, yN], [xW, yN], [xW, -Dd - 0.2]], 0.7), roundPath([[xE, -Dd - 0.2], [xE, yS], [0.2, yS]], 0.7), ...L.drives.map((d) => roundPath(d, 0.55))];   // 0-1 public roads · 2+ the hospital's own (staff) road
-    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < (pi < 2 ? 4 : pi === 3 ? 3 : 2); k++) cars.push({ pa, off: (k / 3) * pa.len + pi * 2.1, sp: (pi < 2 ? 1 : 0.62) * (1.5 + 0.35 * hash01(pi * 9 + k)), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
+    const cars = []; paths.forEach((pa, pi) => { for (let k = 0; k < (pi < 2 ? 4 : pi === 2 ? 3 : 2); k++) cars.push({ pa, off: (k / 3) * pa.len + pi * 2.1, sp: (pi < 2 ? 1 : 0.62) * (1.5 + 0.35 * hash01(pi * 9 + k)), v: { kind: k === 1 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(pi * 13 + k * 5) * CAR_COLS.length)] } }); });
     const ems = { pa: paths[0], off: paths[0].len * 0.25, sp: 2.3, v: { kind: 'ems' } };
     const parked = []; let n = 0;
     L.lots.forEach((lot, li) => {
@@ -768,12 +768,12 @@ export function mountSiteFloor(host, opts = {}) {
       lot.rows.forEach((ry, row) => { for (let b = 0; b < nb; b++) { n += 1; if (lot.ems && row === 0 && b >= (lot.emsAt || 0) && b < (lot.emsAt || 0) + 2) continue; if (hash01(n * 7 + li) > (lot.rows.length > 2 ? 0.5 : 0.58)) continue; if (L.corr && Math.abs(x0 + (b + 0.5) * bw - L.corr.ax) < 1.0 && ry + 0.55 < L.corr.yS && ry + 0.55 > L.corr.yE) continue; parked.push({ x: x0 + (b + 0.5) * bw, y: ry + 0.55, ang: row % 2 ? -Math.PI / 2 : Math.PI / 2, v: { kind: hash01(n) > 0.8 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(n * 3) * CAR_COLS.length)], lit: false } }); } });
       lot.bw = bw; lot.nb = nb; lot.bx = x0;
     });
-    const nd = (x) => x > L.aprons[1].x0 - 0.6 && x < L.aprons[0].x1 + 0.6;   // no lamp / tree in front of the two staff driveways
+    const nd = (x) => (x > L.aprons[1].x0 - 0.6 && x < L.aprons[0].x1 + 0.6) || (x > L.aprons[2].x0 - 0.6 && x < L.aprons[2].x1 + 0.6);   // no lamp / tree in front of the two staff driveways
     const lamps = []; for (let x = 2.2; x < e0 - 1; x += 4.6) if (Math.abs(x - L.gate[0]) > 1.6 && !nd(x)) lamps.push({ x, y: f0 - 0.14 }); for (let y = 2.4 - Math.floor((Dd + 1) / 4.6) * 4.6; y < f0 - 1; y += 4.6) lamps.push({ x: e0 - 0.14, y });
     for (let y = 10.0; y > 8.0; y -= 4.6) lamps.push({ x: L.avenue.x0 - 0.15, y });   // lamps along both sides of the central walkway
     const trees = []; for (let x = 1.4; x < e0 - 1; x += 3.1) if (Math.abs(x - L.gate[0]) > 2.2 && !nd(x) && !lamps.some((q) => Math.abs(q.x - x) < 0.9)) trees.push({ x, y: f0 - L.road.walk / 2 - 0.02 });
     for (let y = 3.2 - Math.floor((Dd + 1) / 3.1) * 3.1; y < f0 - 1.2; y += 3.1) if (Math.abs(y - shelterY(f0)) > 1.4 && !lamps.some((q) => q.x > e0 - 1 && Math.abs(q.y - y) < 0.9)) trees.push({ x: e0 - L.road.walk / 2 - 0.02, y });
-    for (const y of [5.7, 7.6, 9.4]) trees.push({ x: 23.95, y });   // lawn inside the drop-off loop
+    for (const x of [17.6, 19.6, 21.6]) trees.push({ x, y: 10.62 });   // lawn inside the drop-off loop
     return { paths, cars, ems, parked, lamps, trees, open: {}, shelter: { x: e0 - L.road.walk / 2, y: shelterY(f0) } };
   }
   let CMP = null; let CMPfor = null;
@@ -791,16 +791,16 @@ export function mountSiteFloor(host, opts = {}) {
     rc(0.15, Y0 + 0.15, camp.x1 - 0.1, f0 - wk, pal.walk);
     for (const [x0, y0, x1, y1] of LAWNS) rc(x0, y0, x1, y1, pal.grass); rc(L.island[0], L.island[1], L.island[2], L.island[3], pal.grass);
     rc(L.avenue.x0, L.bld.main.y1 - 0.2, L.avenue.x1, f0 - wk, pal.corr, 0.7);
-    { const C = L.corr; const hw = C.hw + 0.1; rc(C.ax - hw, C.yE, C.ax + hw, C.yS, pal.corr, 0.95); rc(C.xL, C.yj - hw, C.xR, C.yj + hw, pal.corr, 0.95); }   // the ground storey of the two-storey connecting walkway
+    { const C = L.corr; const hw = C.hw + 0.1; rc(C.ax - hw, C.yE, C.ax + hw, C.yS, pal.corr, 0.95); rc(C.xL, C.yj - hw, C.xR, C.yj + hw, pal.corr, 0.95); rc(C.ax - hw, C.yj2 - hw, C.xR2, C.yj2 + hw, pal.corr, 0.95); }   // the ground storey of the two-storey connecting walkway
     {   // the central connecting walkway (ทางเชื่อมกลาง): front gate → back of the campus, with the service lanes leaving it to the east, the covered links to the towers and the ground of the construction site
       const sp = L.avenue; const yBack = -L.world.D + 0.55; const dash = (x0, x1, y) => { ctx.save(); ctx.strokeStyle = pal.roadLine; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); const a2 = P(x0, y); const b2 = P(x1, y); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); ctx.restore(); };
       for (const ln of L.lanes) { rc(ln.x0, ln.y0, ln.x1, ln.y1, pal.road); if (ln.x1 - ln.x0 >= ln.y1 - ln.y0) dash(ln.x0 + 0.2, ln.x1 - 0.2, (ln.y0 + ln.y1) / 2); else { ctx.save(); ctx.strokeStyle = pal.roadLine; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, tw * 0.02); ctx.setLineDash([tw * 0.12, tw * 0.1]); const a2 = P((ln.x0 + ln.x1) / 2, ln.y0 + 0.2); const b2 = P((ln.x0 + ln.x1) / 2, ln.y1 - 0.2); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); ctx.restore(); } }
       
       
       siteGround();
-      for (let y = 10.5; y < 11.7; y += 0.32) rc(gx - 1.0, y, gx + 1.0, y + 0.17, pal.zebra);   // the pedestrian avenue crosses the front road
+      for (let y = 11.1; y < 12.1; y += 0.32) rc(gx - 1.0, y, gx + 1.0, y + 0.17, pal.zebra);   // the pedestrian avenue crosses the front road
       const arrow = (x, y, dx, dy) => { const t = (a, b) => P(x + dx * a - dy * b, y + dy * a + dx * b); poly([t(-0.3, -0.07), t(0.1, -0.07), t(0.1, -0.17), t(0.34, 0), t(0.1, 0.17), t(0.1, 0.07), t(-0.3, 0.07)], pal.roadLine); };   // painted one-way arrows (as on the photo of the outpatient road)
-      ctx.globalAlpha = 0.85; for (let y = 9.6; y > 5.2; y -= 1.7) arrow(22.6, y, 0, -1); for (const x of [22.9, 23.9]) arrow(x, 4.2, 1, 0); for (let y = 5.6; y < 10.1; y += 1.7) arrow(RXS, y, 0, 1); ctx.globalAlpha = 1;
+      ctx.globalAlpha = 0.85; for (const y of [10.5, 9.9]) arrow(15.8, y, 0, -1); for (const x of [17.4, 19.2, 21.0]) arrow(x, 9.7, 1, 0); for (const y of [9.7, 10.4]) arrow(23.2, y, 0, 1); ctx.globalAlpha = 1;
     }
     for (const wp of [L.walk.er, L.walk.main]) { let pa = L.entry; for (const q of wp) { rc(Math.min(pa[0], q[0]) - 0.42, Math.min(pa[1], q[1]) - 0.42, Math.max(pa[0], q[0]) + 0.42, Math.max(pa[1], q[1]) + 0.42, pal.corr, 0.7); pa = q; } }
     ctx.save(); ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.globalAlpha = 0.7; ctx.beginPath(); for (let y = L.bld.main.y1 + 0.2; y < f0 - wk; y += 0.6) { const a = P(L.avenue.x0, y); const b = P(L.avenue.x1, y); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke(); ctx.restore();
@@ -849,12 +849,17 @@ export function mountSiteFloor(host, opts = {}) {
   const TREES0 = [[1.6, 3.7], [3.4, 2.2], [2.2, 0.4], [4.2, -1.4], [1.8, -3.2], [4.6, -4.6], [2.4, -5.8], [7.6, 3.4], [9.8, 3.9], [10.5, 1.6], [8.0, 0.6], [10.2, -0.8], [7.0, -1.2],
     [1.0, 9.4], [6.6, 10.9], [9.4, 10.9], [16.2, 11.2], [18.2, 11.6], [20.4, 10.4], [22.6, 11.4], [24.6, 10.6], [21.8, 9.6], [22.8, 1.8], [24.2, 0.6], [22.6, -0.8], [24.4, 2.6],
     [17.0, -15.5], [19.5, -15.6], [22.6, -14.6], [24.0, -12.8], [23.8, -15.4], [11.0, -13.0], [9.0, -12.2], [11.2, -15.2]];
-  const TREES = TREES0.filter(([x, y]) => !(x > 24.3 && x < 26.6 && y > -11.6 && y < 12.0)   // staff road, right-hand side
-    && !(x > 2.0 && x < 12.4 && y > 10.0 && y < 12.0) && !(x > 14.4 && x < 26.6 && y > 10.0 && y < 12.0)   // staff road, front
-    && !(x > 4.8 && x < 19.6 && y > -1.6 && y < 2.8) && !(x > 4.2 && x < 11.8 && y > -10.2 && y < -0.2)   // emergency building + construction site behind it
-    && !(x > 2.5 && x < 3.9 && y > -6.4 && y < 5.6) && !(x > 3.6 && x < 11.8 && y > 2.6 && y < 8.4)      // haul road · car park + ramp in front of the emergency building
-    && !(x > 11.4 && x < 24.4 && y > 4.4 && y < 9.9) && !(x > 16.8 && x < 19.2 && y > -9.6 && y < 4.8) && !(x > 21.8 && x < 24.8 && y > 3.4 && y < 10.2)   // outpatient building · the connecting walkway
-    && !(x > 19.4 && x < 24.8 && y > -0.8 && y < 3.4) && !(x > 21.6 && x < 24.8 && y > -9.0 && y < -6.0));   // tower 1 · connector lane
+  const TREES = TREES0.filter(([x, y]) => !(x > 24.3 && x < 26.8 && y > -11.6 && y < 12.6)                                    // hospital road, right
+    && !(x > 2.0 && x < 24.0 && y > 10.8 && y < 12.6) && !(x > 14.8 && x < 24.0 && y > 8.8 && y < 11.2) && !(x > 10.8 && x < 12.4 && y > 5.4 && y < 11.2)   // front road · drop-off loop · link road
+    && !(x < 2.8 && y > 6.8 && y < 8.9) && !(x > 2.5 && x < 3.9 && y > -6.4 && y < 12.0)                                 // new west exit · haul road / west branch
+    && !(x > 4.8 && x < 19.6 && y > -1.6 && y < 2.8) && !(x > 4.2 && x < 11.8 && y > -10.2 && y < -0.2)                   // emergency building + construction site behind it
+    && !(x > 3.6 && x < 11.8 && y > 2.6 && y < 8.6) && !(x > 16.8 && x < 24.8 && y > 3.2 && y < 8.8)                      // car park + ramp of the emergency building · outpatient building
+    && !(x > 16.8 && x < 19.2 && y > -12.2 && y < 4.2) && !(x > 19.4 && x < 24.8 && y > -0.8 && y < 3.4)                  // connecting walkway · tower 1
+    && !(x > 18.4 && x < 24.8 && y > -13.0 && y < -2.0));                                                               // car park + tower 2
+  /** The new exit in the west fence (left of the emergency building): a gantry with a board over the road. */
+  function exitGates(items) {
+    for (const e of HL.exits) items.push({ d: e.x + e.y1 + 0.8, f: () => { for (const y of [e.y0, e.y1]) box(e.x, y, 0.1, 0.1, 1.35, Cc('#475569')); box(e.x, (e.y0 + e.y1) / 2, 0.1, e.y1 - e.y0 + 0.1, 0.09, Cc('#0f766e'), 1.35); signX(e.y1, e.x + 0.08, 1.0, e.y1 - e.y0, 0.38, Cc('#0f766e'), [[e.name, 0.14, 0.15], ['NEW EXIT', 0.09, 0.29]]); } });
+  }
   /** Raised "turtle-back" entrance (หลังเต่า): a concrete table in front of the door, a ramp down to the drive with yellow marking stripes, red-and-white kerbs on both sides — as in the photo of the emergency entrance. */
   function humpRamp(r) {
     const x0 = r.x - r.w / 2; const x1 = r.x + r.w / 2; const ya = r.y0 + r.flat; const yb = r.y0 + r.len; const CON = Cc('#cfd4db'); const hz = (y) => (y <= ya ? r.h : r.h * Math.max(0, 1 - (y - ya) / (yb - ya)));
@@ -880,6 +885,11 @@ export function mountSiteFloor(host, opts = {}) {
   }
   /** The emergency (accident) building, after the photo: low tan block of 3 floors with continuous window bands, a taller block at the right-hand end, a brown canopy with a red "อุบัติเหตุ–ฉุกเฉิน / EMERGENCY" sign,
    *  red traffic barriers in front and an ambulance at the side. It stands at the LEFT of the main hospital building. */
+  /** The website's visitors who are on a page right now = people standing behind the glass of the entrance (they never walk about the campus). */
+  function usersInside(dx, dy, n, col, now) {
+    const s = tw * 0.042; for (let k = 0; k < n; k++) { const x = dx + (k - (n - 1) / 2) * 0.17; const [sx, sy] = P(x, dy + 0.02, Z(0.1 + 0.02 * (k % 2))); const br = reduced ? 0 : Math.sin(now / 600 + k * 1.7) * s * 0.1;
+      ctx.fillStyle = col; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.roundRect(sx - s * 0.7, sy - s * 3 + br, s * 1.4, s * 2.7, s * 0.6); ctx.fill(); ctx.fillStyle = '#f1c9a5'; ctx.beginPath(); ctx.arc(sx, sy - s * 3.5 + br, s * 0.75, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
+  }
   function erBuilding(items, now, emsLive) {
     const b = HL.bld.er; const WALL = Cc('#dfc08a'); const BAND = Cc('#c08a4b'); const GLASS = Cc('#a9c9e2'); const DGL = Cc('#7f9db8'); const ROOF = Cc('#9a4a1c'); const CREAM = Cc('#f3ead2'); const TOWER = Cc('#caa270'); const RED = '#dc2626';
     const { x0, x1, y0, y1 } = b; const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const W = x1 - x0; const D = y1 - y0; const FH = 0.95; const gx = b.door[0];
@@ -904,20 +914,30 @@ export function mountSiteFloor(host, opts = {}) {
     const by = y1 + 0.95; for (let x = x0 + 0.3; x <= x1 - 0.3; x += 0.6) { if (Math.abs(x - gx) < 1.5) continue; items.push({ d: x + by, f: () => { box(x, by, 0.45, 0.16, 0.26, RED); box(x, by, 0.47, 0.17, 0.05, '#f8fafc', 0.12); } }); }
     items.push({ d: x1 - 0.5 + by + 0.05, f: () => vehicle(x1 - 0.5, by, -Math.PI / 2, { kind: 'ems' }, now, emsLive) });
   }
-  /** Covered skywalk between the emergency building and the main building (steel columns, a glazed band). */
-  function skywalk(items) {   // the connecting walkway: roofed corridor on columns with steel railings, no stairs · entered only through the administration building
-    const C = HL.corr; const DECK = Cc('#cfd8e1'); const STEEL = Cc('#334155'); const COL = Cc('#d6dce3'); const ROOFC = Cc('#7dd3c8'); const Zd = C.z; const ZT = Zd + 0.1; const ROOFZ = ZT + 0.95; const hw = C.hw; const gap = (a0, a1, g0, g1) => (g1 <= a0 || g0 >= a1 ? [[a0, a1]] : [[a0, Math.min(a1, g0)], [Math.max(a0, g1), a1]].filter(([p, q]) => q - p > 0.02));
+  /** The two-storey connecting walkway: ground storey (paved, seen between the columns) + a roofed, railed deck on columns. From the back of the outpatient building straight back, a "+" junction with the emergency
+   *  building (a door in its right-hand wall) and ตึกสายลม, and a "T" at the left-hand wall of ตึกแสงเดือน. */
+  function skywalk(items) {
+    const C = HL.corr; const DECK = Cc('#cfd8e1'); const STEEL = Cc('#334155'); const COL = Cc('#d6dce3'); const ROOFC = Cc('#7dd3c8'); const Zd = C.z; const ZT = Zd + 0.1; const ROOFZ = ZT + 0.95; const hw = C.hw;
+    const cut = (a0, a1, list) => list.reduce((segs, [g0, g1]) => segs.flatMap(([p, q]) => (g1 <= p || g0 >= q ? [[p, q]] : [[p, Math.min(q, g0)], [Math.max(p, g1), q]].filter(([u, v]) => v - u > 0.02))), [[a0, a1]]);
     const railX = (x, y0, y1) => { faceX(x, y0, y1, ZT, ZT + 0.04, STEEL); faceX(x, y0, y1, ZT + 0.3, ZT + 0.34, STEEL); for (let y = y0 + 0.08; y < y1 - 0.02; y += 0.22) faceX(x, y, y + 0.03, ZT, ZT + 0.34, STEEL); };
     const railY = (x0, x1, y) => { faceY(x0, x1, y, ZT, ZT + 0.04, STEEL); faceY(x0, x1, y, ZT + 0.3, ZT + 0.34, STEEL); for (let x = x0 + 0.08; x < x1 - 0.02; x += 0.22) faceY(x, x + 0.03, y, ZT, ZT + 0.34, STEEL); };
-    const jy0 = C.yj - hw; const jy1 = C.yj + hw; const jx0 = C.ax - hw; const jx1 = C.ax + hw;
-    // axis (runs along y): from the back of the administration building to the junction and a little beyond
+    const jx0 = C.ax - hw; const jx1 = C.ax + hw; const J1 = [C.yj - hw, C.yj + hw]; const J2 = [C.yj2 - hw, C.yj2 + hw];
+    // axis (runs along y): from the back of the outpatient building to the T at ตึกแสงเดือน
     for (let y = C.yS; y > C.yE + 1e-6; y -= 1.0) { const ya = Math.max(C.yE, y - 1.0); const ym = (y + ya) / 2; const L = y - ya; const k = Math.round(y * 2);
-      items.push({ d: C.ax + ym + 0.2, f: () => { if (k % 4 === 0) for (const x of [jx0 + 0.1, jx1 - 0.1]) box(x, ym, 0.2, 0.2, Zd, COL); box(C.ax, ym, 2 * hw, L + 0.02, 0.1, DECK, Zd); for (const [p, q] of gap(ya, y, jy0, jy1)) railX(jx0 + 0.03, p, q); if (ya <= C.yE + 1e-6) railY(jx0, jx1, C.yE + 0.03); } });
-      items.push({ d: C.ax + ym + 2.0, f: () => { ctx.globalAlpha = 0.5; box(C.ax, ym, 2 * hw + 0.3, L + 0.02, 0.06, ROOFC, ROOFZ); ctx.globalAlpha = 1; if (k % 4 === 0) for (const x of [jx0 + 0.04, jx1 - 0.04]) box(x, ym, 0.09, 0.09, 0.95, STEEL, ZT); for (const [p, q] of gap(ya, y, jy0, jy1)) railX(jx1 - 0.03, p, q); } }); }
-    // arms (run along x): left to the emergency building, right to inpatient tower 1
-    for (const [xa0, xb0] of [[C.xL, jx0], [jx1, C.xR]]) for (let x = xa0; x < xb0 - 1e-6; x += 1.0) { const xb = Math.min(xb0, x + 1.0); const xm = (x + xb) / 2; const L = xb - x; const k = Math.round(x * 2);
-      items.push({ d: xm + C.yj + 0.2, f: () => { if (k % 4 === 0) for (const y of [jy0 + 0.1, jy1 - 0.1]) box(xm, y, 0.2, 0.2, Zd, COL); box(xm, C.yj, L + 0.02, 2 * hw, 0.1, DECK, Zd); railY(x, xb, jy0 + 0.03); } });
-      items.push({ d: xm + C.yj + 2.0, f: () => { ctx.globalAlpha = 0.5; box(xm, C.yj, L + 0.02, 2 * hw + 0.3, 0.06, ROOFC, ROOFZ); ctx.globalAlpha = 1; if (k % 4 === 0) for (const y of [jy0 + 0.04, jy1 - 0.04]) box(xm, y, 0.09, 0.09, 0.95, STEEL, ZT); railY(x, xb, jy1 - 0.03); } }); }
+      items.push({ d: C.ax + ym + 0.2, f: () => { if (k % 4 === 0) for (const x of [jx0 + 0.1, jx1 - 0.1]) box(x, ym, 0.2, 0.2, Zd, COL); box(C.ax, ym, 2 * hw, L + 0.02, 0.1, DECK, Zd); for (const [p, q] of cut(ya, y, [J1])) railX(jx0 + 0.03, p, q); if (ya <= C.yE + 1e-6) railY(jx0, jx1, C.yE + 0.03); } });
+      items.push({ d: C.ax + ym + 2.0, f: () => { ctx.globalAlpha = 0.5; box(C.ax, ym, 2 * hw + 0.3, L + 0.02, 0.06, ROOFC, ROOFZ); ctx.globalAlpha = 1; if (k % 4 === 0) for (const x of [jx0 + 0.04, jx1 - 0.04]) box(x, ym, 0.09, 0.09, 0.95, STEEL, ZT); for (const [p, q] of cut(ya, y, [J1, J2])) railX(jx1 - 0.03, p, q); } }); }
+    // arms (run along x): left to the emergency building, right to ตึกสายลม (1.2) and to ตึกแสงเดือน (-10.95)
+    for (const [xa0, xb0, yc] of [[C.xL, jx0, C.yj], [jx1, C.xR, C.yj], [jx1, C.xR2, C.yj2]]) for (let x = xa0; x < xb0 - 1e-6; x += 1.0) { const xb = Math.min(xb0, x + 1.0); const xm = (x + xb) / 2; const L = xb - x; const k = Math.round(x * 2);
+      items.push({ d: xm + yc + 0.2, f: () => { if (k % 4 === 0) for (const y of [yc - hw + 0.1, yc + hw - 0.1]) box(xm, y, 0.2, 0.2, Zd, COL); box(xm, yc, L + 0.02, 2 * hw, 0.1, DECK, Zd); railY(x, xb, yc - hw + 0.03); } });
+      items.push({ d: xm + yc + 2.0, f: () => { ctx.globalAlpha = 0.5; box(xm, yc, L + 0.02, 2 * hw + 0.3, 0.06, ROOFC, ROOFZ); ctx.globalAlpha = 1; if (k % 4 === 0) for (const y of [yc - hw + 0.04, yc + hw - 0.04]) box(xm, y, 0.09, 0.09, 0.95, STEEL, ZT); railY(x, xb, yc + hw - 0.03); } }); }
+  }
+  /** The door of the emergency building on its right-hand side where the walkway arrives: a glazed door on each storey, a small canopy, a sign. People walk up to it and go in. */
+  function erSideDoor(items) {
+    const b = HL.bld.er; const C = HL.corr; const x = b.x1; const yc = C.yj; const DOOR = '#475569'; const GLASS = Cc('#a9c9e2'); const FRAME = Cc('#f3ead2');
+    items.push({ d: x + yc + 0.35, f: () => {
+      for (const z0 of [0, C.z + 0.1]) { faceX(x + 0.012, yc - 0.45, yc + 0.45, z0, z0 + 0.82, DOOR); faceX(x + 0.013, yc - 0.4, yc - 0.03, z0 + 0.04, z0 + 0.76, GLASS); faceX(x + 0.013, yc + 0.03, yc + 0.4, z0 + 0.04, z0 + 0.76, GLASS); box(x + 0.02, yc - 0.52, 0.06, 0.07, 0.86, FRAME, z0); box(x + 0.02, yc + 0.52, 0.06, 0.07, 0.86, FRAME, z0); }
+      signX(yc + 0.5, x + 0.03, 1.9, 1.0, 0.3, Cc('#0f766e'), [['ทางเข้า', 0.15, 0.15]]);
+    } });
   }
   /** The name wall at the front gate (white wall, dark bands, ministry emblem): "โรงพยาบาลสันทราย · Sansai Hospital". */
   function signWall(items) {
@@ -1076,20 +1096,20 @@ export function mountSiteFloor(host, opts = {}) {
   let AMB = null; let AMBfor = null;
   function buildAmbient(L) {
     const P0 = L.paths; if (!P0) return { walkers: [], stand: [] }; const pa = {}; for (const k of Object.keys(P0)) pa[k] = roundPath(P0[k], 0.25);
-    const W = []; const add = (path, kinds, base = 0) => kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, z: path.indexOf('deck') === 0 ? 1.0 : 0, g: /^g[A-C]$/.test(path), into: /^in[AB]$/.test(path), kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); });
+    const W = []; const add = (path, kinds, base = 0) => kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, z: path.indexOf('deck') === 0 ? 1.0 : 0, g: /^g[A-D]$/.test(path), fade: (L.fades || {})[path] || null, kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); });
     add('front', ['visitor', 'patient', 'visitor', 'kid', 'nurse']); add('ave', ['doctor', 'visitor', 'wheel', 'visitor', 'nurse', 'patient']); add('toEr', ['wheel', 'patient', 'nurse', 'visitor', 'doctor']);
     add('link', ['nurse', 'doctor', 'wheel']); add('lotE', ['visitor', 'nurse']);
-    add('deckA', ['visitor', 'doctor', 'nurse', 'wheel', 'visitor']); add('deckB', ['nurse', 'visitor', 'wheel']); add('deckC', ['doctor', 'visitor', 'patient', 'nurse', 'visitor']);   // upper storey of the connecting walkway
-    add('gA', ['visitor', 'patient', 'nurse', 'wheel', 'visitor', 'doctor', 'visitor']); add('gB', ['doctor', 'visitor', 'kid', 'visitor', 'nurse']); add('gC', ['nurse', 'visitor', 'wheel', 'patient', 'visitor', 'doctor']);   // ground storey
+    add('deckA', ['visitor', 'doctor', 'nurse', 'wheel', 'visitor']); add('deckB', ['nurse', 'visitor', 'wheel']); add('deckC', ['doctor', 'visitor', 'patient', 'nurse']); add('deckD', ['nurse', 'visitor', 'doctor']);   // upper storey of the connecting walkway
+    add('gA', ['visitor', 'patient', 'nurse', 'wheel', 'visitor', 'doctor', 'visitor']); add('gB', ['doctor', 'visitor', 'kid', 'visitor', 'nurse']); add('gC', ['nurse', 'visitor', 'wheel', 'patient', 'visitor']); add('gD', ['visitor', 'nurse', 'wheel', 'visitor']);   // ground storey
     add('lot', ['visitor', 'nurse', 'visitor']); add('inA', ['visitor', 'nurse', 'visitor']); add('inB', ['visitor', 'doctor', 'visitor', 'wheel']);   // people walk from the car park into ตึกแสงเดือน (they fade out at its door) add('s5', ['worker']);
     add('s1', ['worker', 'worker']); add('s2', ['worker']); add('s3', ['worker']); add('s4', ['worker', 'worker']);
-    const dy = L.site ? L.site.dy : 0; const stand = [[6.0, 3.4, 'nurse', 1], [6.4, 3.52, 'patient', 2], [9.8, 3.4, 'visitor', 3], [15.5, 9.45, 'visitor', 4], [16.2, 9.5, 'doctor', 5], [15.0, 9.4, 'wheel', 6], [13.0, 6.5, 'kid', 7], [13.2, 7.0, 'visitor', 8], [3.2 + (L.site ? L.site.dx : 0), 3.6 + dy, 'worker', 9], [4.0 + (L.site ? L.site.dx : 0), 3.55 + dy, 'worker', 10], [18.4, 12.85, 'visitor', 11], [19.0, 12.9, 'kid', 12], [12.4, 4.0, 'visitor', 13], [14.4, 3.9, 'nurse', 14], [22.0, -1.6, 'doctor', 15], [17.8, -1.3, 'visitor', 16], [21.2, 4.0, 'wheel', 17]];
-    if (L.corr) { const c = L.corr; stand.push([c.ax + 0.12, 2.5, 'visitor', 21, 0], [c.ax + 0.12, 2.85, 'patient', 22, 0], [c.ax + 0.12, 3.2, 'wheel', 23, 0], [c.ax + 0.12, 3.55, 'visitor', 24, 0], [c.ax - 0.15, 3.9, 'nurse', 25, 1.0], [c.ax + 0.2, 3.3, 'visitor', 26, 1.0]); }   // a queue on the ground storey, two people standing on the deck
+    const dy = L.site ? L.site.dy : 0; const stand = [[6.0, 3.4, 'nurse', 1], [6.4, 3.52, 'patient', 2], [9.8, 3.4, 'visitor', 3], [21.6, 8.45, 'visitor', 4], [22.6, 8.5, 'doctor', 5], [18.4, 8.45, 'wheel', 6], [13.0, 6.5, 'kid', 7], [13.2, 7.0, 'visitor', 8], [3.2 + (L.site ? L.site.dx : 0), 3.6 + dy, 'worker', 9], [4.0 + (L.site ? L.site.dx : 0), 3.55 + dy, 'worker', 10], [18.4, 12.85, 'visitor', 11], [19.0, 12.9, 'kid', 12], [13.8, 4.6, 'visitor', 13], [14.4, 5.2, 'nurse', 14], [22.0, -1.6, 'doctor', 15], [16.6, -1.3, 'visitor', 16], [13.6, 7.2, 'wheel', 17]];
+    if (L.corr) { const c = L.corr; stand.push([c.ax + 0.12, 2.4, 'visitor', 21, 0], [c.ax + 0.12, 2.75, 'patient', 22, 0], [c.ax + 0.12, 3.1, 'wheel', 23, 0], [c.ax + 0.12, 3.45, 'visitor', 24, 0], [c.ax - 0.15, 3.2, 'nurse', 25, 1.0], [c.ax + 0.2, 2.6, 'visitor', 26, 1.0]); }   // a queue on the ground storey, two people standing on the deck
     return { walkers: W, stand };
   }
   function ambientItems(items, now) {
     const L = HL; if (AMBfor !== L) { AMB = buildAmbient(L); AMBfor = L; } const T = reduced ? 4 : now / 1000;
-    for (const w of AMB.walkers) { const len = w.q.len; const u = (((w.off + T * w.sp) % (2 * len)) + 2 * len) % (2 * len); const s = u < len ? u : 2 * len - u; const q = pathAt(w.q, s); const fa = w.into ? Math.max(0, Math.min(1, (len - s) / 0.6)) : 1; if (fa <= 0.02) continue; items.push({ d: q.x + q.y + (w.z ? 1.4 : w.g ? 2.3 : 0.01), f: () => { ctx.globalAlpha = fa; ambFig(q.x, q.y, w.kind, now, w.seed, w.kind === 'worker' ? 0.9 : 0.95, w.z); ctx.globalAlpha = 1; } }); }
+    for (const w of AMB.walkers) { const len = w.q.len; const u = (((w.off + T * w.sp) % (2 * len)) + 2 * len) % (2 * len); const s = u < len ? u : 2 * len - u; const q = pathAt(w.q, s); let fa = 1; if (w.fade) { if (w.fade[0]) fa = Math.min(fa, s / 0.6); if (w.fade[1]) fa = Math.min(fa, (len - s) / 0.6); } fa = Math.max(0, Math.min(1, fa)); if (fa <= 0.02) continue; items.push({ d: q.x + q.y + (w.z ? 1.4 : w.g ? 2.3 : 0.01), f: () => { ctx.globalAlpha = fa; ambFig(q.x, q.y, w.kind, now, w.seed, w.kind === 'worker' ? 0.9 : 0.95, w.z); ctx.globalAlpha = 1; } }); }
     for (const [x, y, kind, seed, zl = 0] of AMB.stand) items.push({ d: x + y + 0.01 + (zl ? 1.4 : seed >= 21 && seed <= 24 ? 2.3 : 0), f: () => ambFig(x, y, kind === 'wheel' ? 'wheel' : kind, now, seed, 0.95, zl) });
   }
   function campusScene(items, labels, F, now, kit) {
@@ -1101,18 +1121,19 @@ export function mountSiteFloor(host, opts = {}) {
       const [dx, dy] = P(b.door[0], b.door[1] + 0.4); ctx.globalAlpha = reduced ? 0.5 : 0.35 + 0.25 * Math.sin(now / 400); ctx.fillStyle = bd.col; ctx.beginPath(); ctx.ellipse(dx, dy, tw * 0.3, tw * 0.15, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
       bhits.push({ id: bd.id, d: b.c[0] + b.c[1], ...bbox([...rectPts(b.x0, b.y0, b.x1, b.y1), P(b.x0, b.y0, Z(b.h)), P(b.x1, b.y0, Z(b.h))]) });
       if (bd.id === 'main') for (const k of L.towers) { const th = k.fl * k.fh + 0.5; bhits.push({ id: 'main', d: k.x0 + k.y0, ...bbox([...rectPts(k.x0, k.y0, k.x1, k.y1), P(k.x0, k.y0, Z(th)), P(k.x1, k.y0, Z(th))]) }); }
-      const inside = ids.reduce((a, i) => a + F.at[i].length, 0); const cum = ids.reduce((a, i) => a + F.cum[i] * pfNow(), 0); const [lx, ly] = bd.id === 'er' ? P(3.2, 2.2, 0) : P(b.door[0], b.door[1] + 0.4, 0);
+      const inside = ids.reduce((a, i) => a + F.at[i].length, 0); if (inside > 0) { const nShow = Math.min(5, inside); items.push({ d: b.door[0] + b.door[1] + 3.2, f: () => usersInside(bd.id === 'er' ? b.door[0] : b.door[0], b.door[1], nShow, bd.col, now) }); } const cum = ids.reduce((a, i) => a + F.cum[i] * pfNow(), 0); const [lx, ly] = bd.id === 'er' ? P(3.2, 2.2, 0) : P(b.door[0], b.door[1] + 0.4, 0);
       labels.push({ x: lx, y: ly + tw * 0.34, text: `${bd.icon} ${bd.name} · ${ids.length ? `${ids.length} ระบบ` : 'ยังไม่มีระบบ'}`, col: bd.col, sc: 1 });
       labels.push({ x: lx, y: ly + tw * 0.34 + hh + 3, text: ids.length ? `ในอาคาร ${fmt(inside)} คน · เปิดหน้า ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(cum)} · คลิกเพื่อเข้า` : 'คลิกเพื่อเข้าไปดู', col: hov ? bd.col : null, sc: 0.8 });
     });
     { const [dx, dy] = P(gx, f0 - 0.35, 0); labels.push({ x: dx, y: dy, text: 'ทางเข้าหลัก', col: pal.brand, sc: 0.8 }); }
     { const [rx, ry] = P(3.4, f0 + L.road.w * 0.5, 0); labels.push({ x: rx, y: ry, text: 'ทางหลวง 1260', col: null, sc: 0.6 }); const [ex, ey] = P(e0 + L.road.w * 0.5, 6.5, 0); labels.push({ x: ex, y: ey, text: 'ทางหลวง 1001', col: null, sc: 0.6 }); }
     L.lots.forEach((lot) => { const [px2, py2] = P((lot.x0 + lot.x1) / 2, lot.y1 - 0.5, 0); labels.push({ x: px2, y: py2, text: lot.name || '🅿 ที่จอดรถ', col: null, sc: 0.6 }); });
-    erBuilding(items, now, emsLive); hospBuilding(items); opdWings(items); skywalk(items); signWall(items);
+    erBuilding(items, now, emsLive); hospBuilding(items); opdWings(items); skywalk(items); erSideDoor(items); exitGates(items); signWall(items);
     towerItems(items); linkItems(items); sideGate(items, now); fencePanels(items); siteProps(items, now); ambientItems(items, now);
     { const [fx, fy] = P(3.0 + L.site.dx, -2.1 + L.site.dy, Z(3.7)); labels.push({ x: fx, y: fy, text: '🚧 กำลังก่อสร้างอาคารใหม่', col: '#d97706', sc: 0.85 }); }
     for (const k of L.towers) { const [tx, ty] = P((k.x0 + k.x1) / 2, k.y1, Z(k.fl * k.fh + 0.2)); labels.push({ x: tx, y: ty - tw * 0.1, text: '🛏 ' + k.name, col: '#9a6b2f', sc: 0.85 }); }
-    { const [sx, sy] = P(L.rear.x - 0.9, L.rear.y[0] - 0.2, Z(1.5)); labels.push({ x: sx, y: sy - tw * 0.1, text: '🚪 ทางออกด้านข้าง', col: '#0f766e', sc: 0.7 }); const [wx, wy] = P(HL.corr.ax, 3.2, Z(1.0)); labels.push({ x: wx, y: wy, text: 'ทางเชื่อม 2 ชั้น (ชั้นบนเข้าผ่านตึกผู้ป่วยนอก)', col: pal.brand, sc: 0.7 }); const [gx1, gy1] = P(HL.corr.xL + 3.0, HL.corr.yj + 0.45, 0); labels.push({ x: gx1, y: gy1 + tw * 0.2, text: 'ชั้น 1 · ทางเดินระดับพื้น', col: null, sc: 0.6 }); }
+    { const [ex2, ey2] = P(HL.exits[0].x, (HL.exits[0].y0 + HL.exits[0].y1) / 2, Z(1.7)); labels.push({ x: ex2, y: ey2 - tw * 0.1, text: '🚪 ทางออกใหม่ (ซ้ายตึกอุบัติเหตุ)', col: '#0f766e', sc: 0.7 }); }
+    { const [sx, sy] = P(L.rear.x - 0.9, L.rear.y[0] - 0.2, Z(1.5)); labels.push({ x: sx, y: sy - tw * 0.1, text: '🚪 ทางออกด้านข้าง', col: '#0f766e', sc: 0.7 }); const [wx, wy] = P(HL.corr.ax, -5.0, Z(1.0)); labels.push({ x: wx, y: wy, text: 'ทางเชื่อม 2 ชั้น (ชั้นบนเข้าผ่านตึกผู้ป่วยนอก)', col: pal.brand, sc: 0.7 }); const [gx1, gy1] = P(HL.corr.xL + 3.0, HL.corr.yj + 0.45, 0); labels.push({ x: gx1, y: gy1 + tw * 0.2, text: 'ชั้น 1 · ทางเดินระดับพื้น', col: null, sc: 0.6 }); }
     TREES.forEach(([x, y]) => items.push({ d: x + y, f: () => tree(x, y) }));
     campusItems(items, now, emsLive);
   }
