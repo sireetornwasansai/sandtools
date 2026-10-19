@@ -4,10 +4,15 @@ import { config, MAX_FILE_BYTES } from '../core/config.js';
 import { downloadBlob, copyText } from '../core/download.js';
 import { toast } from '../core/toast.js';
 import { takePendingFile } from '../core/handoff.js';
+import { getSettings, setSettings } from '../core/store.js';
 import { privacyNotice, notice } from '../core/notices.js';
 import { record, recording, recordingNote } from '../core/logger.js';
 import { detectFormat, FORMATS, ACCEPT } from './converters/index.js';
 import { convertTo, targetsFor, TARGETS, ALL_TARGETS, DEFAULT_TARGET } from './converters/convert-to.js';
+import { DOCX_FONTS, FONT_CHOICES } from './converters/docx-fonts.js';
+
+const DOCX_MODES = [['layout', 'คงหน้าตาเดิม', 'หน้า ตาราง ย่อหน้า รูป และฟอนต์ตามต้นฉบับ PDF'], ['flow', 'จัดเรียงใหม่', 'เนื้อหาไหลต่อเนื่อง แก้ไขง่าย ไม่คงเลย์เอาต์']];
+const fontLabel = (k) => (k === 'auto' ? 'ตามไฟล์ PDF (อัตโนมัติ)' : DOCX_FONTS[k] ? DOCX_FONTS[k].label : k);
 
 const STAGES = [['reading', 'อ่านไฟล์'], ['converting', 'กำลังแปลง'], ['writing', 'สร้างไฟล์ปลายทาง'], ['done', 'เสร็จเรียบร้อย']];
 /** Shown instead when a scanned PDF needs OCR (reading text from the page images). */
@@ -19,7 +24,10 @@ export function mount(root, _ctx) {
   let target = DEFAULT_TARGET;                 // chosen output format (key of TARGETS)
   /** @type {File|null} */ let current = null;  // file being converted: kept so another target can be picked without uploading again
   let convId = 0;                               // ignores the result of a conversion that was replaced by a newer one
+  let docxFont = FONT_CHOICES.includes(getSettings().docxFont) ? getSettings().docxFont : 'auto';   // Word output: font + (PDF only) layout mode, remembered on this device
+  let docxMode = getSettings().docxMode === 'flow' ? 'flow' : 'layout';
   const targetHost = h('div', { class: 'conv-targets' });
+  const optionHost = h('div', { class: 'conv-targets' });
   const zoneHost = h('div');
   const statusHost = h('div', { role: 'status', 'aria-live': 'polite' });
   const resultHost = h('div');
@@ -47,6 +55,22 @@ export function mount(root, _ctx) {
       h('div', { class: 'conv-targets-label' }, current ? `แปลง ${current.name} เป็น` : 'แปลงเป็น'),
       h('div', { class: 'chip-row', role: 'group', 'aria-label': 'รูปแบบไฟล์ปลายทาง' }, list.map((t) => h('button', { class: 'chip', type: 'button', 'aria-pressed': String(t === target), disabled: busy ? '' : null,
         onclick: () => { if (busy || t === target) return; target = t; renderTargets(); if (current) start(current); } }, TARGETS[t].label))));
+    renderOptions();
+  }
+
+  /** Word-only options: layout mode (PDF source only) and the font of the .docx (TH Sarabun New / PSK / Tahoma). */
+  function renderOptions() {
+    const isPdf = !!current && detectFormat(current.name) === 'pdf';
+    if (target !== 'docx') { optionHost.replaceChildren(); return; }
+    const chips = (label, items, selected, onPick) => h('div', null,
+      h('div', { class: 'conv-targets-label' }, label),
+      h('div', { class: 'chip-row', role: 'group', 'aria-label': label }, items.map(([k, text, hint]) => h('button', { class: 'chip', type: 'button', title: hint || '', 'aria-pressed': String(k === selected), disabled: busy ? '' : null,
+        onclick: () => { if (busy || k === selected) return; onPick(k); renderOptions(); if (current) start(current); } }, text))));
+    const parts = [];
+    if (isPdf || !current) parts.push(chips('รูปแบบไฟล์ Word จาก PDF', DOCX_MODES, docxMode, (k) => { docxMode = k; setSettings({ docxMode: k }); }));
+    parts.push(chips('ฟอนต์ในไฟล์ Word', FONT_CHOICES.map((k) => [k, fontLabel(k), k === 'auto' ? 'ใช้ฟอนต์เดียวกับ PDF (TH Sarabun New / PSK ฯลฯ) ถ้าไม่พบ ใช้ Tahoma' : `ระบุฟอนต์ ${fontLabel(k)} ทั้งเอกสาร`]), docxFont, (k) => { docxFont = k; setSettings({ docxFont: k }); }));
+    parts.push(h('p', { class: 'muted', style: 'margin:-.25rem 0 .75rem' }, 'ไฟล์ Word ระบุชื่อฟอนต์แต่ไม่ฝังฟอนต์ — เครื่องที่เปิดไฟล์ต้องติดตั้ง TH Sarabun New / TH SarabunPSK ไว้ (ถ้าไม่มี Word จะใช้ Tahoma แทน)'));
+    optionHost.replaceChildren(...parts);
   }
 
   let stages = STAGES;
@@ -82,7 +106,7 @@ export function mount(root, _ctx) {
     const setBar = (f) => { bar.classList.remove('indeterminate'); bar.firstElementChild.style.width = `${Math.round(f * 100)}%`; bar.setAttribute('aria-valuenow', String(Math.round(f * 100))); };
     try {
       const r = await convertTo(file, target, {
-        maxBytes: MAX_FILE_BYTES, timeoutMs: Math.max(5, config.conversionTimeoutSec) * 1000,
+        maxBytes: MAX_FILE_BYTES, timeoutMs: Math.max(5, config.conversionTimeoutSec) * 1000, docxFont, docxMode,
         onStage: (st) => { if (my === convId) steps.replaceChildren(stepList(st)); }, onProgress: (f) => { if (my === convId) setBar(f); }, onStatus: (t) => { if (my === convId) note.textContent = t; }
       });
       if (my !== convId) return;
@@ -103,7 +127,7 @@ export function mount(root, _ctx) {
     const isText = typeof r.text === 'string';
     const label = r.target === 'md' ? 'Markdown' : T.label;
     const kb = r.blob.size < 1024 * 1024 ? `${(r.blob.size / 1024).toFixed(1)} KB` : `${(r.blob.size / 1024 / 1024).toFixed(1)} MB`;
-    statusHost.querySelector('.card') && statusHost.querySelector('.card').append(h('p', { class: 'muted', style: 'margin-top:.5rem' }, `แปลงเสร็จใน ${(r.ms / 1000).toFixed(1)} วินาที · ${isText ? `${r.text.length.toLocaleString('th-TH')} ตัวอักษร` : kb}${r.count > 1 && r.target === 'pdf' ? ` · ${r.count} หน้า` : ''}`));
+    statusHost.querySelector('.card') && statusHost.querySelector('.card').append(h('p', { class: 'muted', style: 'margin-top:.5rem' }, `แปลงเสร็จใน ${(r.ms / 1000).toFixed(1)} วินาที · ${isText ? `${r.text.length.toLocaleString('th-TH')} ตัวอักษร` : kb}${r.count > 1 && r.target === 'pdf' ? ` · ${r.count} หน้า` : ''}${r.pages > 1 ? ` · ${r.pages} หน้า` : ''}${r.font && DOCX_FONTS[r.font] ? ` · ฟอนต์ ${DOCX_FONTS[r.font].label}` : ''}`));
     const actions = []; let body = [];
     if (isText) {
       const text = h('textarea', { rows: 16, readonly: true, 'aria-label': `ผลลัพธ์ ${label}`, spellcheck: 'false' }, '');
@@ -146,10 +170,11 @@ export function mount(root, _ctx) {
   root.append(h('div', { class: 'page' },
     h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'File Converter'), h('p', null, 'แปลงไฟล์ระหว่าง PDF · Word · Excel · PowerPoint · CSV · HTML · ข้อความ · รูปภาพ — เลือกรูปแบบปลายทาง แล้ววางไฟล์'))),
     privacyNotice({ detail: recording() ? `การแปลงทำงานในเบราว์เซอร์ของคุณ · ${recordingNote()}` : 'การแปลงทำงานในเบราว์เซอร์ของคุณทั้งหมด ไฟล์ไม่ถูกอัปโหลดหรือเก็บไว้ที่เซิร์ฟเวอร์ใด ๆ' }),
-    targetHost, zoneHost, statusHost, resultHost,
+    targetHost, optionHost, zoneHost, statusHost, resultHost,
     h('details', { class: 'card', style: 'margin-top:1rem' }, h('summary', null, 'ข้อจำกัดของการแปลง'),
       h('ul', null,
-        h('li', null, 'PDF: ไฟล์ที่มีข้อความอ่านได้ตรง ๆ (ตารางจะเป็นข้อความธรรมดา) · ไฟล์ภาพสแกนจะอ่านด้วย OCR ไทย/อังกฤษบนเครื่องของคุณ (ช้ากว่า — ประมาณ 5–15 วินาทีต่อหน้า, ครั้งแรกต้องโหลดตัวอ่านประมาณ 8 MB) ความแม่นยำไม่ถึง 100% โดยเฉพาะเลขไทย กรุณาตรวจทานกับต้นฉบับ'),
+        h('li', null, 'PDF → Word (คงหน้าตาเดิม): คงขนาดหน้า ขอบกระดาษ ย่อหน้า การชิดขอบ ตารางที่มีเส้น รูปภาพ และฟอนต์ TH Sarabun New / PSK ตามต้นฉบับ — ตารางไม่มีเส้น ข้อความซ้อนกัน กราฟิกซับซ้อน และข้อความแนวตั้ง/เอียง อาจไม่ตรงเป๊ะ · ตัวอักษรไทยตัดบรรทัดตามพจนานุกรมของ Word จึงอาจต่างจาก PDF 1–2 บรรทัด'),
+        h('li', null, 'PDF → ข้อความ/อื่น ๆ: ไฟล์ที่มีข้อความอ่านได้ตรง ๆ (ตารางจะเป็นข้อความธรรมดา) · ไฟล์ภาพสแกนจะอ่านด้วย OCR ไทย/อังกฤษบนเครื่องของคุณ (ช้ากว่า — ประมาณ 5–15 วินาทีต่อหน้า, ครั้งแรกต้องโหลดตัวอ่านประมาณ 8 MB) ความแม่นยำไม่ถึง 100% โดยเฉพาะเลขไทย กรุณาตรวจทานกับต้นฉบับ'),
         h('li', null, 'Word/PowerPoint: แปลงข้อความ หัวข้อ รายการ ตาราง ลิงก์ ไม่รวมกราฟ กล่องข้อความ และรูปภาพ (ระบุเป็นลิงก์รูป)'),
         h('li', null, 'Excel: รองรับ .xlsx (ไฟล์ .xls รุ่นเก่า ให้บันทึกเป็น .xlsx ก่อน) ผลลัพธ์เป็นค่าที่แสดงในเซลล์ ไม่ใช่สูตร'),
         h('li', null, 'รูปภาพ: แปลงระหว่าง PNG/JPG/WEBP และ PDF ได้ · แปลงเป็นข้อความ/Word/Markdown ด้วย OCR (ต้องติดตั้งไฟล์ OCR)'),

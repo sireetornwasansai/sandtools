@@ -3,7 +3,7 @@
 // once with `npm run ocr:fetch` (see scripts/fetch-ocr.mjs); they are NOT precached by the service worker (≈8 MB) — the worker
 // caches them on first use in its own cache (see sw.js).
 import { ConversionError, Deadline } from './common.js';
-import { tesseractToMarkdown } from './ocr-layout.js';
+import { tesseractToMarkdown, wordsFromTesseract } from './ocr-layout.js';
 
 const VENDOR = new URL('../../vendor/ocr/', import.meta.url);
 export const OCR_LANGS = ['tha', 'eng'];
@@ -86,9 +86,10 @@ const toBlob = (canvas) => new Promise((res, rej) => canvas.toBlob((b) => (b ? r
  * @param {number[]} indexes zero-based page indexes to read
  * @param {{signal?:AbortSignal,onStage?:Function,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocrTimeoutMs?:number}} opts
  * @param {string[]} warnings pushed to
+ * @param {Map<number,{words:any[],width:number,height:number}>} [wordsOut] when given, the recognised words (pixel boxes) of every page are stored here too — the Word layout writer needs positions, not just text
  * @returns {Promise<Map<number,string>>} page index → Markdown ('' when the page has no readable text)
  */
-export async function ocrPdfPages(pdf, indexes, opts, warnings) {
+export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
   const todo = indexes.slice(0, OCR_MAX_PAGES);
   if (indexes.length > todo.length) warnings.push(`OCR อ่านได้สูงสุด ${OCR_MAX_PAGES} หน้าต่อไฟล์ — ข้ามหน้าที่เหลืออีก ${indexes.length - todo.length} หน้า`);
   if (opts.onStage) opts.onStage('ocr');
@@ -102,9 +103,10 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings) {
       if (opts.signal && opts.signal.aborted) throw new ConversionError('CANCELLED', 'ยกเลิกการแปลงแล้ว');
       if (opts.onStatus) opts.onStatus(`กำลังอ่านข้อความจากภาพ หน้า ${n + 1} จาก ${todo.length}`);
       const canvas = await renderPage(pdf, todo[n] + 1);
-      let data; const width = canvas.width;
+      let data; const width = canvas.width, height = canvas.height;
       try { data = await engine.recognize(await toBlob(canvas)); } finally { canvas.width = 0; canvas.height = 0; }
       const r = tesseractToMarkdown(data, { width });
+      if (wordsOut) wordsOut.set(todo[n], { words: wordsFromTesseract(data), width, height });
       chunks.set(todo[n], r.markdown);
       if (r.markdown && r.words) conf.push(r.confidence);
       if (opts.onProgress) opts.onProgress((n + 1) / todo.length);

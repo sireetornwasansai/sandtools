@@ -7,11 +7,13 @@ const DB_NAME = 'sand-db';
 const DB_STORE = 'docs';
 export const MAX_RECENT = 12;
 
-/** @typedef {{theme:'light'|'dark'|'system',fontSize:number,tabSize:number,wordWrap:boolean,previewMode:'split'|'editor'|'preview',sidebarCollapsed:boolean,remoteImages:boolean}} Settings */
+/** @typedef {{theme:'light'|'dark'|'system',fontSize:number,tabSize:number,wordWrap:boolean,previewMode:'split'|'editor'|'preview',sidebarCollapsed:boolean,remoteImages:boolean,docxFont:string,docxMode:'layout'|'flow'}} Settings */
 /** @type {Settings} */
 export const DEFAULT_SETTINGS = {
   theme: 'system', fontSize: 15, tabSize: 2, wordWrap: true,
-  previewMode: 'split', sidebarCollapsed: false, remoteImages: false
+  previewMode: 'split', sidebarCollapsed: false, remoteImages: false,
+  docxFont: 'auto',      // File Converter → Word: 'auto' (follow the PDF), THSarabunNew, THSarabunPSK, Tahoma
+  docxMode: 'layout'     // PDF → Word: 'layout' keeps the look of the PDF, 'flow' = re-flowed text
 };
 
 function readJSON(key, fallback) {

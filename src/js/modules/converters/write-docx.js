@@ -1,16 +1,23 @@
 // Markdown → .docx (Word), written by hand with JSZip: headings, bold/italic/strike/code, links, nested lists, tables, quotes, code blocks.
 // Thai text is tagged as complex script (w:cs + bidi language) so Word applies Thai line breaking and the right font.
+// The font (Tahoma by default, or TH Sarabun New / TH SarabunPSK ...) is a parameter, see docx-fonts.js.
+// docxPackage() is shared with write-docx-layout.js (PDF → Word that keeps the page layout).
 import { Lexer } from '../../vendor/marked.esm.js';
 import { getJSZip } from './common.js';
 import { ent } from './write-text.js';
+import { DOCX_FONTS } from './docx-fonts.js';
 
 const bad = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g;
 const x = (s) => String(s).replace(bad, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+export const WDRAW = ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
 const TEXT_W = 9638; // A4 minus 2 cm margins, in twips
 
-export async function writeDocx(md, { title = 'document' } = {}) {
-  const JSZip = await getJSZip();
+/**
+ * @param {string} md
+ * @param {{title?:string,font?:import('./docx-fonts.js').DocxFont}} [o] font = Word font for the whole document (default Tahoma)
+ */
+export async function writeDocx(md, { title = 'document', font: fontDef = DOCX_FONTS.Tahoma } = {}) {
   const rels = []; // hyperlinks
   let images = 0; let numSeq = 0; const nums = []; // ordered lists each get their own numbering instance (restart at 1)
 
@@ -87,9 +94,25 @@ export async function writeDocx(md, { title = 'document' } = {}) {
   const tokens = new Lexer({ gfm: true }).lex(md);
   const body = tokens.map(block).join('') || para('');
   const sect = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>';
-  const font = '<w:rFonts w:ascii="Tahoma" w:hAnsi="Tahoma" w:eastAsia="Tahoma" w:cs="Tahoma"/>';
-  const heading = (n, sz, before) => `<w:style w:type="paragraph" w:styleId="Heading${n}"><w:name w:val="heading ${n}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="${before}" w:after="100"/><w:outlineLvl w:val="${n - 1}"/></w:pPr><w:rPr><w:b/><w:bCs/><w:color w:val="1F2A5C"/><w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr></w:style>`;
-  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr>${font}<w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="en-US" w:eastAsia="en-US" w:bidi="th-TH"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
+  const blob = await docxPackage({ body, sect, rels, nums, font: fontDef, title });
+  return { blob, images };
+}
+
+/**
+ * Assemble the .docx package (styles, numbering, font table, relationships, media) around a ready-made <w:body> content string.
+ * @param {{body:string,sect:string,rels?:string[],nums?:Array<{id:number,start:number}>,font?:import('./docx-fonts.js').DocxFont,title?:string,
+ *   images?:Array<{rid:string,name:string,bytes:Uint8Array}>,settings?:boolean,compact?:boolean,extraFonts?:string[]}} o
+ *   settings = write settings.xml with Word 2013+ compatibility mode (layout writer); compact = paragraphs default to no spacing (layout writer);
+ *   extraFonts = other font families used by runs (listed in the font table)
+ * @returns {Promise<Blob>}
+ */
+export async function docxPackage({ body, sect, rels = [], nums = [], font: fontDef = DOCX_FONTS.Tahoma, title = 'document', images = [], settings = false, compact = false, extraFonts = [] }) {
+  const JSZip = await getJSZip();
+  const fam = x(fontDef.family); const k = fontDef.size / 11;      // headings scale with the body size of the chosen font
+  const half = Math.round(fontDef.size * 2);
+  const font = `<w:rFonts w:ascii="${fam}" w:hAnsi="${fam}" w:eastAsia="${fam}" w:cs="${fam}"/>`;
+  const heading = (n, sz, before) => `<w:style w:type="paragraph" w:styleId="Heading${n}"><w:name w:val="heading ${n}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="${before}" w:after="100"/><w:outlineLvl w:val="${n - 1}"/></w:pPr><w:rPr><w:b/><w:bCs/><w:color w:val="1F2A5C"/><w:sz w:val="${Math.round(sz * k)}"/><w:szCs w:val="${Math.round(sz * k)}"/></w:rPr></w:style>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr>${font}<w:sz w:val="${half}"/><w:szCs w:val="${half}"/><w:lang w:val="en-US" w:eastAsia="en-US" w:bidi="th-TH"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>${compact ? '<w:spacing w:after="0" w:line="240" w:lineRule="auto"/>' : '<w:spacing w:after="120" w:line="276" w:lineRule="auto"/>'}</w:pPr></w:pPrDefault></w:docDefaults>
 <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
 ${[[1, 40, 360], [2, 32, 300], [3, 28, 240], [4, 25, 200], [5, 23, 160], [6, 22, 160]].map(([n, sz, b]) => heading(n, sz, b)).join('')}
 <w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="60"/><w:ind w:left="720"/></w:pPr></w:style>
@@ -102,13 +125,19 @@ ${[[1, 40, 360], [2, 32, 300], [3, 28, 240], [4, 25, 200], [5, 23, 160], [6, 22,
   const bulletLvls = Array.from({ length: 9 }, (_, i) => lvl(i, 'bullet', i % 2 ? 'o' : '\uF0B7', 720 + i * 360)).join('');
   const decLvls = Array.from({ length: 9 }, (_, i) => lvl(i, i % 3 === 0 ? 'decimal' : i % 3 === 1 ? 'lowerLetter' : 'lowerRoman', `%${i + 1}.`, 720 + i * 360)).join('');
   const numbering = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering ${W}><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${bulletLvls}</w:abstractNum><w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${decLvls}</w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num><w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>${nums.map((n) => `<w:num w:numId="${n.id}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="${n.start}"/></w:lvlOverride></w:num>`).join('')}</w:numbering>`;
-  const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdN" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>${rels.map((h, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${x(h)}" TargetMode="External"/>`).join('')}</Relationships>`;
+  const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdN" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/><Relationship Id="rIdF" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>${settings ? '<Relationship Id="rIdT" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>' : ''}${images.map((im) => `<Relationship Id="${im.rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${im.name}"/>`).join('')}${rels.map((h, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${x(h)}" TargetMode="External"/>`).join('')}</Relationships>`;
   const zip = new JSZip();
-  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>');
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>${settings ? '<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>' : ''}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>${images.length ? '<Default Extension="png" ContentType="image/png"/>' : ''}</Types>`);
   zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>');
   zip.file('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${x(title)}</dc:title><dc:creator>SAND Office Tools</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}</dcterms:created></cp:coreProperties>`);
-  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W}><w:body>${body}${sect}</w:body></w:document>`);
+  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W}${WDRAW}><w:body>${body}${sect}</w:body></w:document>`);
   zip.file('word/styles.xml', styles); zip.file('word/numbering.xml', numbering); zip.file('word/_rels/document.xml.rels', docRels);
+  // font table: fonts are named, not embedded; Tahoma is the fallback when the reader's computer lacks TH Sarabun
+  const fontEntry = (name, alt) => `<w:font w:name="${x(name)}"><w:altName w:val="${x(alt)}"/><w:charset w:val="DE"/><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font>`;
+  const fontNames = [fontDef.family, ...extraFonts.filter((f) => f && f !== fontDef.family)];
+  zip.file('word/fontTable.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts ${W}>${fontNames.map((n) => fontEntry(n, n === fontDef.family ? fontDef.alt : 'Tahoma')).join('')}</w:fonts>`);
+  if (settings) zip.file('word/settings.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${W}><w:defaultTabStop w:val="720"/><w:characterSpacingControl w:val="doNotCompress"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`);
+  for (const im of images) zip.file(`word/media/${im.name}`, im.bytes);
   const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
-  return { blob, images };
+  return blob;
 }

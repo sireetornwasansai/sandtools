@@ -12,6 +12,7 @@ import { mdTable } from './common.js';
 import { markdownToText, markdownTables } from './write-text.js';
 import { writeXlsx, writeCsv, writeJson } from './write-sheets.js';
 import { writeDocx } from './write-docx.js';
+import { DOCX_FONTS, DEFAULT_FONT_CHOICE } from './docx-fonts.js';
 import { markdownToHtmlDoc } from './write-html.js';
 import { writePdf } from './write-pdf.js';
 import { convertImageTo, imageToPdf, pdfToImages } from './raster.js';
@@ -77,6 +78,35 @@ async function ocrImage(file, o, warnings) {
   } finally { await engine.terminate(); }
 }
 
+/** Font installed note: the .docx names the font but cannot carry it. */
+const fontNote = (font, detected, forced) => `ไฟล์ Word ใช้ฟอนต์ “${font.family}”${forced || !detected ? '' : ' ตามที่ใช้ใน PDF'} — ฟอนต์ไม่ได้ฝังไว้ในไฟล์ ต้องติดตั้งฟอนต์นี้ในเครื่องที่เปิดไฟล์ มิฉะนั้น Word จะแสดงด้วย ${font.alt} แทน (ขนาดตัวอักษรและการตัดบรรทัดอาจต่างไปเล็กน้อย)`;
+
+/**
+ * PDF → Word that keeps the look of the PDF: one Word section per page, paragraphs with the original indents / alignment, real tables
+ * rebuilt from the ruling lines, pictures at their position, and the font of the PDF (TH Sarabun New / TH SarabunPSK ...) written by name.
+ * Scanned pages are read with OCR and placed by the position of each recognised word.
+ */
+async function pdfToDocxLayout(buf, title, o, opts, warnings) {
+  const [{ readPdfPages }, { layoutDocument }, { writeDocxLayout }, { getPdfjs }] = await Promise.all([
+    import('./pdf-pages.js'), import('./pdf-layout.js'), import('./write-docx-layout.js'), import('./pdf.js')]);
+  const pdfjs = await getPdfjs();
+  let pdfLib = null;
+  try { const { getPdfLib } = await import('../pdf/engine.js'); pdfLib = await getPdfLib(); } catch { pdfLib = null; }   // only needed to repair Thai tone marks (/ActualText)
+  const r = await readPdfPages(buf, { ...o, pdfjs, pdfLib });
+  warnings.push(...r.warnings);
+  if (o.onStage) o.onStage('writing');
+  if (o.onProgress) o.onProgress(0);
+  const model = layoutDocument(r.pages);
+  const w = await writeDocxLayout(model, { title, fontChoice: opts.docxFont || DEFAULT_FONT_CHOICE, fontUsage: r.fontUsage });
+  if (o.onProgress) o.onProgress(1);
+  const forced = !!opts.docxFont && opts.docxFont !== 'auto';
+  warnings.push(fontNote(w.font, w.detected, forced));
+  if (forced && w.detected && w.detected.id !== w.font.id) warnings.push(`PDF ใช้ฟอนต์ ${w.detected.label} แต่เลือกแสดงเป็น ${w.font.label} — ความกว้างตัวอักษรอาจต่างจากต้นฉบับเล็กน้อย`);
+  if (r.pages.some((pg) => pg.ocr)) warnings.push('หน้าที่เป็นภาพสแกนถูกอ่านด้วย OCR และจัดตามตำแหน่งคำ ไม่มีฟอนต์เดิมให้ใช้ — โปรดตรวจทานข้อความกับต้นฉบับ');
+  if (model.dropped) warnings.push(`เส้นหรือกรอบที่ซับซ้อน ${model.dropped} จุดไม่ถูกคัดลอก (เส้นเฉียง กราฟิก)`);
+  return { blob: w.blob, pages: w.pages, font: w.font };
+}
+
 /** Read any text document or spreadsheet into the common model. @returns {Promise<{markdown:string,sheets?:Array<{name:string,rows:string[][]}>,warnings:string[]}>} */
 async function readSource(id, file, buf, target, o) {
   switch (id) {
@@ -105,8 +135,9 @@ const NOTE_LAYOUT = 'Word/PowerPoint/PDF ถูกอ่านเป็นเน
 /**
  * Convert a File to the chosen target format.
  * @param {File} file @param {keyof typeof TARGETS} target
- * @param {{maxBytes:number,timeoutMs:number,onStage?:Function,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocr?:boolean,ocrTimeoutMs?:number}} opts
- * @returns {Promise<{blob:Blob,filename:string,target:string,text?:string,markdown?:string,warnings:string[],ms:number,count?:number}>}
+ * @param {{maxBytes:number,timeoutMs:number,onStage?:Function,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocr?:boolean,ocrTimeoutMs?:number,
+ *   docxFont?:string,docxMode?:'layout'|'flow'}} opts docxFont = 'auto' | key of DOCX_FONTS (Word output); docxMode = PDF → Word: 'layout' keeps the page look (default), 'flow' = re-flowed text
+ * @returns {Promise<{blob:Blob,filename:string,target:string,text?:string,markdown?:string,warnings:string[],ms:number,count?:number,pages?:number,font?:string}>}
  */
 export async function convertTo(file, target, opts) {
   const t0 = performance.now();
@@ -127,6 +158,12 @@ export async function convertTo(file, target, opts) {
     if (id === 'image' && T.kind === 'image') return out(await convertImageTo(file, target));
     if (id === 'image' && target === 'pdf') return out(await imageToPdf(file, baseName(file.name)));
     if (id === 'pdf' && T.kind === 'image') { const r = await pdfToImages(buf, target, file.name, o); warnings.push(...r.warnings); return out(r.blob, { filename: r.filename, count: r.count }); }
+
+    // --- PDF → Word keeping the look of the PDF (default); 'flow' falls through to the Markdown route below
+    if (id === 'pdf' && target === 'docx' && opts.docxMode !== 'flow') {
+      const r = await pdfToDocxLayout(buf, baseName(file.name), o, opts, warnings);
+      return out(r.blob, { pages: r.pages, font: r.font.id });
+    }
 
     // --- read into the common model
     let src;
@@ -164,10 +201,13 @@ export async function convertTo(file, target, opts) {
         return out(await writeXlsx(sheets, { header: !!src.sheets || id !== 'pdf' }));
       }
       case 'docx': {
-        const r = await writeDocx(md, { title });
+        const choice = opts.docxFont || DEFAULT_FONT_CHOICE; const forced = choice !== 'auto';
+        const font = forced && DOCX_FONTS[choice] ? DOCX_FONTS[choice] : DOCX_FONTS.Tahoma;
+        const r = await writeDocx(md, { title, font });
         if (r.images) warnings.push(`รูปภาพ ${r.images} รูปแทนด้วยข้อความ [รูปภาพ]`);
-        if (id === 'pdf') warnings.push('การแปลง PDF เป็น Word ได้ข้อความ หัวข้อ รายการ และตารางที่จัดเรียงใหม่ ไม่ใช่หน้าตาเดียวกับต้นฉบับ');
-        return out(r.blob);
+        if (id === 'pdf') warnings.push('โหมดจัดเรียงใหม่: ได้ข้อความ หัวข้อ รายการ และตารางที่จัดเรียงใหม่ ไม่ใช่หน้าตาเดียวกับต้นฉบับ (เลือก “คงหน้าตาเดิม” ถ้าต้องการให้เหมือน PDF)');
+        if (font.id !== 'Tahoma') warnings.push(fontNote(font, null, true));
+        return out(r.blob, { font: font.id });
       }
       case 'pdf': {
         const r = await writePdf(md, { title, onProgress: opts.onProgress, deadline, signal: ac.signal });
