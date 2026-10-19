@@ -49,18 +49,25 @@ export async function writeDocxLayout(model, { title = 'document', fontChoice = 
 
   const microPara = (heightTw, extra = '', inner = '') => `<w:p><w:pPr><w:widowControl w:val="0"/>${extra}<w:spacing w:before="0" w:after="0" w:line="${Math.max(20, heightTw)}" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr>${inner}</w:p>`;
 
-  const para = (b, { keepNextToTable = false } = {}) => {
+  // Wrap slack: Word / LibreOffice break Thai words by dictionary and measure the font slightly differently from the program that made the PDF,
+  // so a line that just fitted in the PDF can wrap one word early and leave an orphan line — a few of those per page push the page's last lines
+  // (and the page number) onto an extra page. Every page's right margin is therefore `slack` pt narrower than measured, which gives the wrapped
+  // paragraphs that much more room. Centred / right-aligned paragraphs and rules get the same amount as right indent, so they stay where they were.
+  let curSlack = 0;
+  const para = (b, { keepNextToTable = false, cell = false } = {}) => {
     const ref = b.tokens.find((t) => !t.tab) || { fs: b.fs, font: '', fid: null, b: false, i: false };
     const tabs = b.tabs.length ? `<w:tabs>${b.tabs.map((t) => `<w:tab w:val="${t.kind}" w:pos="${tw(t.pos)}"/>`).join('')}</w:tabs>` : '';
-    const ind = (b.indL > 0.4 || b.indR > 0.4 || Math.abs(b.first) > 0.4)
-      ? `<w:ind w:left="${tw(b.indL)}" w:right="${tw(b.indR)}"${b.first > 0.4 ? ` w:firstLine="${tw(b.first)}"` : b.first < -0.4 ? ` w:hanging="${tw(-b.first)}"` : ''}/>` : '';
+    const keep = !cell && (b.jc === 'center' || b.jc === 'right') ? curSlack : 0;
+    const indR = b.indR + keep;
+    const ind = (b.indL > 0.4 || indR > 0.4 || Math.abs(b.first) > 0.4)
+      ? `<w:ind w:left="${tw(b.indL)}" w:right="${tw(indR)}"${b.first > 0.4 ? ` w:firstLine="${tw(b.first)}"` : b.first < -0.4 ? ` w:hanging="${tw(-b.first)}"` : ''}/>` : '';
     const jc = b.jc && b.jc !== 'left' ? `<w:jc w:val="${b.jc}"/>` : '';
     const mark = `<w:rPr>${runProps(ref)}</w:rPr>`;
     void keepNextToTable;
     return `<w:p><w:pPr><w:widowControl w:val="0"/>${tabs}<w:spacing w:before="${tw(b.before)}" w:after="0" w:line="${tw(b.pitch)}" w:lineRule="atLeast"/>${ind}${jc}${mark}</w:pPr>${runs(b.tokens, ref)}</w:p>`;
   };
 
-  const ruleXml = (b) => `<w:p><w:pPr><w:widowControl w:val="0"/><w:pBdr><w:bottom w:val="single" w:sz="${Math.max(2, Math.round(b.w * 8))}" w:space="0" w:color="000000"/></w:pBdr><w:spacing w:before="${tw(b.gapBefore)}" w:after="0" w:line="20" w:lineRule="exact"/><w:ind w:left="${tw(b.indL)}" w:right="${tw(b.indR)}"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr></w:p>`;
+  const ruleXml = (b) => `<w:p><w:pPr><w:widowControl w:val="0"/><w:pBdr><w:bottom w:val="single" w:sz="${Math.max(2, Math.round(b.w * 8))}" w:space="0" w:color="000000"/></w:pBdr><w:spacing w:before="${tw(b.gapBefore)}" w:after="0" w:line="20" w:lineRule="exact"/><w:ind w:left="${tw(b.indL)}" w:right="${tw(b.indR + curSlack)}"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr></w:p>`;
 
   const border = (name, w) => (w > 0 ? `<w:${name} w:val="single" w:sz="${Math.max(2, Math.min(96, Math.round(w * 8)))}" w:space="0" w:color="000000"/>` : `<w:${name} w:val="nil"/>`);
 
@@ -85,7 +92,7 @@ export async function writeDocxLayout(model, { title = 'document', fontChoice = 
         }
         if (!o) continue;
         const w = widths.slice(c, c + o.cs).reduce((a, b) => a + b, 0);
-        const body = o.paras.length ? o.paras.map((p) => para(p)).join('') : microPara(20);
+        const body = o.paras.length ? o.paras.map((p) => para(p, { cell: true })).join('') : microPara(20);
         tcs += `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${o.cs > 1 ? `<w:gridSpan w:val="${o.cs}"/>` : ''}${o.rs > 1 ? '<w:vMerge w:val="restart"/>' : ''}<w:tcBorders>${border('top', o.borders.t)}${border('left', o.borders.l)}${border('bottom', o.borders.b)}${border('right', o.borders.r)}</w:tcBorders>${o.fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${o.fill}"/>` : ''}${o.vAlign !== 'top' ? `<w:vAlign w:val="${o.vAlign === 'center' ? 'center' : 'bottom'}"/>` : ''}</w:tcPr>${body}</w:tc>`;
         c += o.cs - 1;
       }
@@ -104,18 +111,21 @@ export async function writeDocxLayout(model, { title = 'document', fontChoice = 
   // (many PDFs break anywhere), so a reflowed paragraph can come out a line or two longer than in the PDF, and a page filled exactly to
   // its margin would push its last lines onto an extra page.
   const BOTTOM_MARGIN_MAX = 57, BOTTOM_SLACK = 21;
+  const WRAP_SLACK = 8;                                                           // pt of extra line width per page (see `para`)
+  const pageSlack = (pg) => Math.max(0, Math.min(WRAP_SLACK, pg.margins.r));
   const CARRIER_PT = 1;                                                           // height of the paragraph that carries a page's pictures
   const sectXml = (pg) => {
     const landscape = pg.width > pg.height;
     const m = pg.margins;
     const top = Math.max(0, m.t - (pg.images.length ? CARRIER_PT : 0));
     const bottom = Math.max(14, Math.min(m.b, BOTTOM_MARGIN_MAX) - BOTTOM_SLACK);
-    return `<w:sectPr><w:type w:val="nextPage"/><w:pgSz w:w="${tw(pg.width)}" w:h="${tw(pg.height)}"${landscape ? ' w:orient="landscape"' : ''}/><w:pgMar w:top="${tw(top)}" w:right="${tw(m.r)}" w:bottom="${tw(bottom)}" w:left="${tw(m.l)}" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>`;
+    const right = Math.max(0, m.r - pageSlack(pg));
+    return `<w:sectPr><w:type w:val="nextPage"/><w:pgSz w:w="${tw(pg.width)}" w:h="${tw(pg.height)}"${landscape ? ' w:orient="landscape"' : ''}/><w:pgMar w:top="${tw(top)}" w:right="${tw(right)}" w:bottom="${tw(bottom)}" w:left="${tw(m.l)}" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>`;
   };
 
   let body = ''; let prevWasTable = false; let nImg = 0; let lastSect = '';
   model.pages.forEach((pg, pi) => {
-    prevWasTable = false;
+    prevWasTable = false; curSlack = pageSlack(pg);
     // carrier paragraph FIRST: a picture is anchored to the page by absolute position, but it stays on the page of the paragraph that holds it,
     // so it must not sit behind content that could overflow onto the next page
     let anchors = '';

@@ -1,6 +1,7 @@
 import { ConversionError, LIMITS } from './common.js';
 import { layoutToMarkdown } from './ocr-layout.js';
 import { applyActualText, normalizeThai, readActualTextSpans } from './pdf-actualtext.js';
+import { repairThaiIfNeeded } from './pdf-thai.js';
 
 const THAI = /[\u0e00-\u0e7f]/;
 
@@ -66,6 +67,14 @@ export async function convertPdf(buf, opts = {}) {
   }
   const warnings = [];
   try {
+    // Thai marks mis-encoded by the PDF producer (Word for Mac …): repair the embedded fonts, then carry on with the repaired file
+    try {
+      const th = await repairThaiIfNeeded(pdf, {
+        open: (bytes) => pdfjs.getDocument({ data: bytes, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }).promise,
+        getPdfLib: async () => (await import('../pdf/engine.js')).getPdfLib()
+      });
+      pdf = th.pdf; if (th.warning) warnings.push(th.warning);
+    } catch { /* the repair is best-effort */ }
     const total = Math.min(pdf.numPages, LIMITS.maxPdfPages);
     if (pdf.numPages > total) warnings.push(`PDF มี ${pdf.numPages} หน้า แปลงเฉพาะ ${total} หน้าแรก`);
     const pages = [];

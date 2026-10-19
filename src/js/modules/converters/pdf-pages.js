@@ -5,6 +5,7 @@
 import { ConversionError, LIMITS } from './common.js';
 import { applyActualText, readActualTextSpans } from './pdf-actualtext.js';
 import { classifyFont } from './docx-fonts.js';
+import { repairThaiIfNeeded } from './pdf-thai.js';
 import { encodePng, pdfImageToPixels, shrinkPixels } from './png.js';
 
 const THAI = /[\u0e00-\u0e7f]/;
@@ -141,8 +142,16 @@ async function bitmapToPng(bitmap) {
  */
 export async function readPdfPages(buf, opts) {
   const { pdfjs } = opts;
-  const pdf = await openPdf(buf, pdfjs);
+  let pdf = await openPdf(buf, pdfjs);
   const warnings = []; const fontUsage = {};
+  // Thai marks mis-encoded by the PDF producer (Word for Mac …): repair the embedded fonts, then carry on with the repaired file
+  try {
+    const th = await repairThaiIfNeeded(pdf, {
+      open: (bytes) => openPdf(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), pdfjs),
+      getPdfLib: async () => opts.pdfLib || (await import('../pdf/engine.js')).getPdfLib()
+    });
+    pdf = th.pdf; if (th.warning) warnings.push(th.warning);
+  } catch { /* the repair is best-effort */ }
   try {
     const total = Math.min(pdf.numPages, LIMITS.maxPdfPages);
     if (pdf.numPages > total) warnings.push(`PDF มี ${pdf.numPages} หน้า แปลงเฉพาะ ${total} หน้าแรก`);
