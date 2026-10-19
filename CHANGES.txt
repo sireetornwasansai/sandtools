@@ -1,3 +1,26 @@
+v1.8.2 — แก้ PDF → Word แปลงไม่ได้ ("ไฟล์ PDF เสียหายหรือเปิดไม่ได้ · Setting up fake worker failed") + ซ่อมวรรณยุกต์ไทยที่เพี้ยน
+สาเหตุ 1: core/polyfills.js ถูก import ใน Web Worker ของ pdf.js ด้วย แต่เรียก Element (ไม่มีใน Worker) → worker ตายตอนเริ่ม → pdf.js ถอยไปใช้ "fake worker"
+          ซึ่ง vendor/pdf.worker.shim.mjs ไม่ได้ export WorkerMessageHandler → แปลง PDF ทุกไฟล์ล้ม แม้ไฟล์ปกติ
+สาเหตุ 2: PDF ที่บันทึกจาก Word บน Mac (Quartz) + TH Sarabun ใช้กลีฟ "วรรณยุกต์/สระบน-ล่างแบบตัวแปร" ที่ ToUnicode ชี้เป็นตัวอักษรมั่ว (Z % U m ฯลฯ)
+          ข้อความจึงออกมาเป็น "ผูZวิจัย" "ล%างไต" แทน "ผู้วิจัย" "ล้างไต"
+แก้:   polyfills.js ครอบ Element ด้วย typeof + เพิ่ม polyfill ที่ pdf.js 5.x ใช้ (Uint8Array.toHex/toBase64, Promise.withResolvers, iterator helpers ฯลฯ — เติมเฉพาะที่เบราว์เซอร์ไม่มี)
+       pdf.worker.shim.mjs: export * from './pdf.worker.min.mjs'
+       ตัวซ่อมวรรณยุกต์ไทย: เทียบ "รูปทรงกลีฟ" ในฟอนต์ที่ฝังใน PDF กับตัวอ้างอิง TH Sarabun New แล้วเขียน ToUnicode ใหม่ (ซ่อมเฉพาะที่ตรงชัดเจน และเฉพาะฟอนต์ไทย)
+       ทำงานอัตโนมัติเมื่อตรวจพบข้อความเพี้ยน ทั้งโหมดคงหน้าตาเดิม / จัดเรียงใหม่ / txt / md / xlsx — มีข้อความเตือนให้ตรวจทาน
+       write-docx-layout.js: เผื่อความกว้างย่อหน้า 8pt (ขอบขวาหน้าแคบลง) กันบรรทัดกำพร้าจากการตัดคำไทยของ Word ที่ทำให้เลขหน้าล้นไปหน้าใหม่
+ผลทดสอบ: ไฟล์ IS.09 (14 หน้า) → Word 14 หน้า ตรงกับต้นฉบับ ข้อความไทยถูกต้อง (จุดเพี้ยน 848 → 0)
+ไฟล์ใหม่:  converters/ttf.js · thai-mark-shapes.js · thai-fix.js · pdf-thai.js · tests/unit/thai-fix.test.mjs
+ไฟล์แก้:   core/polyfills.js · vendor/pdf.worker.shim.mjs · converters/pdf.js · pdf-pages.js · write-docx-layout.js
+ข้อจำกัด:  สีตัวอักษร และกราฟิกลูกศรหนา/เส้นเฉียงไม่ถูกคัดลอก · ต้องติดตั้ง TH Sarabun New/PSK ในเครื่องที่เปิดไฟล์ Word
+
+v1.8.1 — แปลง PDF → Word สมบูรณ์: คงหน้าตาเดิม + รองรับฟอนต์ TH Sarabun New / TH SarabunPSK
+ใหม่:  ตัวเลือก "รูปแบบไฟล์ Word จาก PDF": คงหน้าตาเดิม (ค่าเริ่มต้น) หรือ จัดเรียงใหม่ · ตัวเลือก "ฟอนต์ในไฟล์ Word": ตามไฟล์ PDF (อัตโนมัติ) / TH Sarabun New / TH SarabunPSK / Tahoma (จำค่าไว้ในเครื่อง)
+       คงหน้าตาเดิม = ขนาดหน้า ขอบกระดาษ ย่อหน้า ระยะบรรทัด การชิดขอบ/กระจายไทย แท็บ ตาราง (รวมเซลล์ เส้น สีพื้น) เส้นคั่น รูป/ตราครุฑ และขนาดฟอนต์ตามต้นฉบับ
+       ฟอนต์ไทยเขียนทั้งช่อง ascii/cs และขนาด szCs ทำให้ Word ไม่เปลี่ยนเป็นฟอนต์ไทยเริ่มต้นและไม่ทิ้งขนาดตัวอักษร · ซ่อมสระ/วรรณยุกต์ไทยจาก ActualText ของ PDF · หน้าสแกนอ่านด้วย OCR แล้ววางตามตำแหน่งคำ
+ไฟล์ใหม่:  src/js/modules/converters/docx-fonts.js · pdf-pages.js · pdf-layout.js · write-docx-layout.js · png.js · tests/unit/docx-fonts.test.mjs
+ไฟล์แก้:   converters/write-docx.js (docxPackage ใช้ร่วมกัน, ฟอนต์เป็นพารามิเตอร์) · convert-to.js · ocr.js · core/store.js (docxFont, docxMode) · modules/converter.js (ปุ่มเลือก)
+หมายเหตุ: ไฟล์ .docx ระบุชื่อฟอนต์ ไม่ฝังฟอนต์ — เครื่องที่เปิดต้องติดตั้ง TH Sarabun New / TH SarabunPSK (ไม่มีจะใช้ Tahoma แทน)
+
 v1.8.0 — สารบรรณ: ศูนย์สารบรรณ · คิวรอลงรับ · พิมพ์ทะเบียน/ตรารับ · ติดตามแบบแถบความคืบหน้า · หน้าแรกตามอีเมล
 แก้:  gas/Saraban.gs (คิวรอลงรับส่ง age / urgency / registered) · gas/Code.gs (login/me ส่ง home ตาม HOME_SARABAN_EMAILS)
       src/js/modules/saraban.js · saraban-engine.js · inbox.js · core/auth.js · main.js · css/saraban.css · tests · docs/SARABAN.md
