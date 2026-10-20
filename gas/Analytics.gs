@@ -340,6 +340,8 @@ function projects(b) {
     case 'update': return anaUpdate(sc, u, b);
     case 'delete': return anaDelete(sc, u, b);
     case 'stats':  return anaStats(anaOwned(sc, b.key), b.days);
+    case 'replay': return simReplay(sc, b);   // 3D plan: replay of a real day (below)
+    case 'wings':  return simWings(sc, b);    // 3D plan: pages of every system in one call (below)
     default: throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');
   }
 }
@@ -430,4 +432,185 @@ function setupAnalytics() {
   ScriptApp.newTrigger('anaPruneJob').timeBased().everyDays(1).atHour(3).create();
   if (!prop('EDGE_SECRET')) setupLinks();
   console.log('พร้อมใช้งาน — แท็บ Sites, Hits และทริกเกอร์เขียนข้อมูลทุกนาที/ล้างข้อมูลเก่าทุกคืนถูกสร้างแล้ว\nอย่าลืมตั้ง SAND_EDGE_SECRET ใน Vercel ให้เท่ากับ EDGE_SECRET (ดูได้ใน Project Settings → Script properties)');
+}
+
+/* ====================================================================================================================
+ * 3D hospital plan — projects/replay and projects/wings
+ * ==================================================================================================================== */
+
+/**
+ * SAND Office Tools — ผังจำลอง 3 มิติของโรงพยาบาล: เล่นซ้ำวันจริง (projects/replay) และหน้าย่อยของทุกระบบในครั้งเดียว (projects/wings).
+ *
+ * วางต่อท้าย Analytics.gs แล้วเพิ่ม 2 บรรทัดใน switch ของ projects():
+ *     case 'replay': return simReplay(sc, b);
+ *     case 'wings':  return simWings(sc, b);
+ *
+ *   projects/replay {mode: 'today' | 'peak'}   → {mode, day, today, byDay:[{d,pv}], scale, sites:[{key, n, uv, fresh, back, ev:[[นาทีของวัน, ผู้เข้าชม#, f, หน้า#]], pgs:[พาธ]}]}
+ *        f = 0 เข้าครั้งแรกของวัน · 1 กลับมาใหม่หลังห่างเกิน 30 นาที · 2 เปิดหน้าอื่นในการเข้าครั้งเดียวกัน   (ผู้เข้าชม# เป็นเลขรัน ไม่ใช่ค่าแฮช)
+ *   projects/wings  {days: 7 | 30 | 90 | 365}  → {days, sites:[{site, uv, realtime, pages:[{path, pv, uv, realtime, byHour[24], rl}], other, flows:[{from, to, n}]}]}
+ *        รูปแบบเดียวกับ op "pages" ของแต่ละโครงการ แต่อ่านชีต Hits ครั้งเดียวสำหรับทุกโครงการ (เร็วกว่าเรียกทีละระบบมาก) · แคช 60 วินาที
+ *
+ * ความเป็นส่วนตัว (PDPA): ใช้เฉพาะข้อมูลที่ Hits เก็บอยู่แล้ว (hash รายวัน ไม่มี IP / คุกกี้) · ตอบเฉพาะโครงการของผู้ใช้ (แอดมินเห็นทั้งหมด) · ไม่ส่ง hash ออกไปเลย
+ * ต้องใช้ฟังก์ชันจาก Code.gs / Links.gs / Analytics.gs: requireUser, rateLimit, intProp, lnkScope, lnkDayOf, lnkHourOf, sheetTab, anaAll, anaFlush
+ */
+
+var SIM_SCAN_ROWS = 80000;      // newest Hits rows read (same budget as Analytics.gs)
+var SIM_VISIT_GAP = 30;         // minutes: a view after a longer silence is a "return visit" (must match VISIT_GAP in site-engine.js)
+var SIM_MAX_EV = 2000;          // events sent per project (the page ignores more)
+var SIM_MAX_PGS = 16;           // page names sent per project for the replay
+var SIM_MAX_PAGES = 10;         // rooms per system (MAX_PAGES in site-engine.js); more → busiest 9 + "other pages"
+var SIM_ROLES = ['admin', 'head', 'officer', 'committee', 'researcher', 'user'];
+
+/* ------------------------------------ helpers ------------------------------------ */
+
+/** Same grouping rule as pageKey() in site-engine.js: no query string, index.html folded into its folder, no trailing slash, "#/route" kept. */
+function simPageKey(p) {
+  var t = String(p == null || p === '' ? '/' : p), hash = '', hi = t.indexOf('#');
+  if (hi >= 0) { var hv = t.slice(hi); if (/^#!?\//.test(hv)) hash = hv.split('?')[0].toLowerCase().replace(/\/+$/, ''); t = t.slice(0, hi); }
+  t = t.split('?')[0].toLowerCase(); if (t.charAt(0) !== '/') t = '/' + t;
+  t = t.replace(/\/index\.html?$/, '/'); if (t.length > 1) t = t.replace(/\/+$/, '');
+  return t + hash;
+}
+function simMinuteOf(t) { return Math.floor(((t + 25200000) % 86400000) / 60000); }   // minute of the day in Thailand time (UTC+7)
+function simScope(sc) { return sc.admin ? '*' : sc.email; }
+function simSites(sc) {
+  return anaAll().filter(function (s) { return s.status !== 'deleted' && (sc.admin || s.owner === sc.email); });
+}
+function simZero24() { var a = []; for (var h = 0; h < 24; h++) a.push(0); return a; }
+function simCacheGet(k) { try { var v = CacheService.getScriptCache().get(k); return v ? JSON.parse(v) : null; } catch (x) { return null; } }
+function simCachePut(k, v, sec) { try { CacheService.getScriptCache().put(k, JSON.stringify(v), sec); } catch (x) { /* too big for the cache: just recompute next time */ } }
+
+/**
+ * Page views (no robots, no events) of the given projects since `since` — newest SIM_SCAN_ROWS rows of Hits.
+ * The role column is found by its header (บทบาท / role) so this works whether or not your Hits tab has one; without it every `rl` stays empty.
+ */
+function simRead(keys, since) {
+  var sh = sheetTab('Hits', ANA_HIT_HEADERS), last = sh.getLastRow();
+  if (last < 2) return [];
+  var width = ANA_HIT_HEADERS.length; try { if (typeof sh.getLastColumn === 'function') width = Math.max(width, sh.getLastColumn()); } catch (x) { /* keep default */ }
+  var roleCol = -1;
+  if (width > ANA_HIT_HEADERS.length) {
+    var head = sh.getRange(1, 1, 1, width).getValues()[0];
+    for (var c = ANA_HIT_HEADERS.length; c < head.length; c++) if (/บทบาท|role/i.test(String(head[c]))) { roleCol = c; break; }
+  }
+  var from = Math.max(2, last - SIM_SCAN_ROWS + 1), vals = sh.getRange(from, 1, last - from + 1, width).getValues(), out = [];
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    if (!keys[String(r[1])] || String(r[2]) !== 'pv' || Number(r[12]) === 1) continue;
+    var t = r[0] instanceof Date ? r[0].getTime() : Number(r[0]);
+    if (!isFinite(t) || t < since) continue;
+    var role = roleCol >= 0 ? String(r[roleCol] || '').toLowerCase() : '';
+    out.push({ t: t, key: String(r[1]), name: String(r[3] || '/'), vid: String(r[9] || ''), role: SIM_ROLES.indexOf(role) >= 0 ? role : '' });
+  }
+  return out;
+}
+function simPrepare(sc) {
+  if (typeof anaFlush === 'function') anaFlush();   // views still waiting in the cache buffer count too
+  var sites = simSites(sc), keys = Object.create(null);
+  sites.forEach(function (s) { keys[s.key] = s; });
+  return { sites: sites, keys: keys };
+}
+
+/* ------------------------------ projects/replay ------------------------------ */
+
+function simReplay(sc, b) {
+  var mode = b.mode === 'peak' ? 'peak' : 'today', ck = 'sr:' + simScope(sc) + ':' + mode, hit = simCacheGet(ck);
+  if (hit) return hit;
+  var p = simPrepare(sc), now = Date.now(), today = lnkDayOf(now);
+  var rows = simRead(p.keys, now - 31 * 86400000);
+  var perDay = Object.create(null);
+  rows.forEach(function (r) { var d = lnkDayOf(r.t); perDay[d] = (perDay[d] || 0) + 1; });
+  var byDay = [], best = null, i;
+  for (i = 29; i >= 0; i--) {
+    var d = lnkDayOf(now - i * 86400000), pv = perDay[d] || 0;
+    byDay.push({ d: d, pv: pv });
+    if (pv > 0 && (!best || pv > best.pv || (pv === best.pv && d > best.d))) best = { d: d, pv: pv };   // busiest day; ties → the latest day (same rule as the page)
+  }
+  var day = mode === 'peak' && best ? best.d : today;
+  var perSite = Object.create(null);
+  rows.forEach(function (r) { if (lnkDayOf(r.t) === day) (perSite[r.key] = perSite[r.key] || []).push(r); });
+  var sites = Object.keys(perSite).map(function (key) { return simReplaySite(key, perSite[key]); });
+  var out = { mode: mode, day: day, today: today, byDay: byDay, scale: 1, sites: sites };
+  simCachePut(ck, out, 60);
+  return out;
+}
+
+function simReplaySite(key, rows) {
+  rows.sort(function (a, c) { return a.t - c.t; });
+  var visitors = Object.create(null), seen = 0, fresh = 0, back = 0, pageCount = Object.create(null), ev = [];
+  rows.forEach(function (r) {
+    var pk = simPageKey(r.name); pageCount[pk] = (pageCount[pk] || 0) + 1;
+    var v = r.vid ? visitors[r.vid] : null, f;
+    if (!v) { v = { no: ++seen, last: r.t }; if (r.vid) visitors[r.vid] = v; f = 0; fresh++; }                       // first view of this visitor today (no hash → every view is its own visitor)
+    else if ((r.t - v.last) / 60000 > SIM_VISIT_GAP) { f = 1; back++; v.last = r.t; }                                // came back after a pause
+    else { f = 2; v.last = r.t; }                                                                                     // another page of the same visit
+    ev.push([simMinuteOf(r.t), v.no, f, pk]);
+  });
+  var pgs = Object.keys(pageCount).sort(function (a, c) { return pageCount[c] - pageCount[a]; }).slice(0, SIM_MAX_PGS), idx = Object.create(null);
+  pgs.forEach(function (k, n) { idx[k] = n; });
+  ev.forEach(function (e) { e[3] = idx[e[3]] === undefined ? -1 : idx[e[3]]; });
+  var n = ev.length;
+  if (ev.length > SIM_MAX_EV) {                                  // keep every visit start first, then thin the rest evenly
+    var starts = ev.filter(function (e) { return e[2] !== 2; });
+    ev = starts.length > SIM_MAX_EV ? starts.filter(function (e, i) { return i % Math.ceil(starts.length / SIM_MAX_EV) === 0; }) : starts;
+  }
+  return { key: key, n: n, uv: seen, fresh: fresh, back: back, ev: ev, pgs: pgs };
+}
+
+/* ------------------------------- projects/wings ------------------------------- */
+
+function simWings(sc, b) {
+  var days = [7, 30, 90, 365].indexOf(Number(b.days)) >= 0 ? Number(b.days) : 30, ck = 'sw:' + simScope(sc) + ':' + days, hit = simCacheGet(ck);
+  if (hit) return hit;
+  var p = simPrepare(sc), now = Date.now(), rows = simRead(p.keys, now - days * 86400000), per = Object.create(null);
+  rows.forEach(function (r) { (per[r.key] = per[r.key] || []).push(r); });
+  var sites = Object.keys(per).map(function (key) { return simWingSite(p.keys[key], per[key], days, now); });
+  var out = { days: days, sites: sites };
+  simCachePut(ck, out, 60);
+  return out;
+}
+
+function simPageAgg(path) { return { path: path, pv: 0, uv: Object.create(null), rt: Object.create(null), byHour: simZero24(), rl: {} }; }
+function simPageOut(a) {
+  var rl = {}; SIM_ROLES.forEach(function (id) { if (a.rl[id]) rl[id] = a.rl[id]; });
+  return { path: a.path, pv: a.pv, uv: Object.keys(a.uv).length, realtime: Object.keys(a.rt).length, byHour: a.byHour, rl: rl };
+}
+
+/** One project → the same shape as `projects/pages`: the busiest pages (+ "other"), who uses them, when, and the walks between pages. */
+function simWingSite(s, rows, days, now) {
+  rows.sort(function (a, c) { return a.t - c.t; });
+  var five = now - 5 * 60000, agg = Object.create(null), siteUv = Object.create(null), siteRt = Object.create(null), walk = Object.create(null), anon = 0;
+  rows.forEach(function (r) {
+    var pk = simPageKey(r.name), a = agg[pk] = agg[pk] || simPageAgg(pk), day = lnkDayOf(r.t), who = (r.vid || ('x' + (++anon))) + day;
+    a.pv++; a.uv[who] = 1; a.byHour[lnkHourOf(r.t)]++;
+    if (r.role) a.rl[r.role] = (a.rl[r.role] || 0) + 1;
+    siteUv[who] = 1;
+    if (r.t >= five && r.vid) { a.rt[r.vid] = 1; siteRt[r.vid] = 1; }
+    if (r.vid) { var w = walk[who] = walk[who] || []; w.push({ k: pk, t: r.t }); }
+  });
+  var ranked = Object.keys(agg).map(function (k) { return agg[k]; }).sort(function (a, c) { return c.pv - a.pv; });
+  var keep = ranked.length > SIM_MAX_PAGES ? ranked.slice(0, SIM_MAX_PAGES - 1) : ranked, rest = ranked.slice(keep.length), kept = Object.create(null);
+  keep.forEach(function (a) { kept[a.path] = true; });
+  var other = null;
+  if (rest.length) {
+    var o = simPageAgg('*other');
+    rest.forEach(function (a) {
+      o.pv += a.pv; o.byHour = o.byHour.map(function (n, i) { return n + a.byHour[i]; });
+      Object.keys(a.uv).forEach(function (u) { o.uv[u] = 1; }); Object.keys(a.rt).forEach(function (u) { o.rt[u] = 1; });
+      SIM_ROLES.forEach(function (id) { if (a.rl[id]) o.rl[id] = (o.rl[id] || 0) + a.rl[id]; });
+    });
+    other = simPageOut(o); delete other.path;
+  }
+  var flow = Object.create(null);
+  Object.keys(walk).forEach(function (who) {
+    var w = walk[who];
+    for (var i = 1; i < w.length; i++) {
+      if ((w[i].t - w[i - 1].t) / 60000 > SIM_VISIT_GAP) continue;      // a long pause is a new visit, not a walk from page to page
+      var from = kept[w[i - 1].k] ? w[i - 1].k : (other ? '*other' : ''), to = kept[w[i].k] ? w[i].k : (other ? '*other' : '');
+      if (!from || !to || from === to) continue;
+      var fk = from + '\u0001' + to; flow[fk] = (flow[fk] || 0) + 1;
+    }
+  });
+  var flows = Object.keys(flow).map(function (k) { var x = k.split('\u0001'); return { from: x[0], to: x[1], n: flow[k] }; }).sort(function (a, c) { return c.n - a.n; }).slice(0, 40);
+  return { days: days, site: { key: s.key, name: s.name, url: s.url, tags: s.tags }, uv: Object.keys(siteUv).length, realtime: Object.keys(siteRt).length, pages: keep.map(simPageOut), other: other, flows: flows };
 }
