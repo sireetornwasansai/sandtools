@@ -317,7 +317,7 @@ a { color: var(--primary); text-decoration: none; }
 .day-over-limit { box-shadow: inset 0 0 0 2px var(--amber) !important; }
 
 /* FORM PANEL */
-#formPanel { max-width: 640px; }
+#formPanel { max-width: none; }
 .card {
   background: var(--white); border: 1px solid var(--border);
   border-radius: var(--radius2); box-shadow: var(--shadow-sm); margin-bottom: 16px; overflow: hidden;
@@ -444,7 +444,7 @@ a { color: var(--primary); text-decoration: none; }
 }
 
 /* STAFF PANEL */
-#staffPanel { max-width: 740px; }
+#staffPanel { max-width: none; }
 .staff-add-row { display: flex; gap: 8px; align-items: flex-end; }
 .staff-add-row .form-group { flex: 1; margin-bottom: 0; }
 .color-swatches { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
@@ -881,11 +881,11 @@ tbody tr:hover { background: var(--bg); }
    SAND integration overrides (added by the port)
    ===================================================================================== */
 :host { display: block; position: relative; --font: inherit; font-family: var(--font-sand, inherit); }
-.hr-root { position: relative; font-family: var(--font-sand, 'Noto Sans Thai', 'Sarabun', 'Leelawadee UI', Tahoma, sans-serif); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.hr-root { position: relative; font-family: var(--font-sand, 'Noto Sans Thai', 'Sarabun', 'Leelawadee UI', Tahoma, sans-serif); border: 1px solid var(--border); border-radius: 14px; overflow: visible; }
 [hidden] { display: none !important; }
 
 /* the old full-screen layout becomes a block inside SAND's page: the sidebar turns into a toolbar on top */
-.layout { flex-direction: column; height: auto; min-height: 620px; overflow: visible; }
+.layout { flex-direction: column; height: auto; min-height: 0; overflow: visible; }
 .sidebar { width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 14px; overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); }
 .sidebar-brand { display: none; }
 .sidebar-stats { display: flex; gap: 6px; padding: 0; margin: 0; border: 0; }
@@ -900,8 +900,8 @@ tbody tr:hover { background: var(--bg); }
 .sidebar-datejump { display: flex; align-items: center; gap: 6px; padding: 0; margin: 0 0 0 auto; border: 0; }
 .sidebar-datejump label { margin: 0; white-space: nowrap; }
 .sidebar-setup { padding: 0; margin: 0; border: 0; }
-.main { overflow: visible; min-height: 560px; }
-.content-area { overflow: visible; min-height: 520px; }
+.main { overflow: visible; min-height: 0; }
+.content-area { overflow: visible; min-height: 0; position: static; }
 .panel { overflow-y: visible; }
 .topbar { flex-wrap: wrap; height: auto; min-height: 52px; gap: 6px; padding: 6px 14px; }
 #calendar { height: auto; }
@@ -926,9 +926,70 @@ tbody tr:hover { background: var(--bg); }
   .sidebar-stats { width: 100%; }
   .sidebar-stats .sstat { flex: 1; }
   .sidebar .nav-item { padding: 6px 10px; font-size: 13px; }
-  .content-area { min-height: 420px; }
+  .content-area { min-height: 0; }
 }
 @media print { .sidebar, .topbar { display: none !important; } }
 .dept-btns { flex-direction: row; }
 .dept-btn { flex: 0 0 auto; }
 .fc .fc-header-toolbar .fc-toolbar-chunk:last-child { display: none; }   /* the view buttons already live in the top bar */
+
+
+/* =====================================================================================
+   v1.1 — full-page layout (fixes: form / report / staff panels were cut off at 520px and could not scroll)
+   Root cause: .panel was position:absolute; inset:0 inside a fixed-height box, and .hr-root clipped the overflow.
+   Now every panel is a normal block (only the active one is shown), so the SAND page itself scrolls and nothing is hidden.
+   ===================================================================================== */
+.hr-root { background: var(--bg); }
+.layout { min-height: 0; }
+.sidebar { border-radius: 14px 14px 0 0; }
+.main { display: block; }
+.content-area { display: block; position: static; overflow: visible; min-height: 0; }
+.panel { display: none; position: static; inset: auto; opacity: 1; pointer-events: auto; overflow: visible; padding: 16px 18px 28px; transition: none; }
+.panel.active { display: block; animation: hr-panel-in .16s ease-out both; }
+@keyframes hr-panel-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .panel.active { animation: none; } }
+
+/* calendar: fill the visible screen but never smaller than a usable height */
+#calendarPanel { padding: 12px; display: none; }   /* the older #calendarPanel rule forced display:flex — an id beats .panel, so hide it explicitly */
+#calendarPanel.active { display: flex; flex-direction: column; overflow: visible; }
+#calendar { flex: 1 1 auto; height: auto; min-height: 560px; overflow: visible; }
+#calendar .fc { min-height: 0; }
+
+/* top bar stays in view while scrolling long forms (below SAND's own header) */
+.topbar { position: sticky; top: 0; z-index: 30; border-radius: 0; background: var(--white); }
+
+/* form: use the whole width — two columns on wide screens, one column on phones */
+#formPanel.active { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+#formPanel > .card { margin: 0 !important; }
+#formPanel .card-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; }
+#formPanel .card-body > * { grid-column: 1 / -1; min-width: 0; }
+#formPanel .card-body > .form-row { display: contents; }
+#formPanel .card-body > .form-row[style*="display:none"], #formPanel .card-body > .form-row[style*="display: none"] { display: none; }
+#formPanel .card-body > .form-row > .form-group { grid-column: auto; min-width: 0; }
+#formPanel .card-body > .form-group:first-child,
+#formPanel .card-body > .halfday-group,
+#formPanel .card-body > #timeGroup { grid-column: 1 / -1; }
+#formPanel .card-body > .form-group:not(:first-child):not(#timeGroup) { grid-column: 1 / -1; }
+#formPanel .card-body .form-row > .form-group { margin-bottom: 14px; }
+#formPanel .btn-submit { min-height: 46px; margin-top: 4px; }   /* a normal button: a floating one would cover the fields above it */
+#formPanel .time-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; }
+#formPanel .form-input, #formPanel .form-select { min-height: 42px; }
+#recentList { max-height: 70vh; overflow-y: auto; }
+@media (max-width: 1100px) { #formPanel.active { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  #formPanel .card-body { grid-template-columns: minmax(0, 1fr); }
+  #formPanel .card-body > .form-row > .form-group { grid-column: 1 / -1; }
+  .panel { padding: 12px 10px 24px; }
+}
+
+/* other panels: tables / reports use the full width and scroll sideways instead of being cut */
+#staffPanel, #reportPanel, #holidaysPanel, #dailylogPanel, #projectsPanel { width: 100%; }
+.table-wrap, .timeline-wrap { overflow-x: auto; }
+
+/* dropdowns / pickers may extend past the card edge */
+.card { overflow: visible; }
+.card-header { border-radius: var(--radius2) var(--radius2) 0 0; }
+.ac-dropdown, .combo-dropdown { z-index: 400; }
+
+/* drop work that is invisible anyway */
+.sidebar-brand, .brand-row { display: none !important; }
