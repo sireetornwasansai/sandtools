@@ -1014,6 +1014,9 @@ function saraban(b) {
     case 'numbers':  return sarNumbers(sc, b);
     case 'parties':  return sarParties(sc, b);
     case 'unitsave': return sarUnitSave(sc, b);
+    case 'impscan':  return sarImpScan(sc, b);     // SarImport.gs (admin)
+    case 'import':   return sarImpRun(sc, b);
+    case 'impsync':  return sarImpSync(sc, b);
     default: throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');
   }
 }

@@ -80,3 +80,15 @@
 .sar-progress li.now { border-top-color: var(--primary); color: var(--primary); font-weight: 700; }
 .sar-progress li.warn { border-top-color: var(--warning); color: var(--warning); font-weight: 700; }
 @media print { .sar-tabs, .sar-submit, .btn-row { display: none !important; } }
+
+/* นำเข้าทะเบียนเดิม (หน้า admin) */
+.sar-imp-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: .6rem; }
+.sar-imp-url { flex: 1 1 22rem; min-width: 0; min-height: 44px; padding: .5rem .8rem; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong, var(--border)); border-radius: 10px; }
+.sar-imp-tab { margin-top: .7rem; } .sar-imp-tab.has-problem { border-left: 5px solid var(--warning); }
+.sar-imp-head { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; cursor: pointer; min-height: 44px; } .sar-imp-head input { width: 1.2rem; height: 1.2rem; }
+.sar-imp-sample { font-size: .85rem; overflow-wrap: anywhere; margin: .3rem 0; }
+.sar-imp-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .7rem; margin-top: .6rem; }
+.sar-imp-opts label { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; color: var(--muted); } .sar-imp-opts select { min-height: 44px; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong, var(--border)); border-radius: 10px; padding: .4rem .6rem; }
+.sar-imp-warn { margin: .4rem 0 0; padding-left: 1.2rem; font-size: .85rem; color: var(--warning); overflow-wrap: anywhere; }
+#main .sar-imp-row + * { margin-top: .6rem; }
+
