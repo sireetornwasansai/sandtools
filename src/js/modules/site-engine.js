@@ -630,18 +630,18 @@ export const CAMPUS = { XE: 26.8, YE: 12.6, D: 16.2 };   // D = depth added BEHI
 export function campusLayout() {
   const H = HOSP; const { XE, YE } = CAMPUS; const GX = XE + H.WALK + H.ROAD; const GY = YE + H.WALK + H.ROAD; const gx = 13.4; const D = CAMPUS.D; const ROADY = GY - H.ROAD;
   const er = { id: 'er', x0: 11.8, x1: 17.2, y0: -0.3, y1: 2.7, door: [14.5, 2.7], h: 3.9 };   // touches the connecting walkway: its side door opens straight onto it
-  const main = { id: 'main', x0: 17.2, x1: 24.4, y0: 3.5, y1: 8.0, door: [20.8, 7.5], h: 5.4 };   // outpatient building (OPD): flush with the hospital road · the tall middle block (5 floors = the old administration building) with a 3-floor wing each side
+  const main = { id: 'main', x0: 17.2, x1: 24.4, y0: 3.9, y1: 8.4, door: [20.8, 7.9], h: 5.4 };   // outpatient building (OPD): flush with the hospital road · the tall middle block (5 floors = the old administration building) with a 3-floor wing each side
   for (const b of [main, er]) b.c = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
   const entry = [gx, YE + 0.2];
   /** The two inpatient towers (ตึกผู้ป่วยใน): one click zone each → the main building (all systems live there). */
   const towers = [
-    { id: 'ipd1', name: 'ตึกสายลม', x0: 20.0, x1: 24.2, y0: -0.4, y1: 2.9, fl: 8, fh: 0.78, wall: '#e0b987', trim: '#b68f3c', kind: 'balcony' },
+    { id: 'ipd1', name: 'ตึกสายลม', x0: 20.0, x1: 24.2, y0: -0.9, y1: 2.0, fl: 8, fh: 0.78, wall: '#e0b987', trim: '#b68f3c', kind: 'balcony' },
     { id: 'ipd2', name: 'ตึกแสงเดือน', x0: 19.4, x1: 24.4, y0: -12.6, y1: -9.3, fl: 9, fh: 0.78, wall: '#ead9b8', trim: '#9266d8', kind: 'bars', door: false },   // entered ONLY from its left-hand side through the archway at the end of the walkway · flush with the hospital road, behind the central car park
   ];
   const DY = -6.2; const DX = 9.5;   // the construction site is directly behind the emergency building (x 10.1 – 15.9); the ring road runs round it: between it and the emergency building, and between it and the walkway
   const site = { x0: 0.6 + DX, y0: -4.6 + DY, x1: 6.4 + DX, y1: 3.7 + DY, dy: DY, dx: DX };
   const rear = { x: XE - 0.25, y: [-11.0, -9.4] };         // side exit: a gap in the east hedge, beside inpatient tower 2, onto road 1001
-  const sign = { x0: 4.3, w: 3.6, y: 12.3, gap: [4.1, 8.0] };   // at the front fence, beside the motorcycle parking   // hospital name wall: on the road in front of the emergency building
+  const sign = { x0: 9.8, w: 2.4, y: 10.4 };   // the hospital name wall: in front of the motorcycle parking, inside the grounds (not on the fence)   // hospital name wall: on the road in front of the emergency building
   /** Car parks. rows = y of each row of stalls (cars nose-to-nose in pairs with a drive aisle between). */
   const lot = (x0, x1, y0, n, extra = {}) => { const g = extra.gap || 2.35; const rows = n === 4 ? [y0 + 0.15, y0 + 0.15 + g, y0 + 0.15 + g + 1.55, y0 + 0.15 + 2 * g + 1.55] : [y0 + 0.15, y0 + 0.15 + g]; return { x0, x1, y0, y1: rows[rows.length - 1] + 1.15, rows, ...extra }; };   // gap = distance between the two rows of a pair (the drive aisle between them is gap − 1.05)
   const lots = [lot(10.0, 16.2, 4.55, 2, { gap: 2.7, ems: true, emsAt: 6, name: '🅿 ที่จอดรถอาคารอุบัติเหตุ (หน้าตึก)' }), lot(18.9, 24.4, -9.0, 4, { gap: 2.5, name: '🅿 ที่จอดรถ (หน้าตึกแสงเดือน)' })];
@@ -655,13 +655,14 @@ export function campusLayout() {
     { x0: WX - 0.8, x1: WX + 0.8, y0: -12.7, y1: 12.2 },                                                    // road beside the emergency building: out to the main road · west side of the ring road
     { x0: WX + 0.8, x1: 10.2, y0: AW - 0.7, y1: AW + 0.7 }, { x0: 16.2, x1: 17.2, y0: AW - 0.7, y1: 11.5 },   // the emergency car park: west end → road beside the building · east end ← from the front road
     { x0: WX + 0.8, x1: 17.2, y0: -2.1, y1: -0.8 }, { x0: 16.0, x1: 17.2, y0: -12.7, y1: -2.1 }, { x0: WX + 0.8, x1: 17.2, y0: -12.7, y1: -11.4 },   // the ring road round the construction site (anticlockwise): south · east (between the site and the walkway) · north side
-    { x0: 16.2, x1: 23.8, y0: 9.1, y1: 10.3 }, { x0: 22.6, x1: 23.8, y0: 9.1, y1: 12.3 },                  // the U-shaped drop-off road of the outpatient building: up on the west (the lane beside the emergency car park), across the front (under the canopy) and down on the east side into the front road
+    { x0: 17.9, x1: 23.8, y0: 9.1, y1: 10.3 }, { x0: 17.9, x1: 18.9, y0: 10.3, y1: 12.3 }, { x0: 22.6, x1: 23.8, y0: 9.1, y1: 12.3 },                  // the U-shaped drop-off road of the outpatient building: up on the west (the lane beside the emergency car park), across the front (under the canopy) and down on the east side into the front road
   ];
-  const island = [16.2, 10.3, 22.6, 10.9];   // lawn inside the loop
+  const island = [18.9, 10.3, 22.6, 10.9];   // lawn inside the loop
   const aprons = [{ x0: gx - 1.2, x1: gx + 1.2, y0: 12.0, y1: ROADY + 0.02 }, { x0: WX - 0.8, x1: WX + 0.8, y0: 12.0, y1: ROADY + 0.02 }];   // [0] the only way in (entrance) · [1] exit onto the main road beside the emergency building
   // STAFF ONLY: ONE boom barrier on the hospital road on the RIGHT-hand side, past the outpatient building (leads to the central car park and the back exit).
-  const gates = [{ x0: RX - 0.7, x1: RX + 0.7, y: 6.0, booth: RX + 0.95, dir: 1, name: 'E', sx: RX - 0.9, sw: 1.8, sz: 1.3 }];   // beside the outpatient building
-  const exits = []; const bikes = { x0: 10.0, x1: 16.0, y0: 8.9, y1: 10.8 };   // motorcycle parking: right after the car park in front of the emergency building, the hospital name sign beside it
+  const gates = [{ x0: RX - 0.7, x1: RX + 0.7, y: 6.0, booth: RX + 0.95, dir: 1, name: 'E', sx: RX - 0.9, sw: 1.8, sz: 1.3 },                       // staff only, beside the outpatient building
+    { x0: RX - 0.7, x1: RX + 0.7, y: -8.9, booth: RX + 0.95, dir: 1, name: 'R', sx: RX - 0.9, sw: 1.8, sz: 1.3, col: '#0f766e', lines: [['ทางออกด้านหลัง', 0.15, 0.16], ['REAR EXIT · STAFF', 0.09, 0.32]] }];   // the barrier of the rear exit, beside ตึกแสงเดือน
+  const exits = []; const bikes = { x0: 10.0, x1: 16.0, y0: 8.75, y1: 10.1 };   // motorcycle parking: right after the car park in front of the emergency building, the hospital name sign beside it
   const sidePark = { x0: 6.9, x1: 7.95, y0: 4.7, y1: 8.4 };   // parking along the road beside the emergency building
   const canopy = { x0: main.door[0] - 1.9, x1: main.door[0] + 1.9, y0: 8.95, y1: 10.45, z: 0.95 };   // drive-through in front of the outpatient entrance: patient pick-up / drop-off
   const ring = { x0: 8.5, x1: 16.6, y0: -11.75, y1: -1.65 };   // the anticlockwise ring road (centre line)
@@ -671,12 +672,12 @@ export function campusLayout() {
     [[gx, EY], [gx, EASTL], [RX - 0.4, EASTL], ...toBack],                                                                                                      // entrance → east along the front road → hospital road → through the barrier → out at the back
     [[gx, EY], [gx, EASTL], [RX - 0.4, EASTL], [RX - 0.4, AY2], [19.8, AY2], [19.8, AY1], [RX - 0.4, AY1], ...toBack],                                          // … central car park: in at entrance 2 (south), through the free pocket at the west end, out at entrance 1 (north), then out at the back
     [[gx, EY], [gx, EASTL], [RX - 0.4, EASTL], [RX - 0.4, AY2], [19.8, AY2], [19.8, AY1], [RX - 0.4, AY1], ...toBack],
-    [[gx, EY], [gx, EASTL], [16.7, EASTL], [16.7, 9.5], [23.4, 9.5], [23.4, WESTL], [WX + 0.5, WESTL], [WX + 0.5, EY]],                                                                       // east along the front road → up the west leg of the U → across the front of the outpatient building (under the canopy, patient drop-off) → down the east leg into the front road → west → out beside the emergency building
-    [[gx, EY], [gx, EASTL], [16.7, EASTL], [16.7, AW], [WX + 0.5, AW], [WX + 0.5, EY]],                                                                         // east a little → up the east end of the emergency car park → west along its aisle → out beside the emergency building
+    [[gx, EY], [gx, EASTL], [18.4, EASTL], [18.4, 9.7], [23.4, 9.7], [23.4, WESTL], [16.7, WESTL], [16.7, AW], [WX + 0.5, AW], [WX + 0.5, EY]],                                                                       // east along the front road → up the east end → west across the front of the outpatient building (under the canopy, patient drop-off) → into the emergency car park → out beside the emergency building
+    [[gx, EY], [gx, EASTL], [18.4, EASTL], [18.4, 9.7], [23.4, 9.7], [23.4, WESTL], [16.7, WESTL], [16.7, AW], [WX + 0.5, AW], [WX + 0.5, EY]],                                                                         // east a little → up the east end of the emergency car park → west along its aisle → out beside the emergency building
     [[gx, EY], [gx, WESTL], [WX - 0.5, WESTL], [WX - 0.5, -1.65], [16.6, -1.65], [16.6, -11.75], [WX + 0.5, -11.75], [WX + 0.5, EY]],                              // west → the ring road round the construction site, anticlockwise → out beside the emergency building
   ];
   /** Raised "turtle-back" entrances (หลังเต่า) in front of the emergency building and the outpatient building. */
-  const humps = [{ id: 'er', x: er.door[0], y0: er.y1 + 0.05, w: 2.4, flat: 1.05, len: 1.75, h: 0.16 }, { id: 'main', x: main.door[0], y0: main.door[1] + 0.05, w: 2.6, flat: 0.75, len: 1.5, h: 0.16 }];
+  const humps = [{ id: 'er', x: er.door[0], y0: er.y1 + 0.05, w: 2.4, flat: 1.05, len: 1.75, h: 0.16 }, { id: 'main', x: main.door[0], y0: main.door[1] + 0.05, w: 2.6, flat: 0.6, len: 1.1, h: 0.16 }];
   /** The connecting walkway: TWO storeys on columns — a ground walkway and, on top of it, a roofed, railed deck. The deck starts at the back of the outpatient building (you walk through it to get in),
    *  runs straight back with a "+" junction at the emergency building (door in its right wall) and ตึกสายลม, and ends in a "T" at the left-hand wall of ตึกแสงเดือน. */
   const yj2 = (towers[1].y0 + towers[1].y1) / 2;
@@ -688,7 +689,7 @@ export function campusLayout() {
     deckA: [[corr.xL + 0.3, corr.yj], [corr.ax, corr.yj], [corr.ax, corr.yS - 0.15]], deckB: [[corr.ax, corr.yj], [corr.xR - 0.25, corr.yj]], deckC: [[corr.ax, corr.yj], [corr.ax, corr.yj2]], deckD: [[corr.ax, corr.yj2], [corr.xR2 - 0.25, corr.yj2]],
     gA: [[corr.ax - hwA, corr.yj + gz], [corr.ax + gz, corr.yj + gz], [corr.ax + gz, corr.yS - 0.25]], gB: [[corr.ax + gz, corr.yj + gz], [corr.xR - 0.25, corr.yj + gz]], gC: [[corr.ax + gz, corr.yj + gz], [corr.ax + gz, corr.yj2 + gz]], gD: [[corr.ax + gz, corr.yj2 + gz], [corr.xR2 - 0.25, corr.yj2 + gz]],
     toEr: [[10.6, 4.05], [er.door[0] - 0.6, 4.05], [er.door[0] - 0.6, er.door[1] + 0.3]],
-    lotE: [[10.6, 8.6], [15.6, 8.6]], bikeW: [[10.6, 9.85], [15.4, 9.85]],
+    lotE: [[10.6, 8.6], [15.6, 8.6]],
     inA: [[18.95, AY1], [corr.ax + gz, AY1], [corr.ax + gz, corr.yj2 + gz], [corr.xR2 - 0.25, corr.yj2 + gz]], inB: [[18.95, AY2], [corr.ax + gz, AY2], [corr.ax + gz, corr.yj2 + gz], [corr.xR2 - 0.25, corr.yj2 + gz]],   // from the car park along the ground walkway to the archway on the LEFT of ตึกแสงเดือน
     s1: sp([[1.4, -2.2], [4.6, -2.2]]), s2: sp([[1.0, -3.4], [1.0, -0.5]]), s3: sp([[5.4, -3.4], [5.4, -0.5]]), s4: sp([[1.3, -0.5], [5.0, -0.5]]), s5: sp([[3.8, 3.3], [3.8, -0.5]]) };
   const fades = { deckA: [1, 1], gA: [1, 1], deckB: [0, 1], gB: [0, 1], deckD: [0, 1], gD: [0, 1], inA: [1, 1], inB: [1, 1], toEr: [1, 1] };   // [fade at the start, fade at the end]: people disappear into a door instead of walking through a wall

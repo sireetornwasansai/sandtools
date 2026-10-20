@@ -255,7 +255,7 @@ export function mountSiteFloor(host, opts = {}) {
       HL.rooms.forEach((r) => { if (!r) return; const gd = [r.door[0] - 0.4, r.door[0] + 0.4]; seg('x', r.y0, r.y1, r.x0, T, r.wcol); seg('x', r.y0, r.y1, r.x1, T, r.wcol); seg('y', r.x0, r.x1, r.front ? r.y0 : r.y1, T, r.wcol, gd); });
     } else if (!ins && HL) {
       const HC = '#2f8f4e'; const xe = HL.campus.x1; const ye = HL.campus.y1;   // tree hedge on the FRONT + EAST edges only (back and left: none) that face the public roads (gaps: main gate, hospital name wall, side exit)
-      const yb0 = (HL.world && HL.world.D) ? -HL.world.D : 0;       seg('y', 0.25, xe, ye - 0.25, 0.62, HC, [[HL.aprons[0].x0, HL.aprons[0].x1], [HL.aprons[1].x0, HL.aprons[1].x1], HL.sign.gap], true); seg('x', yb0 + 0.25, ye - 0.25, xe - 0.25, 0.62, HC, HL.rear.y, true);   // the EAST hedge: the same hedge as the front, gap only at the side exit
+      const yb0 = (HL.world && HL.world.D) ? -HL.world.D : 0;       seg('y', 0.25, xe, ye - 0.25, 0.62, HC, [[HL.aprons[0].x0, HL.aprons[0].x1], [HL.aprons[1].x0, HL.aprons[1].x1], ], true); seg('x', yb0 + 0.25, ye - 0.25, xe - 0.25, 0.62, HC, HL.rear.y, true);   // the EAST hedge: the same hedge as the front, gap only at the side exit
     }
     return out;
   }
@@ -802,11 +802,12 @@ export function mountSiteFloor(host, opts = {}) {
       const arrow = (x, y, dx, dy) => { const t = (a, b) => P(x + dx * a - dy * b, y + dy * a + dx * b); poly([t(-0.3, -0.07), t(0.1, -0.07), t(0.1, -0.17), t(0.34, 0), t(0.1, 0.17), t(0.1, 0.07), t(-0.3, 0.07)], pal.roadLine); };   // painted one-way arrows (as on the photo of the outpatient road)
       ctx.globalAlpha = 0.85;
       arrow(gx, 12.45, 0, -1);                                                                                              // the entrance: IN (north)
-      for (const x of [15.2, 19.2, 21.8]) arrow(x, 12.0, 1, 0);                                                             // the front road: east (staff to the hospital road, visitors to the U)
-      arrow(16.7, 10.7, 0, -1); arrow(16.7, 8.2, 0, -1);                                                                    // west leg of the U (also the way into the emergency car park)
-      for (const x of [18.0, 19.8, 21.8]) arrow(x, 9.5, 1, 0);                                                              // across the front of the outpatient building (drop-off)
-      arrow(23.4, 10.6, 0, 1);                                                                                              // east leg of the U: down into the front road
-      for (const x of [21.5, 18.5, 15.5, 11.0]) arrow(x, 11.2, -1, 0);                                                      // the front road: west, to the road beside the emergency building
+      for (const x of [15.2, 19.2, 21.8]) arrow(x, 12.0, 1, 0);                                                             // the front road: east
+      arrow(18.4, 11.5, 0, -1);                                                                                             // up in front of the outpatient building (the west end of the U) …
+      for (const x of [19.6, 20.9, 22.2]) arrow(x, 9.7, 1, 0);                                                              // … east across the front, under the canopy (patient drop-off at the ramp) …
+      arrow(23.4, 10.6, 0, 1);                                                                                              // … down the east end …
+      for (const x of [21.5, 19.5, 17.9]) arrow(x, 11.2, -1, 0);                                                            // … and back west along the front road
+      arrow(16.7, 10.3, 0, -1); arrow(16.7, 8.2, 0, -1);                                                                    // up the lane beside the emergency car park, into it
       for (const y of [6.0, 8.2, 10.6]) arrow(WXA + 0.5, y, 0, 1);                                                          // the road beside the emergency building: OUT (south)
       for (const x of [14.0, 12.0]) arrow(x, 7.0, -1, 0);                                                                   // the emergency car park aisle: west
       for (const x of [12.0, 15.0]) arrow(x, -1.55, 1, 0); for (const y of [-4.5, -8.5]) arrow(16.6, y, 0, -1); for (const x of [14.0, 11.0]) arrow(x, -11.8, -1, 0); for (const y of [-8.0, -4.5]) arrow(WXA + 0.5, y, 0, 1);   // the ring road: anticlockwise
@@ -919,7 +920,7 @@ export function mountSiteFloor(host, opts = {}) {
     && !(x > 7.6 && x < 17.8 && y > -13.8 && y < 8.8) && !(x > 7.6 && x < 10.0 && y > -13.8 && y < 12.6)                    // emergency building, car park in front, construction site, ring road, road beside the building
     && !(x > 7.8 && x < 24.4 && y > 8.8 && y < 12.6) && !(x > 6.4 && x < 8.4 && y > 4.2 && y < 8.9)                      // front road · long road in front of the outpatient building · motorcycle parking
     && !(x > 16.8 && x < 24.8 && y > 3.2 && y < 8.8) && !(x > 16.8 && x < 19.2 && y > -12.2 && y < 4.2)                    // outpatient building · connecting walkway
-    && !(x > 19.4 && x < 24.8 && y > -0.8 && y < 3.4) && !(x > 18.4 && x < 24.8 && y > -13.0 && y < -1.0));              // tower 1 · car park + tower 2
+    && !(x > 19.4 && x < 24.8 && y > -1.3 && y < 2.6) && !(x > 18.4 && x < 24.8 && y > -13.0 && y < -1.0));              // tower 1 · car park + tower 2
   /** The new exit in the west fence (left of the emergency building): a gantry with a board over the road. */
   function exitGates(items) {
     for (const e of HL.exits) items.push({ d: e.x + e.y1 + 0.8, f: () => { for (const y of [e.y0, e.y1]) box(e.x, y, 0.1, 0.1, 1.35, Cc('#475569')); box(e.x, (e.y0 + e.y1) / 2, 0.1, e.y1 - e.y0 + 0.1, 0.09, Cc('#0f766e'), 1.35); signX(e.y1, e.x + 0.08, 1.0, e.y1 - e.y0, 0.38, Cc('#0f766e'), [[e.name, 0.14, 0.15], ['NEW EXIT', 0.09, 0.29]]); } });
@@ -973,7 +974,7 @@ export function mountSiteFloor(host, opts = {}) {
         else box(hinge - g.dir * ((k + 0.5) * sl), g.y, sl, 0.07, 0.08, col, 0.6); }
     } });
     const w = g.sw || 2.0; const bx0 = g.sx !== undefined ? g.sx : g.dir > 0 ? g.booth + 0.5 : g.booth - 0.5 - w; const sz = g.sz || 1.0;
-    items.push({ d: bx0 + w + g.y + 1.2, f: () => { for (const x of [bx0 + 0.1, bx0 + w - 0.1]) box(x, g.y + 0.22, 0.08, 0.08, sz, Cc('#64748b')); signY(bx0, g.y + 0.265, sz, w, 0.5, '#b91c1c', [['เฉพาะรถเจ้าหน้าที่', 0.17, 0.19], ['STAFF ONLY', 0.11, 0.38]]); } });
+    items.push({ d: bx0 + w + g.y + 1.2, f: () => { for (const x of [bx0 + 0.1, bx0 + w - 0.1]) box(x, g.y + 0.22, 0.08, 0.08, sz, Cc('#64748b')); signY(bx0, g.y + 0.265, sz, w, 0.5, g.col || '#b91c1c', g.lines || [['เฉพาะรถเจ้าหน้าที่', 0.17, 0.19], ['STAFF ONLY', 0.11, 0.38]]); } });
   }
   /** The emergency (accident) building, after the photo: low tan block of 3 floors with continuous window bands, a taller block at the right-hand end, a brown canopy with a red "อุบัติเหตุ–ฉุกเฉิน / EMERGENCY" sign,
    *  red traffic barriers in front and an ambulance at the side. It stands at the LEFT of the main hospital building. */
@@ -983,25 +984,38 @@ export function mountSiteFloor(host, opts = {}) {
       ctx.fillStyle = col; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.roundRect(sx - s * 0.7, sy - s * 3 + br, s * 1.4, s * 2.7, s * 0.6); ctx.fill(); ctx.fillStyle = '#f1c9a5'; ctx.beginPath(); ctx.arc(sx, sy - s * 3.5 + br, s * 0.75, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
   }
   function erBuilding(items, now, emsLive) {
-    const b = HL.bld.er; const WALL = Cc('#dfc08a'); const BAND = Cc('#c08a4b'); const GLASS = Cc('#a9c9e2'); const DGL = Cc('#7f9db8'); const ROOF = Cc('#9a4a1c'); const CREAM = Cc('#f3ead2'); const TOWER = Cc('#caa270'); const RED = '#dc2626';
-    const { x0, x1, y0, y1 } = b; const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const W = x1 - x0; const D = y1 - y0; const FH = 0.95; const gx = b.door[0];
+    // after the street-view photo: a wide 3-storey building in orange-tan with violet bands, rows of white-framed windows, a brick entrance block (brick pillars, vertical glass-block strips)
+    // under a hip roof of brown tiles, a red EMERGENCY sign, steps on the right, the building name along the top, a taller wing on the right-hand end
+    const b = HL.bld.er; const WALL = Cc('#e2b27c'); const BAND = Cc('#c98f55'); const VIOL = Cc('#7457b8'); const GLASS = Cc('#a9c9e2'); const FRAME = Cc('#f1f5f9'); const DGL = Cc('#7f9db8'); const TILE = Cc('#8a3f24'); const TILE2 = Cc('#6e311b');
+    const BRICK = Cc('#8f4d3d'); const BRICKD = Cc('#74392d'); const CREAM = Cc('#f3ead2'); const TOWER = Cc('#ead5ac'); const RED = '#dc2626';
+    const { x0, x1, y0, y1 } = b; const cx = (x0 + x1) / 2; const cy = (y0 + y1) / 2; const W = x1 - x0; const D = y1 - y0; const FH = 0.95; const gx = b.door[0]; const ZT = FH * 3;
     items.push({ d: cx + cy, f: () => {
-      box(cx, cy, W, D, FH * 3, WALL); box(cx, cy, W + 0.1, D + 0.1, 0.08, BAND, FH * 3);
+      box(cx, cy, W, D, ZT, WALL); box(cx, cy, W + 0.1, D + 0.1, 0.08, BAND, ZT);
       for (let f = 0; f < 3; f++) {
         const za = f * FH + 0.2; const zb = za + 0.5;
-        for (let x = x0 + 0.25; x < x1 - 1.5; x += 0.55) { if (f === 0 && Math.abs(x + 0.2 - gx) < 1.3) continue; faceY(x, x + 0.4, y1 + 0.006, za, zb, GLASS); }
-        faceY(x0, x1 - 1.2, y1 + 0.005, (f + 1) * FH - 0.1, (f + 1) * FH - 0.02, BAND);
+        for (let x = x0 + 0.25; x < x1 - 1.5; x += 0.55) { if (f === 0 && x + 0.4 > gx - 1.6 && x < gx + 1.7) continue; faceY(x, x + 0.4, y1 + 0.006, za, zb, FRAME); faceY(x + 0.035, x + 0.365, y1 + 0.007, za + 0.04, zb - 0.04, GLASS); faceY(x + 0.2, x + 0.215, y1 + 0.008, za + 0.04, zb - 0.04, FRAME); }
+        faceY(x0, x1 - 1.2, y1 + 0.005, (f + 1) * FH - 0.17, (f + 1) * FH - 0.09, BAND); faceY(x0, x1 - 1.2, y1 + 0.006, (f + 1) * FH - 0.09, (f + 1) * FH - 0.05, VIOL);   // orange band + violet line at each floor
       }
+      faceY(x0, x1 - 1.2, y1 + 0.007, ZT - 0.34, ZT - 0.3, VIOL);
+      wallY(x0 + 0.25, y1 + 0.009, ZT - 0.08, (u) => { ctx.fillStyle = '#6b7280'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; const t = 'โรงพยาบาลสันทราย  อาคารอุบัติเหตุ ผู้ป่วยหนัก ไตเทียมและผ่าตัด'; let f = 0.13 * u; ctx.font = `600 ${f}px ${font}`; const mw = (W - 1.7) * u; const m = ctx.measureText(t).width; if (m > mw) { f *= mw / m; ctx.font = `600 ${f}px ${font}`; } ctx.fillText(t, 0, 0.12 * u); });   // the name along the top of the façade
     } });
-    items.push({ d: x1 - 0.6 + cy + 0.05, f: () => {
+    items.push({ d: x1 - 0.6 + cy + 0.05, f: () => {   // the taller wing at the right-hand end (cream with orange bands)
       box(x1 - 0.6, cy, 1.2, D, 3.9, TOWER); box(x1 - 0.6, cy, 1.3, D + 0.1, 0.07, BAND, 3.9);
-      for (let f = 0; f < 4; f++) { const za = f * 0.95 + 0.25; for (const x of [x1 - 1.05, x1 - 0.75, x1 - 0.45]) faceY(x, x + 0.22, y1 + 0.006, za, za + 0.5, DGL); for (let y = y0 + 0.3; y < y1 - 0.3; y += 0.62) faceX(x1 + 0.006, y, y + 0.4, za, za + 0.5, DGL); }
+      for (let f = 0; f < 4; f++) { const za = f * 0.95 + 0.25; faceY(x1 - 1.2, x1, y1 + 0.005, za + 0.58, za + 0.66, BAND); for (const x of [x1 - 1.05, x1 - 0.75, x1 - 0.45]) faceY(x, x + 0.22, y1 + 0.006, za, za + 0.5, DGL); for (let y = y0 + 0.3; y < y1 - 0.3; y += 0.62) faceX(x1 + 0.006, y, y + 0.4, za, za + 0.5, DGL); }
     } });
-    items.push({ d: gx + y1 + 0.6, f: () => {
-      faceY(gx - 0.45, gx + 0.45, y1 + 0.012, 0, 0.8, '#475569'); faceY(gx - 0.4, gx - 0.03, y1 + 0.013, 0.04, 0.74, GLASS); faceY(gx + 0.03, gx + 0.4, y1 + 0.013, 0.04, 0.74, GLASS);
-      signY(gx - 1.2, y1 + 0.014, 1.15, 2.4, 0.62, RED, [['อุบัติเหตุ–ฉุกเฉิน', 0.21, 0.22], ['EMERGENCY', 0.15, 0.46]]);
-      for (const dx of [-1.05, 1.05]) box(gx + dx, y1 + 0.62, 0.12, 0.12, 0.95, CREAM);
-      box(gx, y1 + 0.35, 2.4, 0.78, 0.1, ROOF, 0.95); box(gx, y1 + 0.35, 2.48, 0.86, 0.04, BAND, 1.05);
+    items.push({ d: gx + y1 + 0.6, f: () => {   // the entrance block
+      const bw = 2.9; const fy = y1 + 0.6; const zb = 1.95;
+      box(gx, y1 + 0.3, bw, 0.6, zb, BRICK); box(gx, y1 + 0.3, bw + 0.08, 0.68, 0.07, BAND, zb);
+      for (const dx of [-bw / 2 + 0.24, bw / 2 - 0.24]) box(gx + dx, fy + 0.08, 0.48, 0.3, zb, BRICKD);   // the two brick pillars stand out
+      faceY(gx - 0.8, gx + 0.8, fy + 0.002, 0, 1.25, '#1f2937'); faceY(gx - 0.74, gx - 0.03, fy + 0.003, 0.05, 1.18, GLASS); faceY(gx + 0.03, gx + 0.74, fy + 0.003, 0.05, 1.18, GLASS);
+      for (const [xa, xb] of [[gx - 1.2, gx - 0.92], [gx + 0.92, gx + 1.2]]) { faceY(xa, xb, fy + 0.004, 0.3, 1.45, '#f0d9a8'); for (let z = 0.45; z < 1.45; z += 0.2) faceY(xa, xb, fy + 0.005, z, z + 0.02, '#c9a96e'); }   // vertical glass-block strips
+      signY(gx - 0.85, fy + 0.006, 1.5, 1.7, 0.4, RED, [['อุบัติเหตุ–ฉุกเฉิน', 0.15, 0.14], ['EMERGENCY', 0.1, 0.3]]);
+      const z0 = zb + 0.02; const z1 = z0 + 0.5; const xl = gx - 1.75; const xr = gx + 1.75; const yf = y1 + 0.95; const yr = y1 + 0.45;   // the hip roof of brown tiles
+      poly([P(xl, yf, Z(z0)), P(xr, yf, Z(z0)), P(gx + 0.8, yr, Z(z1)), P(gx - 0.8, yr, Z(z1))], TILE);
+      poly([P(xr, yf, Z(z0)), P(xr, y1 - 0.05, Z(z0)), P(gx + 0.8, yr, Z(z1))], TILE2);
+      poly([P(xl, yf, Z(z0)), P(xl, yf, Z(z0 - 0.07)), P(xr, yf, Z(z0 - 0.07)), P(xr, yf, Z(z0))], BAND);
+      for (let k = 1; k < 5; k++) { const t = k / 5; const xa = xl + (gx - 0.8 - xl) * t; const xb = xr + (gx + 0.8 - xr) * t; const yy = yf + (yr - yf) * t; const zz = z0 + (z1 - z0) * t; ctx.strokeStyle = 'rgba(60,20,8,.35)'; ctx.lineWidth = 1; ctx.beginPath(); const a1 = P(xa, yy, Z(zz)); const a2 = P(xb, yy, Z(zz)); ctx.moveTo(a1[0], a1[1]); ctx.lineTo(a2[0], a2[1]); ctx.stroke(); }
+      for (let k = 0; k < 3; k++) box(gx + 1.75 + 0.14 * k, y1 + 0.7 - 0.06 * k, 0.5, 0.9 - 0.12 * k, 0.1 + 0.1 * (2 - k), CREAM);   // steps on the right
     } });
     const by = y1 + 0.95; for (let x = x0 + 0.3; x <= x1 - 0.3; x += 0.6) { if (Math.abs(x - gx) < 1.5) continue; items.push({ d: x + by, f: () => { box(x, by, 0.45, 0.16, 0.26, RED); box(x, by, 0.47, 0.17, 0.05, '#f8fafc', 0.12); } }); }
     items.push({ d: x1 - 0.5 + by + 0.05, f: () => vehicle(x1 - 0.5, by, -Math.PI / 2, { kind: 'ems' }, now, emsLive) });
@@ -1033,22 +1047,22 @@ export function mountSiteFloor(host, opts = {}) {
   }
   /** The name wall at the front gate (white wall, dark bands, ministry emblem): "โรงพยาบาลสันทราย · Sansai Hospital". */
   function signWall(items) {
-    const x0 = HL.sign.x0; const w = HL.sign.w; const y = HL.sign.y; const WH = 1.05; const WALL = Cc('#efece4');
-    items.push({ d: x0 + w / 2 + y - 0.5, f: () => { for (let k = 0; k < 3; k++) box(x0 + 0.5 + k * 1.3, y - 0.45, 1.15, 0.2, 1.5 + (k % 2) * 0.12, Cc('#6d4aa0')); } });   // purple roof panels of the building behind the sign
+    const x0 = HL.sign.x0; const w = HL.sign.w; const y = HL.sign.y; const WH = 1.25; const WALL = Cc('#efece4'); const sc = Math.min(1, w / 3.6);
+    items.push({ d: x0 + w / 2 + y - 0.5, f: () => { box(x0 + w * 0.32, y - 0.4, w * 0.62, 0.2, 2.05, Cc('#6b3a63')); box(x0 + w * 0.78, y - 0.4, w * 0.5, 0.2, 1.7, Cc('#58304f')); box(x0 + w * 0.5, y - 0.3, w * 0.98, 0.1, 0.9, Cc('#7b4a73')); } });   // the maroon-violet angular panels behind the sign (as in the photo)
     items.push({ d: x0 + w + y + 0.05, f: () => {
       box(x0 + w / 2, y, w, 0.24, WH, WALL); box(x0 + w / 2, y, w + 0.08, 0.28, 0.05, Cc('#cfcabd'), WH);
       const fy = y + 0.122; faceY(x0, x0 + w, fy, 0, WH, WALL);
       wallY(x0, fy + 0.004, WH, (u) => {
         ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.moveTo(0, 0.36 * u); ctx.lineTo(0.55 * u, 0.04 * u); ctx.lineTo(w * u, 0.04 * u); ctx.lineTo(w * u, 0.1 * u); ctx.lineTo(0.6 * u, 0.1 * u); ctx.lineTo(0, 0.43 * u); ctx.fill();   // black swoosh across the top
-        ctx.beginPath(); ctx.moveTo(0, 0.9 * u); ctx.lineTo(0.42 * u, 0.74 * u); ctx.lineTo(w * u, 0.74 * u); ctx.lineTo(w * u, 0.79 * u); ctx.lineTo(0.46 * u, 0.79 * u); ctx.lineTo(0, 0.96 * u); ctx.fill();   // thin line below
-        const ex = 0.95 * u; const ey = 0.47 * u; const r = 0.27 * u; ctx.fillStyle = '#14532d'; ctx.beginPath(); ctx.arc(ex, ey, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, 0.022 * u); ctx.beginPath(); ctx.arc(ex, ey, r * 0.88, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, 1.14 * u); ctx.lineTo(0.42 * u, 0.98 * u); ctx.lineTo(w * u, 0.98 * u); ctx.lineTo(w * u, 1.03 * u); ctx.lineTo(0.46 * u, 1.03 * u); ctx.lineTo(0, 1.2 * u); ctx.fill();   // thin line below
+        const ex = 0.95 * sc * u; const ey = 0.56 * u; const r = 0.33 * u * Math.max(0.8, sc); ctx.fillStyle = '#14532d'; ctx.beginPath(); ctx.arc(ex, ey, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, 0.022 * u); ctx.beginPath(); ctx.arc(ex, ey, r * 0.88, 0, 7); ctx.stroke();
         ctx.lineWidth = Math.max(1, 0.03 * u); ctx.beginPath(); ctx.moveTo(ex, ey - r * 0.62); ctx.lineTo(ex, ey + r * 0.62); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ex - r * 0.5, ey - r * 0.38); ctx.quadraticCurveTo(ex, ey - r * 0.7, ex + r * 0.5, ey - r * 0.38); ctx.stroke();   // staff + wings of the ministry emblem
         ctx.beginPath(); for (let k = 0; k <= 12; k++) { const t2 = k / 12; const px = ex + Math.sin(t2 * Math.PI * 3) * r * 0.22; const py = ey - r * 0.5 + t2 * r * 1.0; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.stroke();   // snake
-        ctx.fillStyle = '#111827'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; let f = 0.25 * u; ctx.font = `700 ${f}px ${font}`; const t1 = 'โรงพยาบาลสันทราย'; const mx = (w - 1.55) * u; const m1 = ctx.measureText(t1).width; if (m1 > mx) { f *= mx / m1; ctx.font = `700 ${f}px ${font}`; } ctx.fillText(t1, 2.55 * u, 0.38 * u);
-        f = 0.2 * u; ctx.font = `700 ${f}px ${font}`; ctx.fillText('Sansai Hospital', 2.55 * u, 0.62 * u);
+        ctx.fillStyle = '#111827'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; let f = 0.3 * u; ctx.font = `700 ${f}px ${font}`; const t1 = 'โรงพยาบาลสันทราย'; const mx = (w - 1.55 * sc) * u; const m1 = ctx.measureText(t1).width; if (m1 > mx) { f *= mx / m1; ctx.font = `700 ${f}px ${font}`; } ctx.fillText(t1, (1.55 * sc + (w - 1.55 * sc) / 2) * u, 0.46 * u);
+        f = 0.24 * u; ctx.font = `700 ${f}px ${font}`; ctx.fillText('Sansai Hospital', (1.55 * sc + (w - 1.55 * sc) / 2) * u, 0.76 * u);
       });
     } });
-    items.push({ d: x0 + w + y + 0.4, f: () => { box(x0 + w / 2, y + 0.38, w + 0.1, 0.34, 0.16, Cc('#b9855f')); box(x0 + w / 2, y + 0.38, w - 0.06, 0.26, 0.1, Cc('#2f8f4e'), 0.16); for (const k of [0.6, 1.9, 3.2]) box(x0 + k, y + 0.28, 0.1, 0.08, 0.06, '#fde68a', 0.1); } });   // planter with hedge + ground spotlights
+    items.push({ d: x0 + w + y + 0.4, f: () => { box(x0 + w / 2, y + 0.3, w + 0.1, 0.3, 0.16, Cc('#b9855f')); box(x0 + w / 2, y + 0.3, w - 0.06, 0.22, 0.1, Cc('#2f8f4e'), 0.16); for (const k of [0.6, 1.9, 3.2]) if (k * sc < w - 0.2) box(x0 + k * sc, y + 0.22, 0.1, 0.08, 0.06, '#fde68a', 0.1); } });   // planter with hedge + ground spotlights
   }
   // ---------- rear buildings: three tall hospital blocks behind the front tiers (after the street-view photo) ----------
   function highrise(x0, y0, x1, y1, fl, fh, wall, trim, kind, door = true) {
@@ -1080,16 +1094,7 @@ export function mountSiteFloor(host, opts = {}) {
       for (const [txt, fs, dy] of lines) { let f = fs * u; ctx.font = `700 ${f}px ${font}`; const mw = ctx.measureText(txt).width; const mxw = (w - 0.1) * u; if (mw > mxw) { f *= mxw / mw; ctx.font = `700 ${f}px ${font}`; } ctx.fillText(txt, (w / 2) * u, dy * u); }
     });
   }
-  function sideGate(items, now) {
-    const [g0, g1] = HL.rear.y; const x = HL.rear.x; const gc = (g0 + g1) / 2;
-    for (const y of [g0 - 0.12, g1 + 0.12]) items.push({ d: x + y + 0.05, f: () => box(x, y, 0.2, 0.2, 0.95, Cc('#ece8dd')) });
-    items.push({ d: x + gc + 0.1, f: () => {
-      const open = reduced ? 0 : Math.max(0, Math.sin(now / 4200));   // the arm lifts now and then
-      const n = 6; for (let k = 0; k < n; k++) { const a = g0 + (k / n) * (g1 - g0); const b = g0 + ((k + 1) / n) * (g1 - g0); const col = k % 2 ? '#f8fafc' : '#dc2626'; if (open > 0.6) faceX(x + 0.02, g0, g0 + 0.08, 0.62 + k * 0.1, 0.7 + k * 0.1, col); else faceX(x + 0.02, a, b, 0.62, 0.7, col); }
-      signX(g1 + 0.25, x + 0.03, 1.0, g1 - g0 + 0.5, 0.4, Cc('#0f766e'), [['ทางออกด้านข้าง', 0.14, 0.16], ['SIDE EXIT', 0.095, 0.31]]);
-    } });
-    items.push({ d: x - 0.75 + g1 + 0.5 + 0.6, f: () => { box(x - 0.75, g1 + 0.5, 0.46, 0.5, 0.62, Cc('#f3ead2')); box(x - 0.75, g1 + 0.5, 0.54, 0.58, 0.07, Cc('#0f766e'), 0.62); faceX(x - 0.75 + 0.232, g1 + 0.32, g1 + 0.68, 0.28, 0.5, Cc('#a9c9e2')); } });
-  }
+  function sideGate() { /* the rear exit is now only an opening in the hedge: its barrier stands on the hospital road beside ตึกแสงเดือน */ }
   // ---------- construction site behind the emergency building ----------
   const DIRT = '#c4a77c'; const CONC = '#b9bec6';
   function siteGround() {
@@ -1189,12 +1194,12 @@ export function mountSiteFloor(host, opts = {}) {
     const P0 = L.paths; if (!P0) return { walkers: [], stand: [] }; const pa = {}; for (const k of Object.keys(P0)) pa[k] = roundPath(P0[k], 0.25);
     const W = []; const add = (path, kinds, base = 0) => kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, z: path.indexOf('deck') === 0 ? 1.0 : 0, g: /^g[A-D]$/.test(path), fade: (L.fades || {})[path] || null, kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); });
     add('toEr', ['wheel', 'patient', 'visitor']);
-    add('lotE', ['visitor', 'nurse']); add('bikeW', ['visitor', 'nurse']);
+    add('lotE', ['visitor', 'nurse']);
     add('deckA', ['visitor', 'doctor', 'nurse', 'wheel', 'visitor']); add('deckB', ['nurse', 'visitor', 'wheel']); add('deckC', ['doctor', 'visitor', 'patient', 'nurse']); add('deckD', ['nurse', 'visitor', 'doctor']);   // upper storey of the connecting walkway
     add('gA', ['visitor', 'patient', 'nurse', 'patient', 'visitor', 'doctor', 'visitor']); add('gB', ['doctor', 'visitor', 'kid', 'visitor', 'nurse']); add('gC', ['nurse', 'visitor', 'patient', 'patient', 'visitor']); add('gD', ['visitor', 'nurse', 'patient', 'visitor']);   // ground storey
     add('inA', ['visitor', 'nurse', 'visitor']); add('inB', ['visitor', 'doctor', 'visitor', 'wheel']);   // people walk from the car park into ตึกแสงเดือน (they fade out at its door) add('s5', ['worker']);
     add('s1', ['worker', 'worker']); add('s2', ['worker']); add('s3', ['worker']); add('s4', ['worker', 'worker']);
-    const dy = L.site ? L.site.dy : 0; const dx0 = L.site ? L.site.dx : 0; const ed = L.bld.er.door[0]; const stand = [[ed + 0.85, 3.1, 'nurse', 1], [ed + 1.15, 3.3, 'patient', 2], [21.6, 8.3, 'visitor', 4], [22.6, 8.3, 'doctor', 5], [18.4, 8.3, 'wheel', 6], [5.0, 4.8, 'visitor', 13], [5.8, 5.6, 'nurse', 14], [4.6, 6.6, 'kid', 7], [5.4, 7.4, 'visitor', 8], [4.4, 8.0, 'wheel', 17], [3.2 + dx0 + 0.2, 3.6 + dy - 0.7, 'worker', 9], [4.0 + dx0, 3.55 + dy - 0.8, 'worker', 10], [22.0, -0.75, 'doctor', 15]];
+    const dy = L.site ? L.site.dy : 0; const dx0 = L.site ? L.site.dx : 0; const ed = L.bld.er.door[0]; const stand = [[ed + 0.85, 3.1, 'nurse', 1], [ed + 1.15, 3.3, 'patient', 2], [21.6, 8.3, 'visitor', 4], [22.6, 8.3, 'doctor', 5], [18.4, 8.3, 'wheel', 6], [5.0, 4.8, 'visitor', 13], [5.8, 5.6, 'nurse', 14], [4.6, 6.6, 'kid', 7], [5.4, 7.4, 'visitor', 8], [4.4, 8.0, 'wheel', 17], [3.2 + dx0 + 0.2, 3.6 + dy - 0.7, 'worker', 9], [4.0 + dx0, 3.55 + dy - 0.8, 'worker', 10], [22.0, 2.7, 'doctor', 15]];
     if (L.corr) { const c = L.corr; stand.push([c.ax - 0.12, 2.4, 'visitor', 21, 0], [c.ax - 0.12, 2.85, 'patient', 22, 0], [c.ax - 0.12, 3.3, 'wheel', 23, 0], [c.ax - 0.12, 3.75, 'visitor', 24, 0], [c.ax - 0.42, 3.0, 'nurse', 25, 1.0], [c.ax + 0.42, 2.4, 'visitor', 26, 1.0]); }   // a queue on the ground storey, two people standing on the deck
     return { walkers: W, stand };
   }
