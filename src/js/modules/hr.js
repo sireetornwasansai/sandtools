@@ -61,6 +61,9 @@ export async function mount(root) {
   page.append(h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'บันทึกการปฏิบัติงาน'), h('p', null, 'ปฏิทินการลา ประชุม อบรม ไปราชการ · รายงานรายเดือน · จัดการเจ้าหน้าที่และวันหยุด'))), body);
   root.append(page);
 
+  // hand SAND's design tokens to the shadow root (custom properties resolve here, where SAND's :root / dark theme apply)
+  ['bg','surface','surface-2','surface-3','border','border-strong','text','text-2','muted','primary','primary-hover','primary-soft','primary-contrast','primary-ring','focus','success','success-bg','warning','warning-bg','error','error-bg','info','info-bg','radius-sm','radius','radius-lg','shadow-xs','shadow','shadow-md','shadow-lg','font']
+    .forEach((k) => body.style.setProperty('--sand-' + k, `var(--${k})`));
   const s = getSession();
   if (!s) { body.append(notice('warn', 'ต้องเข้าสู่ระบบก่อน', 'ใช้อีเมลหน่วยงานเพื่อเข้าใช้งานระบบบันทึกการปฏิบัติงาน')); return undefined; }
 
