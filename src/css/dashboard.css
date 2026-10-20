@@ -1,5 +1,5 @@
 /* SAND Office Tools — home dashboard. Loaded on demand by modules/dashboard.js; uses the tokens in app.css. */
-.dash { max-width: 1280px; }
+.dash { max-width: none; width: 100%; }   /* เปิดเว็บเต็มความกว้าง 100% — เดิมไฟล์นี้โหลดทีหลัง app.css แล้วดันกลับเป็น 1280px */
 .dsh-hero { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem 1.5rem; margin-bottom: 1rem; padding: 1.5rem 1.6rem; border-radius: var(--radius-lg); border: 1px solid var(--border); box-shadow: var(--shadow);
   background: radial-gradient(800px 240px at 100% -40%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 70%), radial-gradient(520px 200px at 0% 140%, color-mix(in srgb, var(--accent-teal) 14%, transparent), transparent 70%), var(--surface); }
 .dsh-hero h1 { font-size: 1.7rem; margin: 0 0 .15rem; letter-spacing: -.02em; }

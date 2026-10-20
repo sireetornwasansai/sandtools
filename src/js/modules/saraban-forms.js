@@ -134,6 +134,9 @@ export function receiveView(root, X, pre = {}) {
   if (X.cfg.units.some((u) => u.registry)) {
     const regSel = mk('registry', 'ลงทะเบียนรับของ', h('select', null, opt('central', 'สารบรรณกลาง'), X.cfg.units.filter((u) => u.registry && u.active).map((u) => opt(u.code, u.name))));
     grid.append(regSel.root);
+    const want = pre.registry || (X.defaultRegistry ? X.defaultRegistry() : 'central');
+    if ([...regSel.input.options].some((o) => o.value === want)) regSel.input.value = want;
+    regSel.input.addEventListener('change', () => { if (X.rememberRegistry) X.rememberRegistry(regSel.input.value); });
   }
   ['subject', 'docNo', 'party'].forEach((k) => F[k].addEventListener('input', dupCheck));
   F.docNo.value = pre.docNo || ''; F.subject.value = pre.subject || ''; F.party.value = pre.party || ''; F.docDate.value = pre.docDate || '';
@@ -230,6 +233,42 @@ export function sendView(root, X, pre = {}) {
   const rType = h('select', null, opt('normal', 'หนังสือภายนอก (ที่ …/เลขส่ง)'), opt('circular', 'หนังสือเวียน (ที่ …/ว …)'));
   reserveBox.append(purpose.root, field('ประเภทหนังสือ', rType).root);
   const regSel = X.cfg.units.some((u) => u.registry) ? mk('registry', 'ทะเบียนส่งของ', h('select', null, opt('central', 'สารบรรณกลาง'), X.cfg.units.filter((u) => u.registry && u.active).map((u) => opt(u.code, u.name)))) : null;
+  if (regSel) {
+    const want = pre.registry || (X.defaultRegistry ? X.defaultRegistry() : 'central');
+    if ([...regSel.input.options].some((o) => o.value === want)) regSel.input.value = want;
+  }
+  /* เลขส่ง — พิมพ์เอง (ค่าเริ่มต้น): ระบบเสนอเลขถัดไปให้ในช่อง แก้เป็นเลขอื่นได้ · ติ๊ก "ให้ระบบออกเลขให้" = เลขถัดไปอัตโนมัติ · เลขที่ซ้ำถูกปฏิเสธที่ backend */
+  const regVal = () => (regSel ? regSel.input.value : 'central');
+  let nx = null; let touched = false; let circTouched = false; let nxTok = 0;
+  const noIn = h('input', { type: 'text', inputmode: 'numeric', maxlength: 12, placeholder: 'เช่น 150', autocomplete: 'off' });
+  const circIn = h('input', { type: 'text', maxlength: 12, placeholder: 'เลข ว เช่น 7', autocomplete: 'off' });
+  const fullIn = h('input', { type: 'text', maxlength: 80, placeholder: 'เช่น สธ 0312.1/พิเศษ 9 — เว้นว่าง = ใช้รูปแบบปกติ', autocomplete: 'off' }); F.docNo = fullIn;
+  const autoCk = h('input', { type: 'checkbox' });
+  const noF = field('เลขส่ง (ลำดับในทะเบียนส่ง) *', noIn, 'กำลังตรวจเลขล่าสุด…'); const hintEl = noF.root.querySelector('.hint');
+  const circF = field('เลขหนังสือเวียน (ว) *', circIn); circF.root.hidden = true;
+  const preview = h('p', { class: 'sar-numprev', 'aria-live': 'polite' });
+  function paint() {
+    const circ = typeSel.input.value === 'circular', auto = autoCk.checked; circF.root.hidden = !circ || auto;
+    const n = auto ? (nx ? String(nx.out) : '…') : (noIn.value.trim() || '…');
+    const c = auto ? (nx ? String(nx.circ) : '…') : (circIn.value.trim().replace(/^ว\s*\.?\s*/, '') || '…');
+    const tail = circ ? `ว${c}` : n; const full = fullIn.value.trim(); const prefix = nx ? nx.prefix : '';
+    preview.textContent = `เลขที่หนังสือที่จะออก: ${full || (prefix ? `${prefix}/${tail}` : tail)} · เลขส่ง ${n}/${X.cfg.year}`;
+  }
+  async function loadNext() {
+    const tok = (nxTok += 1); hintEl.textContent = 'กำลังตรวจเลขล่าสุด…';
+    try { const r = await X.call('nextno', { registry: regVal(), year: X.cfg.year }); if (tok !== nxTok) return; nx = r; } catch { if (tok !== nxTok) return; nx = null; hintEl.textContent = 'อ่านเลขล่าสุดไม่ได้ — พิมพ์เลขเอง หรือติ๊ก “ให้ระบบออกเลขให้”'; paint(); return; }
+    if (!touched && !autoCk.checked) noIn.value = String(nx.out);
+    if (!circTouched && !autoCk.checked) circIn.value = String(nx.circ);
+    hintEl.textContent = `เลขส่งถัดไปของทะเบียนนี้คือ ${nx.out} — แก้เป็นเลขอื่นได้ ถ้าเลขนั้นถูกใช้แล้วระบบจะไม่บันทึก`; paint();
+  }
+  noIn.addEventListener('input', () => { touched = true; paint(); }); circIn.addEventListener('input', () => { circTouched = true; paint(); }); fullIn.addEventListener('input', paint); typeSel.input.addEventListener('change', paint);
+  autoCk.addEventListener('change', () => { noIn.disabled = autoCk.checked; circIn.disabled = autoCk.checked; if (autoCk.checked) { noIn.value = ''; circIn.value = ''; } else { touched = false; circTouched = false; if (nx) { noIn.value = String(nx.out); circIn.value = String(nx.circ); } } paint(); });
+  if (regSel) regSel.input.addEventListener('change', () => { if (X.rememberRegistry) X.rememberRegistry(regSel.input.value); touched = false; circTouched = false; loadNext(); });
+  if (!pre.reserved) {
+    sendBox.prepend(h('div', { class: 'sar-numbox' }, h('div', { class: 'sar-grid' }, noF.root, circF.root), h('label', { class: 'sar-check' }, autoCk, h('span', null, 'ให้ระบบออกเลขถัดไปให้เอง (ไม่ต้องพิมพ์)')),
+      h('details', { class: 'sar-more' }, h('summary', null, 'พิมพ์เลขที่หนังสือเต็มเอง (รูปแบบพิเศษ)'), field('เลขที่หนังสือ', fullIn, 'ใช้เมื่อเลขที่หนังสือไม่ตรงรูปแบบ “คำนำหน้า/เลขส่ง” — ระบบกันเลขที่ซ้ำให้').root), preview));
+    paint(); loadNext();
+  }
   const go = h('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: async () => {
     if (busy) return; const val = (k) => (F[k] ? F[k].value.trim() : '');
     busy = true; go.disabled = true;
@@ -240,11 +279,20 @@ export function sendView(root, X, pre = {}) {
         return finish(r, true);
       }
       if (!val('subject')) { F.subject.focus(); throw new Error('กรุณาระบุเรื่อง'); }
+      const circ = typeSel.input.value === 'circular'; let numbers = {};
+      if (!pre.reserved) {
+        if (!autoCk.checked) {
+          if (!/^\d{1,6}(\/\d{4})?$/.test(noIn.value.trim())) { noIn.focus(); throw new Error('กรุณาพิมพ์เลขส่งเป็นตัวเลข เช่น 150 (หรือติ๊ก “ให้ระบบออกเลขให้”)'); }
+          if (circ && !/^(ว\s*\.?\s*)?\d{1,6}$/.test(circIn.value.trim())) { circIn.focus(); throw new Error('กรุณาพิมพ์เลขหนังสือเวียน (ว) เป็นตัวเลข เช่น 7'); }
+          numbers = { no: noIn.value.trim(), circNo: circ ? circIn.value.trim() : '' };
+        }
+        if (fullIn.value.trim()) numbers.docNo = fullIn.value.trim();
+      }
       const ps = parties.map((p) => ({ name: p.name.value, channel: p.ch.value, email: p.email.value, trackingNo: p.track.value, receivedBy: p.recv.value })).filter((p) => p.name.trim());
       if (!ps.length) { parties[0].name.focus(); throw new Error('กรุณาระบุผู้รับอย่างน้อย 1 ราย'); }
       const files = []; if (fileIn.files && fileIn.files[0]) { const f = fileIn.files[0]; status.textContent = 'กำลังอัปโหลดไฟล์…'; const u = await upload(X, f, { kind: 'out' }); files.push({ id: u.id }); }
       status.textContent = 'กำลังออกเลข…';
-      const r = await X.call('send', { rid, reservedId: pre.reserved ? pre.reserved.id : '', replyTo, files, parties: ps, ...Object.fromEntries(['subject', 'docDate', 'bookType', 'urgency', 'secrecy', 'cat', 'refs', 'encl'].map((k) => [k, val(k)])), registry: regSel ? val('registry') : 'central' }, 40000);
+      const r = await X.call('send', { rid, reservedId: pre.reserved ? pre.reserved.id : '', replyTo, files, parties: ps, ...Object.fromEntries(['subject', 'docDate', 'bookType', 'urgency', 'secrecy', 'cat', 'refs', 'encl'].map((k) => [k, val(k)])), ...numbers, registry: regSel ? val('registry') : 'central' }, 40000);
       finish(r, false);
     } catch (e) {
       if (e && (e.code === 'NETWORK' || e.code === 'TIMEOUT' || e.code === 'BAD_RESPONSE')) toast('ไม่แน่ใจว่าบันทึกสำเร็จหรือไม่ — กดอีกครั้งได้ ระบบจะไม่ออกเลขซ้ำ', 'error', 8000); else toast(errText(e), 'error', 7000);
@@ -256,6 +304,6 @@ export function sendView(root, X, pre = {}) {
       h('p', null, h('strong', null, 'เลขที่หนังสือ: '), r.docNo), reserved ? h('p', { class: 'muted' }, `ใช้เลขนี้ในร่างหนังสือได้เลย แล้วกลับมาที่หน้า “เลขทะเบียน” เพื่อบันทึกการส่งภายใน ${X.cfg.reserveDays} วัน`) : null, ...((r.warnings || []).map((w) => notice('warn', 'ข้อควรตรวจสอบ', w))),
       h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => navigator.clipboard && navigator.clipboard.writeText(r.docNo).then(() => toast('คัดลอกเลขที่หนังสือแล้ว', 'success')) }, svgIcon(ICONS.copy, 18), 'คัดลอกเลขที่หนังสือ'), h('button', { class: 'btn', type: 'button', onclick: () => X.openDoc(r.doc.id) }, 'เปิดรายละเอียด'), h('button', { class: 'btn btn-primary', type: 'button', onclick: () => X.refresh('send') }, 'ออกเลขฉบับต่อไป'))));
   }
-  const box = h('div', { class: 'card' }, pre.reserved ? notice('info', `ออกหนังสือจากเลขที่จองไว้ ${pre.reserved.reg}`, `เลขที่หนังสือ ${pre.reserved.docNo} — ${pre.reserved.purpose || ''}`) : null, mode, sendBox, reserveBox, regSel ? regSel.root : null, status, h('div', { class: 'btn-row sar-submit' }, go));
+  const box = h('div', { class: 'card' }, pre.reserved ? notice('info', `ออกหนังสือจากเลขที่จองไว้ ${pre.reserved.reg}`, `เลขที่หนังสือ ${pre.reserved.docNo} — ${pre.reserved.purpose || ''}`) : null, regSel ? regSel.root : null, mode, sendBox, reserveBox, status, h('div', { class: 'btn-row sar-submit' }, go));
   root.append(result, box);
 }
