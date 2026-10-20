@@ -66,6 +66,7 @@ var allEvents      = [];
 var selectedName   = "";
 var selectedDept   = "";
 var calendar       = null;
+var calRO          = null;
 var overLimitDates = [];
 var currentEventId = "";
 var deptFilter     = "all";
@@ -114,7 +115,7 @@ function hrInit() {
     if (!e.target.closest('.combo-wrap')) closeAllCombos();
   });
   $r.getElementById('fName').addEventListener('input', onNameInput);
-  setTimeout(onTypeChange, 200);
+  try { onTypeChange(); } catch (e) { setTimeout(onTypeChange, 200); }
 }
 
 // ─────────────────────────────────────────────
@@ -209,37 +210,47 @@ function renderStaffTable() {
 // ─────────────────────────────────────────────
 // LOAD ALL
 // ─────────────────────────────────────────────
+function applyDashboard(d) {
+  d = d || {};
+  var c = d.counts || {};
+  var leaveTotal   = (c["ลากิจ"]||0)+(c["ลากิจครึ่งวัน"]||0)+(c["ลาป่วย"]||0)+
+    (c["ลาป่วยครึ่งวัน"]||0)+(c["ลาพักผ่อน"]||0)+(c["ลาพักผ่อนครึ่งวัน"]||0)+(c["ลาไปเรียน"]||0);
+  var meetingTotal = (c["ประชุม"]||0)+(c["ประชุม P4P"]||0)+(c["ประชุม กกบ."]||0)+(c["ประชุม HR"]||0)+
+    (c["ประชุมภาพลักษณ์"]||0)+(c["ประชุม IRB"]||0)+(c["ประชุม SMC"]||0)+(c["ประชุมอื่นๆ"]||0);
+  $r.getElementById('stLa').textContent      = leaveTotal;
+  $r.getElementById('stPrachum').textContent = meetingTotal;
+  $r.getElementById('stRat').textContent     = c["ไปราชการ"] || 0;
+  $r.getElementById('stOb').textContent      = c["อบรม"]     || 0;
+  overLimitDates = d.overLimitDates || [];
+  // sync holidays จาก server ถ้ามี
+  if (d.holidays) { THAI_HOLIDAYS = d.holidays; }
+}
+function applyEvents(events) {
+  allEvents = events || [];
+  renderCalendar();
+  renderRecentList();
+  hideLoading();
+}
+// one round trip for dashboard + events (the server reads the sheet once). The first call after boot() is answered from the seed.
 function loadAll() {
   google.script.run
-    .withSuccessHandler(function(d) {
-      var c = d.counts || {};
-      var leaveTotal   = (c["ลากิจ"]||0)+(c["ลากิจครึ่งวัน"]||0)+(c["ลาป่วย"]||0)+
-        (c["ลาป่วยครึ่งวัน"]||0)+(c["ลาพักผ่อน"]||0)+(c["ลาพักผ่อนครึ่งวัน"]||0)+(c["ลาไปเรียน"]||0);
-      var meetingTotal = (c["ประชุม"]||0)+(c["ประชุม P4P"]||0)+(c["ประชุม กกบ."]||0)+(c["ประชุม HR"]||0)+
-        (c["ประชุมภาพลักษณ์"]||0)+(c["ประชุม IRB"]||0)+(c["ประชุม SMC"]||0)+(c["ประชุมอื่นๆ"]||0);
-      $r.getElementById('stLa').textContent      = leaveTotal;
-      $r.getElementById('stPrachum').textContent = meetingTotal;
-      $r.getElementById('stRat').textContent     = c["ไปราชการ"] || 0;
-      $r.getElementById('stOb').textContent      = c["อบรม"]     || 0;
-      overLimitDates = d.overLimitDates || [];
-      // sync holidays จาก server ถ้ามี
-      if (d.holidays) { THAI_HOLIDAYS = d.holidays; }
-    })
-    .withFailureHandler(function(){})
-    .getDashboard();
-
-  google.script.run
-    .withSuccessHandler(function(events) {
-      allEvents = events;
-      renderCalendar();
-      renderRecentList();
-      hideLoading();
+    .withSuccessHandler(function(r) {
+      if (r && r.dashboard) applyDashboard(r.dashboard);
+      applyEvents(r && r.events);
     })
     .withFailureHandler(function(err) {
       hideLoading();
       showToast("โหลดปฏิทินไม่สำเร็จ", "error");
     })
-    .getEvents();
+    .getAll();
+}
+// fresh boot() data arrived after the screen was painted from the cached copy → refresh what is shown (form fields are left alone)
+function hrHydrate(b) {
+  if (!b) return;
+  if (b.holidays) THAI_HOLIDAYS = b.holidays;
+  if (b.staff) { staffList = b.staff; renderStaffTable(); }
+  if (b.dashboard) applyDashboard(b.dashboard);
+  if (b.events) applyEvents(b.events);
 }
 
 // ─────────────────────────────────────────────
@@ -331,9 +342,15 @@ function renderCalendar() {
     return;
   }
 
+  // FullCalendar only listens to window resize: also follow the panel itself (scrollbar appears, page padding changes, panel shown again)
+  if (window.ResizeObserver && !calRO && calEl.parentNode) {
+    var roTimer = null;
+    calRO = new ResizeObserver(function() { clearTimeout(roTimer); roTimer = setTimeout(function() { if (calendar) calendar.updateSize(); }, 60); });
+    calRO.observe(calEl.parentNode);
+  }
   calendar = new FullCalendar.Calendar(calEl, {
     initialView: isMobile ? 'listWeek' : 'dayGridMonth',
-    height: isMobile ? 450 : 'calc(100vh - 120px)',
+    height: isMobile ? 'auto' : 'max(560px, calc(100vh - 360px))',
     locale: 'th', firstDay: 1, hiddenDays: [0, 6],
     events: events,
     slotMinTime: '07:00:00', slotMaxTime: '19:00:00',
@@ -1772,7 +1789,7 @@ function showToast(msg, type) {
 }
 function hideLoading() {
   var el = $r.getElementById('loadingScreen'); if (!el) return;
-  el.classList.add('hide'); setTimeout(function(){ el.style.display='none'; }, 450);
+  el.remove();
 }
 function getColorForStaff(name) {
   var s = staffList.find(function(x){ return x.name===name; });
@@ -1823,5 +1840,5 @@ function hrOpenUrl(u) { if (/^https?:\/\//i.test(String(u || ''))) window.open(u
 function printPage() { env.print($r.querySelector('.panel.active'), $r.getElementById('panelTitle') && $r.getElementById('panelTitle').textContent); }
 
 __H = { addStaff, bindProjectCombo, buildProvinceList, buildSwatches, changeStaffColor, changeStaffDept, changeView, checkQuota, closeAllCombos, closeAllMenus, closeDlogAddForm, closeEditModal, closeHistModal, closeHolAddForm, closeModal, closeProjAddForm, confirmDeleteDlog, confirmDeleteHoliday, confirmDeleteProj, confirmRestoreDefaults, copyDlogSummary, copyProjSummary, copyToClipboard, dayCell, deleteEventRecord, deleteStaff, downloadCSV, ensureEditFlatpickr, esc, escAttr, exportCSV, exportDlogCSV, exportProjCSV, filterDlogTable, filterReportTable, getAutoColor, getColorForStaff, getEffectiveType, getFilteredEvents, getHolidayEvents, getHolidayLabelEvents, getProjectStatus, goToDate, goToToday, hideLoading, hrInit, loadAll, loadDlogPanel, loadHolidayPanel, loadHolidays, loadProjPanel, loadReport, loadStaff, mRow, onDateChange, onDeptChange, onEditFileSelect, onEditTypeChange, onFileSelect, onModalOverlayClick, onNameInput, onOverlay, onTypeChange, openDlogEditForm, openEditModal, openHolEditForm, openProjEditForm, openRecentItem, openStaffHistory, printPage, removeParent, renderCalendar, renderDlogTable, renderHolidayTable, renderProjCurrentView, renderProjGrid, renderProjTimeline, renderRecentList, renderReportTable, renderStaffHistory, renderStaffTable, renderStreak, resetForm, restoreHoliday, runSetup, selectStaff, setDeptFilter, setHalfDay, setProgressLabel, showEventModal, showPanel, showToast, submitDlog, submitEdit, submitForm, submitHoliday, submitProject, syncHolidayMap, thaiDate, thaiDateFull, thaiDateShort, timeAgo, toggleDlogAddForm, toggleHolAddForm, toggleMenu, toggleProjAddForm, toggleProjView };
-return { init: hrInit, handlers: __H };
+return { init: hrInit, handlers: __H, hydrate: hrHydrate };
 }
