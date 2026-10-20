@@ -60,3 +60,44 @@ test('formula-looking text is stored as text (no spreadsheet injection)', () => 
   const e = hrEnv(); e.call('saveData', [rec({ note: '=HYPERLINK("http://x")' })]);
   assert.ok(e.sheets.HR_Control[1].some((v) => v === `'=HYPERLINK("http://x")`));
 });
+
+// ---- v1.2: a record on a weekend must be visible; the page can say why the calendar is empty; odd cell formats are read
+test('a record on a Sunday is saved, flagged as weekend and returned (the calendar hides weekends unless told otherwise)', () => {
+  const e = hrEnv();
+  const r = e.call('saveData', [rec({ type: 'ลากิจครึ่งวัน', startDate: '2026-10-25', endDate: '2026-10-25', startTime: '08:00', endTime: '12:00' })]);
+  assert.equal(r.status, 'success'); assert.equal(r.weekend, 'all'); assert.equal(r.startDate, '2026-10-25');
+  const ev = e.call('getEvents'); assert.equal(ev.length, 1); assert.equal(ev[0].start, '2026-10-25T08:00:00');
+  assert.equal(e.call('saveData', [rec({ startDate: '2026-10-23', endDate: '2026-10-26' })]).weekend, 'some');   // Fri → Mon
+  assert.equal(e.call('saveData', [rec({ startDate: '2026-10-20', endDate: '2026-10-20' })]).weekend, '');
+});
+test('boot / getAll carry diag: rows, shown, and why rows were left out', () => {
+  const e = hrEnv();
+  assert.deepEqual(JSON.parse(JSON.stringify(e.call('boot').diag)).rows, 0);
+  const d = (r) => JSON.parse(JSON.stringify(r));
+  e.call('saveData', [rec()]); e.call('saveData', [rec({ startDate: '2026-10-25', endDate: '2026-10-25' })]);
+  e.sheets.HR_Control.push(['', 'ไม่มีวันที่', 'กลุ่มงานโสตฯ', 'ประชุม', 'ไม่ใช่วันที่', '', '', '', '', '', 'id-x', '', '', '']);
+  e.sheets.HR_Control.push(['', '', 'กลุ่มงานโสตฯ', 'ประชุม', '2026-10-20', '', '', '', '', '', 'id-y', '', '', '']);
+  const g = d(e.call('getAll').diag);
+  assert.equal(g.rows, 4); assert.equal(g.shown, 2); assert.equal(g.noDate, 1); assert.equal(g.noName, 1); assert.equal(g.weekendOnly, 1);
+  assert.equal(g.first, '2026-10-20'); assert.equal(g.last, '2026-10-25'); assert.equal(g.own, false); assert.equal(g.sheet, 'HR_Control');
+});
+test('cells written by hand are read: พ.ศ. dates, d/M/yyyy, Date.toString text, serial numbers, 8:00, day fractions', () => {
+  const e = hrEnv(); const D = e.ctx.Date; e.call('getEvents');   // creates the header row
+  const row = (name, start, end, st, et) => ['', name, 'กลุ่มงานโสตฯ', 'ประชุม', start, end, st, et, '', '', 'id-' + name, '', '', ''];
+  e.sheets.HR_Control.push(
+    row('a', '2569-10-20', '', '8:00', '12.30'),
+    row('b', '21/10/2569', '21/10/2569', "'09:15", '10:00'),
+    row('c', 'Wed Oct 22 2026 00:00:00 GMT+0700 (Indochina Time)', '', '', ''),
+    row('d', 46322, 46322, 0.5, 0.625),                                   // 2026-10-27 · 12:00–15:00
+    row('e', new D('2026-10-28T00:00:00+07:00'), '', new D('1899-12-30T08:00:00+07:00'), new D('1899-12-30T16:00:00.020+07:00')));
+  const by = Object.fromEntries(JSON.parse(JSON.stringify(e.call('getEvents'))).map((x) => [x.extendedProps.name, x]));
+  assert.equal(by.a.start, '2026-10-20T08:00:00'); assert.equal(by.a.end, '2026-10-20T12:30:00');
+  assert.equal(by.b.start, '2026-10-21T09:15:00');
+  assert.equal(by.c.extendedProps.startDate, '2026-10-22');
+  assert.equal(by.d.extendedProps.startDate, '2026-10-27'); assert.equal(by.d.start, '2026-10-27T12:00:00'); assert.equal(by.d.end, '2026-10-27T15:00:00');
+  assert.equal(by.e.start, '2026-10-28T08:00:00'); assert.equal(by.e.end, '2026-10-28T16:00:00');
+});
+test('a name typed with a double space is stored with one space (it used to become a second person)', () => {
+  const e = hrEnv(); e.call('saveData', [rec({ name: 'ทวีศักดิ์  สายเขียว' })]);
+  assert.equal(e.call('getEvents')[0].extendedProps.name, 'ทวีศักดิ์ สายเขียว');
+});
