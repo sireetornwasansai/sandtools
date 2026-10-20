@@ -5,12 +5,12 @@
 
 export const URGENCY = { normal: 'ปกติ', urgent: 'ด่วน', very: 'ด่วนมาก', most: 'ด่วนที่สุด' };
 export const SECRECY = { normal: 'ปกติ', secret: 'ลับ', vsecret: 'ลับมาก', tsecret: 'ลับที่สุด' };
-export const STAGE = { registered: 'ลงรับแล้ว รอเสนอ', routed: 'ส่งต่อแล้ว รอรับ', inprogress: 'กำลังดำเนินการ', done: 'ดำเนินการแล้ว', returned: 'ส่งคืน รอส่งต่อใหม่', void: 'ยกเลิกเลข', reserved: 'จองเลข', sent: 'ส่งแล้ว' };
+export const STAGE = { registered: 'ลงทะเบียนแล้ว', routed: 'ส่งต่อแล้ว รอรับ', inprogress: 'กำลังดำเนินการ', done: 'ดำเนินการแล้ว', returned: 'ส่งคืน รอส่งต่อใหม่', void: 'ยกเลิกเลข', reserved: 'จองเลข', sent: 'ส่งแล้ว' };
 export const TO_STATUS = { pending: 'รอรับ', received: 'รับแล้ว', assigned: 'มอบหมายแล้ว', done: 'เสร็จแล้ว', returned: 'ส่งคืน' };
 export const ACTION = { perform: 'เพื่อดำเนินการ', ack: 'เพื่อทราบ' };
 export const EVENT = { receive: 'ลงรับ', send: 'ออกหนังสือ', reserve: 'จองเลข', void: 'ยกเลิกเลข', route: 'ส่งต่อ', forward: 'ส่งต่อ', command: 'สั่งการ', order: 'ข้อสั่งการ', ack: 'รับทราบ', assign: 'มอบหมาย', done: 'ดำเนินการแล้ว', return: 'ส่งคืน', edit: 'แก้ไขข้อมูล', attach: 'แนบไฟล์', reply: 'ตอบกลับ' };
 export const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-const MONTH_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+export const MONTH_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
 export const thaiDigitsToArabic = (s) => String(s == null ? '' : s).replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50));
 export function thaiDate(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${Number(m[1]) + 543}` : ''; }
@@ -55,7 +55,7 @@ export function parseLetter(raw) {
   const out = { docNo: '', docDate: '', subject: '', party: '', salut: '', refs: '', encl: '', urgency: 'normal', secrecy: 'normal', due: '', dueDays: 0, found: {} };
   const tag = (k, ok) => { if (ok) out.found[k] = true; };
 
-  let m = /ที่\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?(?:ว\s?)?\d+)/.exec(text) || /ที่\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?[ก-ฮ]?\d*)/.exec(text);
+  let m = /ที่\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(text) || /ที่\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?[ก-ฮ]?\d*)/.exec(text);   // ที่ ชม 0033.002/ว1190 · ที่ อว78.06/ว.20419 · ที่ สธ 0123/พิเศษ 9
   if (m) out.docNo = m[1].replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
   tag('docNo', !!out.docNo);
 
@@ -110,7 +110,10 @@ export function fileToBase64(file) {
   return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(',')[1] || ''); r.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ')); r.readAsDataURL(file); });
 }
 /** Which tab / which row the recipient screen should highlight. */
-export function stageTone(stage, overdue) { return overdue ? 'bad' : stage === 'done' || stage === 'sent' ? 'ok' : stage === 'void' ? 'muted' : stage === 'returned' ? 'warn' : stage === 'registered' ? 'warn' : 'info'; }
+export function stageTone(stage, overdue) { return overdue ? 'bad' : stage === 'done' || stage === 'sent' ? 'ok' : stage === 'void' ? 'muted' : stage === 'returned' ? 'warn' : stage === 'registered' ? 'plain' : 'info'; }
+/** v1.10: the register is a backup of the clerks' own books, so a letter that nobody routed in this system has NO known status — show no status badge for it (and none for plain "sent"). */
+export const STAGE_HIDDEN = ['registered', 'sent'];
+export const stageLabel = (stage) => (STAGE_HIDDEN.indexOf(stage) >= 0 ? '' : STAGE[stage] || stage || '');
 
 /* ------------------------------ v1.8.0: dates, stages, print sheets ------------------------------ */
 
@@ -145,3 +148,20 @@ export function buildReceiptHtml({ org, doc }) {
   const at = String(doc.at || ''); const t = /[ T](\d{2}):(\d{2})/.exec(at);
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ตรารับ ${escHtml(doc.reg)}</title><style>@page{size:A5 landscape;margin:10mm}body{font:16px/1.7 "TH Sarabun New","Sarabun",Tahoma,sans-serif}.box{width:9cm;border:2px solid #000;padding:.5cm;margin:1cm auto;text-align:center}.box b{font-size:20px}</style></head><body><div class="box"><b>${escHtml(org)}</b><br>เลขรับ ${escHtml(doc.reg)}<br>วันที่ ${escHtml(thaiDate(at.slice(0, 10)))}${t ? `<br>เวลา ${t[1]}.${t[2]} น.` : ''}</div></body></html>`;
 }
+
+/* ------------------------------ v1.10: analytics helpers (ศูนย์สารบรรณ) ------------------------------ */
+
+export const WEEKDAY_SHORT = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+/** Change versus last year as a short Thai phrase: "เพิ่มขึ้น 12%" / "ลดลง 5%" / "เท่าเดิม" / "ไม่มีข้อมูลปีก่อน". */
+export function changeLabel(now, prev) {
+  now = Number(now) || 0; prev = Number(prev) || 0;
+  if (!prev) return now ? 'ไม่มีข้อมูลปีก่อนเทียบ' : '';
+  const p = Math.round(((now - prev) * 100) / prev);
+  return p === 0 ? 'เท่าปีก่อน' : p > 0 ? `เพิ่มขึ้น ${p}% จากปีก่อน` : `ลดลง ${Math.abs(p)}% จากปีก่อน`;
+}
+/** Share of `n` in `total` as a whole percent (0 when total is 0). */
+export const pct = (n, total) => (total ? Math.round((Number(n) * 100) / total) : 0);
+/** Steps of the receive wizard (the order the clerk works in). */
+export const RECEIVE_STEPS = [['scan', 'อัปโหลด/สแกน'], ['check', 'ตรวจข้อมูล'], ['number', 'ลงเลขรับ'], ['forward', 'ส่งต่อ']];
+/** Human names of the fields the on-device reader fills in. */
+export const SCAN_FIELD_LABELS = { docNo: 'เลขที่หนังสือ', docDate: 'ลงวันที่', subject: 'เรื่อง', party: 'จาก', salut: 'เรียน', refs: 'อ้างถึง', encl: 'สิ่งที่ส่งมาด้วย', urgency: 'ชั้นความเร็ว', secrecy: 'ชั้นความลับ', due: 'กำหนดเสร็จ' };

@@ -6,7 +6,7 @@
  * so the two pages can never issue the same number.
  *
  *   POST {action:"saraban", session, op: ...}
- *     everyone signed in : config | dash | my | get | ack | assign | done | return        (only what concerns their unit)
+ *     everyone signed in : config | dash | analytics (staff/exec) | my | get | ack | assign | done | return        (only what concerns their unit)
  *     clerks (staff)     : queue | reject | dup | upload | receive | send | reserve | cancelno | route | update | note |
  *                          list | rows | track | numbers | parties
  *     admins             : units | unitsave | unitdel   (units list is readable by every signed-in user, without e-mails)
@@ -177,7 +177,8 @@ function sarObj(r, row) {
     urgency: sarEnum(r[C.urgency], SAR_URGENCY, 'normal'), secrecy: sarEnum(r[C.secrecy], SAR_SECRECY, 'normal'), due: String(r[C.due] || ''), cat: String(r[C.cat] || ''), channel: String(r[C.channel] || ''),
     files: String(r[C.files] || '').split(/\n/).filter(Boolean), refs: sarUn(r[C.refs]), encl: sarUn(r[C.encl]), note: sarUn(r[C.note]), action: sarUn(r[C.action]), by: String(r[C.by] || ''), verify: String(r[C.verify] || ''),
     inbox: String(r[C.inbox] || ''), dedup: String(r[C.dedup] || ''), voidWhy: sarUn(r[C.voidWhy]), salut: sarUn(r[C.salut]), upd: String(r[C.upd] || '') };
-  var raw = r[C.extra], cached;   // the JSON column is parsed only when a row's "extra" is actually read (a list/dashboard never needs it for most rows)
+  var raw = r[C.extra], cached;
+  o.imp = String(raw || '').indexOf('"imported"') >= 0 || (!o.by && !o.verify);   // v1.10: came from the old (backup) register — its real status is unknown, so no status/overdue is derived for it   // the JSON column is parsed only when a row's "extra" is actually read (a list/dashboard never needs it for most rows)
   Object.defineProperty(o, 'extra', { enumerable: true, configurable: true, get: function () { if (cached === undefined) cached = sarExtra(raw); return cached; }, set: function (v) { cached = v; } });
   return o;
 }
@@ -313,6 +314,7 @@ function sarStage(o, tos) {
 }
 function sarOverdueDays(sc, o, stage, tos) {
   if (o.kind !== 'in' || stage === 'done' || stage === 'void') return 0;
+  if (!tos || !tos.length) return 0;     // v1.10: the register is a backup — a letter nobody routed in this system has no known status, so it is never "overdue"
   var due = sarDueFor(o.due, o.urgency, String(o.at).slice(0, 10), sc.sla, sc.holidays);
   (tos || []).forEach(function (t) { if (t.due && t.status !== 'done' && t.due < due) due = t.due; });
   var d = sarDaysBetween(due, sc.today);
@@ -322,7 +324,7 @@ function sarOverdueDays(sc, o, stage, tos) {
 function sarPublic(sc, o, tos, access) {
   var stage = sarStage(o, tos), full = access === 'full';
   var pub = { id: o.id, kind: o.kind, reg: o.reg, year: o.year, no: o.no, registry: o.registry, status: o.status, stage: stage, at: o.at, docNo: o.docNo, docDate: o.docDate, urgency: o.urgency, secrecy: o.secrecy,
-    due: o.due, cat: o.cat, channel: o.channel, masked: !full, overdue: sarOverdueDays(sc, o, stage, tos), voidWhy: full ? o.voidWhy : '' };
+    due: o.due, cat: o.cat, channel: o.channel, legacy: !!o.imp, masked: !full, overdue: sarOverdueDays(sc, o, stage, tos), voidWhy: full ? o.voidWhy : '' };
   pub.subject = full ? o.subject : SAR_MASK_SUBJECT; pub.party = full ? o.party : ''; pub.action = full ? o.action : ''; pub.note = full ? o.note : ''; pub.by = o.by;
   pub.units = (tos || []).map(function (t) { return { unit: t.unit, status: t.status, action: t.action }; });
   return pub;
@@ -847,7 +849,7 @@ function sarFilterRows(sc, b, rows, tosBy, forExport) {
     if ((from && day < from) || (to && day > to)) return;
     if (!sarMatchQ(acc === 'full' ? o : { reg: o.reg, no: o.no, docNo: o.docNo, subject: '', party: '', note: '', action: '', verify: '' }, terms)) return;
     var pub = sarPublic(sc, o, tos, acc);
-    if (st === 'overdue') { if (!pub.overdue) return; } else if (st && pub.stage !== st) return;
+    if (st === 'overdue') { if (!pub.overdue) return; } else if (st === 'open') { if (pub.stage !== 'routed' && pub.stage !== 'inprogress') return; } else if (st && pub.stage !== st) return;   // 'open' = forwarded and not finished
     if (urg && !(o.urgency === 'most' || o.urgency === 'very')) return;
     if (forExport) { pub.docDate = o.docDate; pub.refs = acc === 'full' ? o.refs : ''; pub.encl = acc === 'full' ? o.encl : ''; pub.channel = o.channel; pub.salut = acc === 'full' ? o.salut : ''; }
     out.push(pub);
@@ -975,19 +977,22 @@ function sarQueue(sc) {
     return { id: q.id, subject: q.subject, bookNo: q.bookNo, bookDate: q.bookDate, from: q.from, file: q.file, urls: q.urls, received: q.received, msgTime: q.msgTime, urgentHint: urgent, urgency: sarGuessUrgency(q.subject + ' ' + q.text), age: age >= 0 ? age : 0, registered: (q.bookNo && dups[sarNorm(q.bookNo)]) || '', source: q.source, suggest: sarSuggestUnits(q.subject, units) };
   }) };
 }
-function sarAgg() { return { k: { inToday: 0, outToday: 0, inYear: 0, outYear: 0, lastIn: 0, lastOut: 0, unrouted: 0, overdue: 0, urgentOpen: 0, returned: 0, inprogress: 0 }, ch: {}, perDay: {}, pend: {} }; }
+function sarAgg() { return { k: { inToday: 0, outToday: 0, inYear: 0, outYear: 0, lastIn: 0, lastOut: 0, unrouted: 0, overdue: 0, urgentOpen: 0, returned: 0, inprogress: 0, routedOpen: 0, imported: 0, inMonth: 0, outMonth: 0 }, ch: {}, perDay: {}, pend: {} }; }
 function sarAggAdd(a, o, tos, pub, c) {
   var k = a.k, day = String(o.at).slice(0, 10);
   if (o.year === c.yr) { if (o.kind === 'in') { k.inYear++; k.lastIn = Math.max(k.lastIn, o.no); } else { k.outYear++; k.lastOut = Math.max(k.lastOut, o.no); } }
   if (day === c.today) { if (o.kind === 'in') k.inToday++; else k.outToday++; }
   if (day >= c.d14) { a.perDay[day] = a.perDay[day] || { in: 0, out: 0 }; a.perDay[day][o.kind]++; }
   if (o.kind === 'in' && day >= c.d30) a.ch[o.channel || 'other'] = (a.ch[o.channel || 'other'] || 0) + 1;
+  if (o.imp && o.year === c.yr) k.imported++;
+  if (day.slice(0, 7) === c.month) { if (o.kind === 'in') k.inMonth++; else k.outMonth++; }
   if (o.kind !== 'in') return;
-  if (pub.stage === 'registered') k.unrouted++;
+  if (pub.stage === 'registered') k.unrouted++;          // kept for old clients only — the page no longer shows it
   if (pub.stage === 'returned') k.returned++;
   if (pub.stage === 'inprogress') k.inprogress++;
+  if (pub.stage === 'routed' || pub.stage === 'inprogress') k.routedOpen++;
   if (pub.overdue) k.overdue++;
-  if (pub.stage !== 'done' && (o.urgency === 'most' || o.urgency === 'very')) k.urgentOpen++;
+  if (tos.length && pub.stage !== 'done' && (o.urgency === 'most' || o.urgency === 'very')) k.urgentOpen++;
   tos.forEach(function (t) { if (t.status === 'pending' || t.status === 'received' || t.status === 'assigned') a.pend[t.unit] = (a.pend[t.unit] || 0) + 1; });
 }
 function sarAggOut(sc, a) {
@@ -1001,7 +1006,7 @@ function sarDash(sc) {
   var out = { today: sc.today, year: sarYearBE(), org: sarOrg(), role: { staff: sc.staff, exec: sc.exec, admin: sc.admin, clear: sc.clear } };
   var my = sarMy(sc); out.my = { open: my.open, overdue: my.overdue };
   if (!(sc.staff || sc.exec)) return out;
-  var rows = sarAll(sarTab(SAR_TAB)), tosBy = sarToAll(sc).by, c = { yr: out.year, today: sc.today, d14: sarAddDays(sc.today, -13), d30: sarAddDays(sc.today, -30) };
+  var rows = sarAll(sarTab(SAR_TAB)), tosBy = sarToAll(sc).by, c = { yr: out.year, today: sc.today, month: sc.today.slice(0, 7), d14: sarAddDays(sc.today, -13), d30: sarAddDays(sc.today, -30) };
   var all = sarAgg(), by = Object.create(null), seen = Object.create(null);
   rows.forEach(function (o) {
     if (o.status === 'void') return;
@@ -1019,6 +1024,74 @@ function sarDash(sc) {
   if (seen.central || !out.groups.length) { var g0 = sarAggOut(sc, by.central || sarAgg()); g0.code = 'central'; g0.name = 'สารบรรณกลาง'; g0.short = 'กลาง'; out.groups.push(g0); }
   return out;
 }
+/* ------------------------------------- วิเคราะห์ข้อมูล (ศูนย์สารบรรณ) — v1.10 ------------------------------------- */
+
+/** Issuer codes printed in the letter number (ที่ สธ 0123/ว45 → "สธ"). Unknown codes are shown as the code itself. */
+var SAR_ISSUERS = { 'สธ': 'กระทรวงสาธารณสุข', 'อว': 'กระทรวง อว.', 'ชม': 'จังหวัดเชียงใหม่', 'มท': 'กระทรวงมหาดไทย', 'ศธ': 'กระทรวงศึกษาธิการ', 'กค': 'กระทรวงการคลัง', 'นร': 'สำนักนายกรัฐมนตรี', 'สรพ': 'สถาบันรับรองคุณภาพสถานพยาบาล', 'สพฉ': 'สถาบันการแพทย์ฉุกเฉินแห่งชาติ', 'พม': 'กระทรวง พม.', 'ยธ': 'กระทรวงยุติธรรม', 'กษ': 'กระทรวงเกษตรฯ', 'รง': 'กระทรวงแรงงาน', 'ดศ': 'กระทรวงดิจิทัลฯ' };
+/** Topic guess from the words in the subject (used only when the clerk did not pick a category — shown to the user as an estimate). */
+var SAR_CAT_WORDS = [['13', /ประชุม|การประชุม/], ['9', /อบรม|หลักสูตร|สัมมนา|ศึกษาดูงาน|ทุนการศึกษา|พัฒนาศักยภาพ|พัฒนาบุคลากร/], ['15', /\bHA\b|รับรองคุณภาพ|มาตรฐาน|สรพ|คุณภาพ/i], ['3', /งบประมาณ|จัดสรร|แผนการใช้จ่าย/], ['4', /การเงิน|เบิกจ่าย|บัญชี|ค่าตอบแทน/], ['5', /จัดซื้อ|จัดจ้าง|พัสดุ|ครุภัณฑ์|ประกวดราคา/], ['6', /บรรจุ|แต่งตั้ง|เลื่อนระดับ|ประเมินผลงาน|ลาศึกษา|โอนย้าย|อัตรากำลัง|บุคลากร/], ['8', /โรค|วัคซีน|ระบาด|ควบคุมโรค|ไข้หวัด|โควิด|ฝุ่น/], ['10', /สารสนเทศ|ไซเบอร์|ดิจิทัล|ระบบ|PDPA|ข้อมูลส่วนบุคคล/i], ['17', /ยา|เวชภัณฑ์|เภสัช/], ['2', /ยุทธศาสตร์|แผนปฏิบัติ|ตัวชี้วัด|นโยบาย|KPI/i], ['14', /ภัยพิบัติ|อัคคีภัย|ความปลอดภัย|ซ้อมแผน/], ['11', /กฎหมาย|วินัย|คดี|ระเบียบ|ข้อบังคับ/], ['12', /ตรวจสอบภายใน|ควบคุมภายใน/], ['18', /ร้องเรียน|สิทธิผู้ป่วย|ร้องทุกข์/], ['7', /ผู้ป่วย|การแพทย์|พยาบาล|ส่งต่อ|บริการ/], ['16', /ประชาสัมพันธ์|เชิญชวน|เผยแพร่/]];
+function sarGuessCat(subject) { var t = String(subject || ''); for (var i = 0; i < SAR_CAT_WORDS.length; i++) if (SAR_CAT_WORDS[i][1].test(t)) return SAR_CAT_WORDS[i][0]; return ''; }
+function sarCatName(k) { for (var i = 0; i < SAR_CATEGORIES.length; i++) if (SAR_CATEGORIES[i][0] === k) return SAR_CATEGORIES[i][1]; return 'ไม่ระบุหมวด'; }
+function sarIssuer(docNo) { var m = /^\s*([\u0E01-\u0E4E]{1,6}|[A-Za-z]{2,6})\s*[-.]?\s*\d/.exec(String(docNo || '')); return m ? m[1] : ''; }
+function sarIsCircular(docNo) { return /\/\s*ว\s*\.?\s*\d|^\s*ว\s*\.?\s*\d/.test(String(docNo || '')); }
+function sarTop(map, n, label) { return Object.keys(map).map(function (k) { return { key: k, name: label ? label(k) : k, n: map[k] }; }).sort(function (a, b) { return b.n - a.n; }).slice(0, n); }
+function sarPct(a, b) { return b ? Math.round(a * 100 / b) : 0; }
+
+/** One pass over the register → everything the "ศูนย์สารบรรณ" analytics block shows. Secret letters are counted but never read (subject/sender stay hidden). */
+function sarAnalytics(sc, b) {
+  sarNeedReader(sc);
+  var year = parseInt(b && b.year, 10) || sarYearBE(), registry = String((b && b.registry) || '').slice(0, 20);
+  return sarCached(sc, 'analytics', year + '|' + registry, 60, function () { return sarAnalyticsRun_(sc, year, registry); });
+}
+function sarAnalyticsRun_(sc, year, registry) {
+  var rows = sarAll(sarTab(SAR_TAB)), tosBy = sarToAll(sc).by, i;
+  var out = { year: year, registry: registry, registryName: registry ? sarRegistryName(sc, registry) : 'ทุกกลุ่มงาน', years: [], total: { in: 0, out: 0, void: 0, prevIn: 0, prevOut: 0 },
+    months: [], weekday: [0, 0, 0, 0, 0, 0, 0], urgency: { normal: 0, urgent: 0, very: 0, most: 0 }, bookType: { circular: 0, normal: 0 }, senders: [], issuers: [], recipients: [], unspecifiedOut: 0,
+    cats: { in: [], out: [] }, lag: { n: 0, avg: 0, max: 0 }, quality: { n: 0, docDate: 0, party: 0, channel: 0, file: 0, cat: 0 }, seq: { in: { last: 0, used: 0, gaps: 0 }, out: { last: 0, used: 0, gaps: 0 } },
+    forwarded: 0, units: [], imported: 0, masked: 0, busiestMonth: null, busiestWeekday: null };
+  for (i = 0; i < 12; i++) out.months.push({ m: i + 1, in: 0, out: 0 });
+  var years = Object.create(null), snd = Object.create(null), iss = Object.create(null), rcp = Object.create(null), unitN = Object.create(null);
+  var catIn = Object.create(null), catOut = Object.create(null), seqSet = { in: Object.create(null), out: Object.create(null) }, lagSum = 0;
+  rows.forEach(function (o) {
+    if (o.year) years[o.year] = true;
+    if (registry && o.registry !== registry) return;
+    var tos = tosBy[o.id] || [], acc = sarAccess(sc, o, tos); if (acc === 'none') return;
+    var full = acc === 'full';
+    if (o.year === year - 1 && o.status !== 'void') { if (o.kind === 'in') out.total.prevIn++; else out.total.prevOut++; }
+    if (o.year !== year) return;
+    var S = out.seq[o.kind]; seqSet[o.kind][o.no] = true; if (o.no > S.last) S.last = o.no;
+    if (o.status === 'void') { out.total.void++; return; }
+    var kin = o.kind === 'in', day = String(o.at).slice(0, 10), mo = parseInt(day.slice(5, 7), 10);
+    out.total[o.kind]++; if (mo >= 1 && mo <= 12) out.months[mo - 1][o.kind]++;
+    var wd = new Date(day + 'T00:00:00Z').getUTCDay(); if (isFinite(wd)) out.weekday[wd]++;
+    if (o.imp) out.imported++;
+    if (!full) { out.masked++; return; }
+    if (kin) {
+      out.urgency[o.urgency] = (out.urgency[o.urgency] || 0) + 1;
+      if (sarIsCircular(o.docNo)) out.bookType.circular++; else out.bookType.normal++;
+      var pn = String(o.party || '').replace(/\s+/g, ' ').trim(), named = pn && !/^ไม่ระบุ/.test(pn);
+      if (named) snd[pn] = (snd[pn] || 0) + 1;
+      var ic = sarIssuer(o.docNo); if (ic) iss[ic] = (iss[ic] || 0) + 1;
+      if (o.docDate && /^\d{4}-\d{2}-\d{2}$/.test(o.docDate)) { var lag = sarDaysBetween(o.docDate, day); if (lag >= 0 && lag <= 180) { out.lag.n++; lagSum += lag; if (lag > out.lag.max) out.lag.max = lag; } }
+      out.quality.n++; if (o.docDate) out.quality.docDate++; if (named) out.quality.party++; if (o.channel) out.quality.channel++; if (o.files.length) out.quality.file++; if (o.cat) out.quality.cat++;
+      if (tos.length) { out.forwarded++; tos.forEach(function (t) { unitN[t.unit] = (unitN[t.unit] || 0) + 1; }); }
+    } else {
+      var rn = String(o.party || '').replace(/\s+/g, ' ').trim(); if (rn) rcp[rn] = (rcp[rn] || 0) + 1; else out.unspecifiedOut++;
+    }
+    var ck = o.cat || sarGuessCat(o.subject) || '', tgt = kin ? catIn : catOut; tgt[ck] = (tgt[ck] || 0) + 1;
+  });
+  ['in', 'out'].forEach(function (k) { var n = 0; Object.keys(seqSet[k]).forEach(function () { n++; }); out.seq[k].used = n; out.seq[k].gaps = Math.max(0, out.seq[k].last - n); });
+  out.years = Object.keys(years).map(Number).sort(function (a, c) { return c - a; });
+  out.senders = sarTop(snd, 8); out.issuers = sarTop(iss, 8, function (k) { return SAR_ISSUERS[k] || k; }); out.recipients = sarTop(rcp, 8);
+  out.units = sarTop(unitN, 8, function (k) { var u = sarUnitBy(sc, k); return u ? u.short || u.name : k; });
+  out.cats.in = sarTop(catIn, 8, function (k) { return k ? sarCatName(k) : 'ไม่ระบุหมวด'; }); out.cats.out = sarTop(catOut, 8, function (k) { return k ? sarCatName(k) : 'ไม่ระบุหมวด'; });
+  out.lag.avg = out.lag.n ? Math.round(lagSum * 10 / out.lag.n) / 10 : 0;
+  var bm = null; out.months.forEach(function (m) { var t = m.in + m.out; if (t && (!bm || t > bm.n)) bm = { m: m.m, n: t }; }); out.busiestMonth = bm;
+  var bw = null; out.weekday.forEach(function (n, d) { if (n && (!bw || n > bw.n)) bw = { d: d, n: n }; }); out.busiestWeekday = bw;
+  out.quality.pct = { docDate: sarPct(out.quality.docDate, out.quality.n), party: sarPct(out.quality.party, out.quality.n), channel: sarPct(out.quality.channel, out.quality.n), file: sarPct(out.quality.file, out.quality.n), cat: sarPct(out.quality.cat, out.quality.n) };
+  return out;
+}
+
 /** One round trip for the first screen: settings + dashboard + the waiting queue. */
 function sarBoot(sc) {
   var out = { config: sarCached(sc, 'config', '', 60, function () { return sarConfig(sc); }) };
@@ -1079,6 +1152,7 @@ function sarabanOp(u, op, b) {
     case 'config':   return sarCached(sc, 'config', '', 60, function () { return sarConfig(sc); });
     case 'dash':     return sarCached(sc, 'dash', '', 30, function () { return sarDash(sc); });
     case 'my':       return sarCached(sc, 'my', '', 30, function () { return sarMy(sc); });
+    case 'analytics': return sarAnalytics(sc, b);
     case 'get':      return sarGet(sc, b);
     case 'units':    return sarCached(sc, 'units', '', 30, function () { return sarUnitsOp(sc); });
     case 'queue':    return sarQueue(sc);
@@ -1147,6 +1221,23 @@ function setupSaraban() {
   var P = PropertiesService.getScriptProperties();
   ['SAR_ORG_NAME', 'SAR_BOOK_PREFIX', 'SARABAN_STAFF_EMAILS', 'SARABAN_EXEC_EMAILS', 'SARABAN_SECRET_EMAILS', 'SAR_HOLIDAYS'].forEach(function (k) { if (P.getProperty(k) === null) P.setProperty(k, ''); });
   console.log('พร้อมใช้งาน — สร้างแท็บ Saraban, SarTo, SarTrack, SarUnits, SarNo แล้ว\nต่อไป: ตั้ง SAR_ORG_NAME, SAR_BOOK_PREFIX (เช่น สธ 0xxx.xxx), SARABAN_STAFF_EMAILS, SARABAN_EXEC_EMAILS ใน Script properties แล้ว Deploy เวอร์ชันใหม่');
+}
+
+/** Run ONCE (v1.10): the units tab may contain hospital group names typed in column B with no code (the page ignores such rows, so they could not be chosen when forwarding a letter).
+ *  This gives every such row a code (d01, d02 …), type "internal", active, short name = name. Headings that start with "ภารกิจ" are not receiving units, so they are set inactive (turn them on in สารบรรณ → หน่วยงาน if needed). */
+function setupSarabanUnits() {
+  var sh = sarTab(SAR_UN), last = sh.getLastRow(), fixed = 0, n = 0;
+  if (last < 2) return 'ไม่มีข้อมูล';
+  var rows = sh.getRange(2, 1, last - 1, UN_COLS).getValues(), used = {};
+  rows.forEach(function (r) { if (r[0]) used[String(r[0])] = true; });
+  rows.forEach(function (r, i) {
+    if (r[0] || !sarUn(r[1])) return;
+    do { n++; var code = 'd' + (n < 10 ? '0' + n : String(n)); } while (used[code]); used[code] = true;
+    var name = sarUn(r[1]), u = { code: code, name: name, short: name.slice(0, 30), type: 'internal', head: '', members: [], delegate: '', delegateUntil: '', prefix: '', active: !/^ภารกิจ/.test(name), email: '', parent: '', keywords: '', registry: false };
+    var rg = sh.getRange(i + 2, 1, 1, UN_COLS); rg.setNumberFormat('@'); rg.setValues([sarUnitRow(u)]); fixed++;
+  });
+  sarBump();
+  return 'กำหนดรหัสให้ ' + fixed + ' หน่วยงาน';
 }
 
 /**

@@ -6,7 +6,7 @@ import { notice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { modal, confirmBox } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
-import { URGENCY, SECRECY, STAGE, TO_STATUS, ACTION, EVENT, thaiDate, thaiDateTime, thaiDateLong, ageLabel, stageIndex, STAGE_STEPS, buildRegisterHtml, buildReceiptHtml, dueLabel, stageTone, toCsv, fileToBase64 } from './saraban-engine.js';
+import { URGENCY, SECRECY, STAGE, TO_STATUS, ACTION, EVENT, MONTHS, MONTH_FULL, WEEKDAY_SHORT, thaiDate, thaiDateTime, thaiDateLong, ageLabel, stageIndex, STAGE_STEPS, buildRegisterHtml, buildReceiptHtml, dueLabel, stageTone, stageLabel, changeLabel, pct, toCsv, fileToBase64 } from './saraban-engine.js';
 import { receiveView, sendView, unitPicker } from './saraban-forms.js';
 
 /**
@@ -22,13 +22,15 @@ const badge = (text, tone = 'muted') => h('span', { class: `sar-badge sar-${tone
 
 /** Placeholder shapes shown while a sub-menu loads (CSS shimmer; static when the user prefers reduced motion). */
 const sk = (cls) => h('i', { class: `sar-sk ${cls || ''}`, 'aria-hidden': 'true' });
+/** Placeholder rows (same shape as a register row) shown while a list is being fetched. */
+function rowSkeletons(n) { return Array.from({ length: n }, () => h('div', { class: 'sar-row sar-skel-card', 'aria-hidden': 'true' }, h('div', { class: 'sar-no' }, sk('num s'), sk('line xs')), h('div', { class: 'sar-main' }, sk('line l'), sk('line m')))); }
 function skeleton(tab) {
   const kind = { home: 'dash', my: 'list', register: 'list', track: 'list' }[tab] || 'form';
   const wrap = h('div', { class: 'sar-skel', role: 'status', 'aria-label': 'กำลังโหลด' }, h('span', { class: 'sar-sr' }, 'กำลังโหลด…'));
   if (kind === 'dash') {
     wrap.append(h('div', { class: 'sar-skel-groups' }, sk('pill'), sk('pill'), sk('pill')), h('div', { class: 'sar-kpis' }, ...[1, 2, 3, 4, 5, 6].map(() => h('div', { class: 'sar-kpi sar-skel-card' }, sk('num'), sk('line s')))), h('div', { class: 'card' }, sk('line m'), sk('chart')));
   } else if (kind === 'list') {
-    wrap.append(h('div', { class: 'card' }, sk('input'), sk('input')), ...[1, 2, 3, 4, 5].map(() => h('div', { class: 'sar-row sar-skel-card' }, h('div', { class: 'sar-no' }, sk('num s'), sk('line xs')), h('div', { class: 'sar-main' }, sk('line l'), sk('line m')))));
+    wrap.append(h('div', { class: 'card' }, sk('input'), sk('input')), ...rowSkeletons(5));
   } else {
     wrap.append(h('div', { class: 'card' }, sk('line m'), ...[1, 2, 3].map(() => h('div', { class: 'sar-skel-field' }, sk('line xs'), sk('input'))), sk('btn')));
   }
@@ -74,7 +76,7 @@ export async function mount(root) {
   if (boot) { seed('config', {}, cfg); if (boot.dash) seed('dash', {}, boot.dash); if (boot.queue) seed('queue', {}, boot.queue); }
   const me = cfg.me; const unitName = (c) => { const u = cfg.units.find((x) => x.code === c); return u ? u.short || u.name : c; };
   const staff = me.staff; const reader = me.staff || me.exec;
-  const TABS = [['home', 'ศูนย์สารบรรณ', reader], ['my', 'งานของฉัน', true], ['receive', 'ลงรับ', staff], ['send', 'ส่งออก', staff], ['register', 'ทะเบียน', reader], ['track', 'ติดตาม', true], ['numbers', 'เลขทะเบียน', staff], ['units', 'หน่วยงาน', me.admin], ['import', 'นำเข้าทะเบียนเดิม', me.admin]].filter((t) => t[2]);
+  const TABS = [['home', 'ศูนย์สารบรรณ', reader], ['my', 'งานของฉัน', true], ['receive', 'รับหนังสือ', staff], ['send', 'ส่งออก', staff], ['register', 'ทะเบียน', reader], ['track', 'ติดตาม', true], ['numbers', 'เลขทะเบียน', staff], ['units', 'หน่วยงาน', me.admin], ['import', 'นำเข้าทะเบียนเดิม', me.admin]].filter((t) => t[2]);
   const bar = h('div', { class: 'sar-tabs', role: 'tablist', 'aria-label': 'เมนูสารบรรณ' }); const view = h('div', { class: 'sar-view' }); const loadbar = h('div', { class: 'sar-loadbar', hidden: true, 'aria-hidden': 'true' }, h('i'));
   let current = ''; let ver = 0;
   /* The clerk's own work group (งานยุทธศาสตร์ฯ / งานพัฒนาคุณภาพฯ …): last one chosen, else the registry of a unit they belong to. */
@@ -107,10 +109,10 @@ export async function mount(root) {
   /* ----------------------------- small building blocks ----------------------------- */
   function docRow(d, extra) {
     const out = d.kind === 'out';
-    return h('button', { class: `sar-row tone-${stageTone(d.stage, d.overdue)}`, type: 'button', onclick: () => openDoc(d.id) },
+    return h('button', { class: `sar-row tone-${stageTone(d.stage, d.overdue)}`, type: 'button', onclick: (e) => openDoc(d.id, e.currentTarget) },
       h('div', { class: 'sar-no' }, h('strong', null, d.reg), h('span', null, out ? 'เลขส่ง' : 'เลขรับ')),
       h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, d.subject || '(ไม่มีเรื่อง)'), h('div', { class: 'muted sar-sub' }, [d.docNo, d.party, d.at ? thaiDate(String(d.at).slice(0, 10)) : ''].filter(Boolean).join(' · ')),
-        h('div', { class: 'sar-badges' }, regCodes.length && d.registry ? badge(d.registry === 'central' ? 'สารบรรณกลาง' : unitName(d.registry), 'info') : null, d.urgency !== 'normal' ? badge(URGENCY[d.urgency], d.urgency === 'urgent' ? 'warn' : 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, badge(STAGE[d.stage] || d.stage, stageTone(d.stage, 0)), d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null, ...(extra || []))));
+        h('div', { class: 'sar-badges' }, regCodes.length && d.registry ? badge(d.registry === 'central' ? 'สารบรรณกลาง' : unitName(d.registry), 'info') : null, d.urgency !== 'normal' ? badge(URGENCY[d.urgency], d.urgency === 'urgent' ? 'warn' : 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, stageLabel(d.stage) ? badge(stageLabel(d.stage), stageTone(d.stage, 0)) : null, d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null, ...(extra || []))));
   }
   function empty(text) { return h('p', { class: 'muted sar-empty' }, text); }
   /** Print a finished HTML sheet (register / received stamp) from a new tab — no inline scripts needed. */
@@ -121,7 +123,7 @@ export async function mount(root) {
   }
   /** ลงรับ → ส่งต่อ → ดำเนินการ → เสร็จสิ้น (received letters only; void / sent letters have no bar). */
   function progressBar(d) {
-    const at = d.kind === 'out' ? -1 : stageIndex(d.stage); if (at < 0) return null;
+    const at = d.kind === 'out' || d.stage === 'registered' ? -1 : stageIndex(d.stage); if (at < 0) return null;   // no bar for a letter nobody routed here: its real status is unknown
     return h('ol', { class: 'sar-progress', 'aria-label': `ความคืบหน้า: ${STAGE[d.stage] || d.stage}` }, STAGE_STEPS.map(([k, l], i) => h('li', { class: i < at ? 'done' : i === at ? (d.stage === 'returned' ? 'warn' : 'now') : '', 'aria-current': i === at ? 'step' : null }, l)));
   }
   /** Small generic dialog: fields [{name,label,type,options,value,hint,rows}] → Promise<values|null>. */
@@ -137,7 +139,18 @@ export async function mount(root) {
       m = modal(title, [intro ? h('p', { class: 'muted' }, intro) : null, ...rows], [ok, h('button', { class: 'btn', type: 'button', onclick: () => finish(null) }, 'ยกเลิก')], { onDismiss: () => finish(null), onClose: () => finish(null) });
     });
   }
-  async function act(fn, okMsg) { try { const r = await fn(); if (okMsg) toast(okMsg, 'success'); return r || true; } catch (e) { toast(errText(e), 'error', 6000); return false; } }
+  let actN = 0;
+  /** Run an action with the top progress bar visible; shows a success / error toast. */
+  async function act(fn, okMsg) {
+    actN += 1; loadbar.hidden = false;
+    try { const r = await fn(); if (okMsg) toast(okMsg, 'success'); return r || true; } catch (e) { toast(errText(e), 'error', 6000); return false; } finally { actN -= 1; if (!actN && !view.hasAttribute('aria-busy')) loadbar.hidden = true; }
+  }
+  /** Full-screen "loading" veil + a spinner on the clicked row, shown while a detail page is fetched. Returns a function that removes both. */
+  function busyShow(label, src) {
+    if (src && src.classList) { src.classList.add('is-loading'); src.setAttribute('aria-busy', 'true'); }
+    const veil = h('div', { class: 'sar-busy', role: 'status', 'aria-live': 'polite' }, h('div', { class: 'sar-busy-box' }, h('i', { class: 'sar-spin', 'aria-hidden': 'true' }), h('span', null, label))); document.body.append(veil);
+    return () => { veil.remove(); if (src && src.classList) { src.classList.remove('is-loading'); src.removeAttribute('aria-busy'); } };
+  }
 
   /* ----------------------------- ลงรับ: คิว Telegram + แบบฟอร์ม ----------------------------- */
   async function receiveTab(el, x, p) {
@@ -158,43 +171,121 @@ export async function mount(root) {
     const host2 = h('div'); el.append(host2); receiveView(host2, x, p);
   }
 
-  /* ----------------------------- ภาพรวม ----------------------------- */
+  /* ----------------------------- ศูนย์สารบรรณ: ทะเบียนรับ-ส่ง + วิเคราะห์ข้อมูล ----------------------------- */
+  const miniRows = (n) => Array.from({ length: n }, () => h('div', { class: 'sar-mini sar-skel-card', 'aria-hidden': 'true' }, sk('num s'), h('div', { class: 'sar-mini-main' }, sk('line l'), sk('line m'))));
+  const retryBox = (title, e, again) => h('div', null, notice('error', title, errText(e)), h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: again }, 'ลองอีกครั้ง')));
+  /** Horizontal bars: [{name, n}] → label · bar · number. */
+  function hbars(items, { total, tone = 'in', emptyText = 'ยังไม่มีข้อมูล' } = {}) {
+    if (!items || !items.length) return empty(emptyText);
+    const max = Math.max(1, ...items.map((i) => i.n)); const sum = total || items.reduce((a, i) => a + i.n, 0);
+    return h('div', { class: 'sar-hbars' }, items.map((i) => h('div', { class: 'sar-hbar', title: `${i.name}: ${i.n} ฉบับ (${pct(i.n, sum)}%)` }, h('span', { class: 'sar-hbar-l' }, i.name), h('span', { class: 'sar-hbar-t' }, h('i', { class: tone, style: `width:${Math.max(3, Math.round((i.n / max) * 100))}%` })), h('strong', null, String(i.n)))));
+  }
+  const tile = (label, value, sub, tone) => h('div', { class: `sar-tile${tone ? ` tone-${tone}` : ''}` }, h('span', null, label), h('strong', null, String(value)), sub ? h('em', null, sub) : null);
+
+  /** One compact register (รับ or ส่ง) for the centre page: newest first, quick search, every change shows a loading state. */
+  function regCard(H, kind, reg) {
+    const out = kind === 'out'; let seq = 0; let q = '';
+    const list = h('div', { class: 'sar-mini-list', 'aria-live': 'polite' }); const meta = h('p', { class: 'muted sar-sub' }); const bar = h('div', { class: 'sar-loadbar', hidden: true, 'aria-hidden': 'true' }, h('i'));
+    const search = h('input', { type: 'search', placeholder: out ? 'ค้นหาทะเบียนส่ง เลขส่ง เรื่อง ผู้รับ…' : 'ค้นหาทะเบียนรับ เลขรับ เรื่อง ผู้ส่ง…', 'aria-label': out ? 'ค้นหาทะเบียนส่ง' : 'ค้นหาทะเบียนรับ' });
+    const card = h('div', { class: `card sar-reg-card ${out ? 'is-out' : 'is-in'}` }, h('div', { class: 'sar-qhead' }, h('h3', { class: 'sar-h3' }, out ? 'ทะเบียนส่ง' : 'ทะเบียนรับ'), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => go('register', { kind, registry: reg }) }, 'ดูทะเบียนทั้งหมด')), search, bar, meta, list);
+    const item = (d) => h('button', { class: `sar-mini tone-${stageTone(d.stage, d.overdue)}`, type: 'button', onclick: (e) => openDoc(d.id, e.currentTarget) },
+      h('strong', { class: 'sar-mini-no' }, d.reg), h('div', { class: 'sar-mini-main' }, h('div', { class: 'sar-mini-subject' }, d.subject || '(ไม่มีเรื่อง)'), h('div', { class: 'muted sar-sub' }, [d.docNo, d.party, d.at ? thaiDate(String(d.at).slice(0, 10)) : ''].filter(Boolean).join(' · ')),
+        (d.urgency !== 'normal' || d.secrecy !== 'normal' || stageLabel(d.stage) || d.overdue) ? h('div', { class: 'sar-badges' }, d.urgency !== 'normal' ? badge(URGENCY[d.urgency], d.urgency === 'urgent' ? 'warn' : 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, stageLabel(d.stage) ? badge(stageLabel(d.stage), stageTone(d.stage, 0)) : null, d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null) : null));
+    async function load() {
+      const my = ++seq; bar.hidden = false; card.setAttribute('aria-busy', 'true'); meta.textContent = 'กำลังโหลด…'; list.replaceChildren(...miniRows(5));
+      try {
+        const r = await call('list', { kind, year: H.year, registry: reg, q, limit: 8 }); if (my !== seq) return;
+        meta.textContent = `พ.ศ. ${r.year}: ${r.counts.total} ฉบับ · เลข${out ? 'ส่ง' : 'รับ'}ล่าสุด ${r.counts.lastNo || '-'}${q ? ` · ตรงเงื่อนไข ${r.total}` : ''}`;
+        list.replaceChildren(...(r.items.length ? r.items.map(item) : [empty(q ? 'ไม่พบรายการตามคำค้น' : 'ยังไม่มีรายการในปีนี้')]));
+        if (r.more) list.append(h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => go('register', { kind, registry: reg }) }, `ดูอีก ${r.total - r.items.length} รายการ`)));
+      } catch (e) { if (my !== seq) return; meta.textContent = ''; list.replaceChildren(retryBox('โหลดทะเบียนไม่สำเร็จ', e, () => load())); } finally { if (my === seq) { bar.hidden = true; card.removeAttribute('aria-busy'); } }
+    }
+    search.addEventListener('input', debounce(() => { q = search.value.trim(); load(); }, 350));
+    load(); return card;
+  }
+
+  /** The analytics block: everything comes from ONE backend call (`analytics`) that reads the register once. */
+  function analyticsBlock(H, reg) {
+    const box = h('div', { class: 'sar-an', 'aria-live': 'polite' }); let seq = 0;
+    const skel = () => h('div', { class: 'sar-skel', role: 'status', 'aria-label': 'กำลังวิเคราะห์ข้อมูล' }, h('span', { class: 'sar-sr' }, 'กำลังวิเคราะห์ข้อมูล…'), h('div', { class: 'sar-tiles' }, ...[1, 2, 3, 4].map(() => h('div', { class: 'sar-tile sar-skel-card' }, sk('line xs'), sk('num')))), h('div', { class: 'card' }, sk('line m'), sk('chart')));
+    function paint(a) {
+      const hasData = a.total.in + a.total.out + a.total.void > 0;
+      const head = h('div', { class: 'sar-qhead' }, h('h3', { class: 'sar-h3' }, `วิเคราะห์ข้อมูลทะเบียน พ.ศ. ${a.year} · ${a.registryName}`));
+      if (!hasData) { box.replaceChildren(head, h('div', { class: 'card' }, empty('ยังไม่มีข้อมูลทะเบียนในปีนี้ — เมื่อมีการลงรับ/ส่งออก ระบบจะวิเคราะห์ให้อัตโนมัติ'))); return; }
+      const mmax = Math.max(1, ...a.months.map((m) => Math.max(m.in, m.out)));
+      const ratio = a.total.in ? (a.total.out / a.total.in).toFixed(2).replace(/\.?0+$/, '') : '-';
+      const tiles = h('div', { class: 'sar-tiles' }, tile('หนังสือรับ', a.total.in, changeLabel(a.total.in, a.total.prevIn), 'in'), tile('หนังสือส่ง', a.total.out, changeLabel(a.total.out, a.total.prevOut), 'out'),
+        tile('สัดส่วนส่ง : รับ', ratio, a.total.in ? `ส่ง ${ratio} ฉบับ ต่อรับ 1 ฉบับ` : ''), tile('รับล่าช้าเฉลี่ย', a.lag.n ? `${a.lag.avg} วัน` : '-', a.lag.n ? `จากวันที่ลงหนังสือถึงวันลงรับ (${a.lag.n} ฉบับ, นานสุด ${a.lag.max} วัน)` : 'ไม่มีวันที่ลงหนังสือให้คำนวณ'),
+        a.busiestMonth ? tile('เดือนที่คึกคักที่สุด', MONTH_FULL[a.busiestMonth.m - 1], `${a.busiestMonth.n} ฉบับ (รับ+ส่ง)`) : null, a.busiestWeekday ? tile('วันที่ลงทะเบียนมากสุด', `วัน${['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'][a.busiestWeekday.d]}`, `${a.busiestWeekday.n} ฉบับ`) : null, a.total.void ? tile('เลขที่ยกเลิก', a.total.void, 'ยังคงอยู่ในทะเบียน', 'warn') : null);
+      const months = h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ปริมาณหนังสือรายเดือน'), h('div', { class: 'sar-mbars', role: 'img', 'aria-label': 'แผนภูมิแท่งหนังสือรับและส่งรายเดือน' }, a.months.map((m) => h('div', { class: 'sar-mbar', title: `${MONTH_FULL[m.m - 1]}: รับ ${m.in} · ส่ง ${m.out}` }, h('div', { class: 'sar-mbar-cols' }, h('i', { class: 'in', style: `height:${Math.round((m.in / mmax) * 100)}%` }, m.in ? h('b', null, String(m.in)) : null), h('i', { class: 'out', style: `height:${Math.round((m.out / mmax) * 100)}%` }, m.out ? h('b', null, String(m.out)) : null)), h('span', null, MONTHS[m.m - 1])))), h('p', { class: 'muted' }, h('span', { class: 'sar-dot in' }), 'รับ ', h('span', { class: 'sar-dot out' }), 'ส่ง'));
+      const wmax = Math.max(1, ...a.weekday);
+      const urg = Object.entries(a.urgency).filter(([, n]) => n).map(([k, n]) => ({ name: URGENCY[k], n }));
+      const typeSum = a.bookType.circular + a.bookType.normal;
+      const cards = h('div', { class: 'sar-two' },
+        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'หนังสือรับ: หน่วยงานต้นทาง'), hbars(a.issuers, { emptyText: 'ยังไม่มีเลขที่หนังสือให้วิเคราะห์' }), h('p', { class: 'hint' }, 'นับจากรหัสหน้าเลขที่หนังสือ เช่น สธ · ชม · อว'), a.senders.length ? h('div', null, h('h4', { class: 'sar-h4' }, 'ผู้ส่งที่ระบุชื่อ'), hbars(a.senders)) : null),
+        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'หนังสือส่ง: ส่งถึง'), hbars(a.recipients, { tone: 'out', emptyText: 'ยังไม่ได้ระบุผู้รับในทะเบียนส่ง' }), a.unspecifiedOut ? h('p', { class: 'hint' }, `ไม่ได้ระบุผู้รับ ${a.unspecifiedOut} ฉบับ`) : null),
+        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'เรื่องที่รับเข้า (ประมาณจากคำในหัวเรื่อง)'), hbars(a.cats.in, { emptyText: 'ยังไม่มีข้อมูล' }), h('p', { class: 'hint' }, 'ใช้หมวดที่เจ้าหน้าที่เลือกไว้ ถ้าไม่ได้เลือกจะเดาจากคำในเรื่อง')),
+        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ประเภทและความเร่งด่วนของหนังสือรับ'), typeSum ? h('div', null, h('div', { class: 'sar-split', role: 'img', 'aria-label': `หนังสือเวียน ${a.bookType.circular} ฉบับ ปกติ ${a.bookType.normal} ฉบับ` }, a.bookType.circular ? h('i', { class: 'a', style: `width:${pct(a.bookType.circular, typeSum)}%` }) : null, a.bookType.normal ? h('i', { class: 'b', style: `width:${pct(a.bookType.normal, typeSum)}%` }) : null), h('p', { class: 'muted sar-sub' }, h('span', { class: 'sar-dot a' }), `หนังสือเวียน (ว) ${a.bookType.circular} (${pct(a.bookType.circular, typeSum)}%) `, h('span', { class: 'sar-dot b' }), `หนังสือทั่วไป ${a.bookType.normal}`)) : null, hbars(urg, { tone: 'warn', emptyText: 'ยังไม่มีข้อมูล' })),
+        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'วันที่ลงทะเบียน (ตามวันในสัปดาห์)'), h('div', { class: 'sar-wbars', role: 'img', 'aria-label': 'จำนวนหนังสือตามวันในสัปดาห์' }, a.weekday.map((n, i) => h('div', { class: 'sar-wbar', title: `${WEEKDAY_SHORT[i]} ${n} ฉบับ` }, h('i', { style: `height:${Math.round((n / wmax) * 100)}%` }), h('b', null, n ? String(n) : ''), h('span', null, WEEKDAY_SHORT[i]))))),
+        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ส่งต่อไปยังหน่วยงาน'), a.units.length ? hbars(a.units, { tone: 'info' }) : empty('ยังไม่มีการส่งต่อในระบบนี้'), a.forwarded ? h('p', { class: 'hint' }, `ส่งต่อแล้ว ${a.forwarded} จาก ${a.total.in} ฉบับ`) : h('p', { class: 'hint' }, 'ทะเบียนเดิมไม่มีข้อมูลการส่งต่อ — ข้อมูลจะเริ่มสะสมเมื่อใช้ขั้นตอน “รับหนังสือ → ส่งต่อ”')));
+      const q = a.quality; const qrows = [['วันที่ลงหนังสือ', q.pct.docDate], ['ผู้ส่ง (จาก)', q.pct.party], ['ช่องทางที่ได้รับ', q.pct.channel], ['ไฟล์ต้นฉบับ', q.pct.file], ['หมวดเรื่อง', q.pct.cat]];
+      const quality = h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ความครบถ้วนของข้อมูลหนังสือรับ'), h('div', { class: 'sar-hbars' }, qrows.map(([l, v]) => h('div', { class: 'sar-hbar', title: `${l}: ${v}%` }, h('span', { class: 'sar-hbar-l' }, l), h('span', { class: 'sar-hbar-t' }, h('i', { class: v >= 80 ? 'ok' : v >= 40 ? 'warn' : 'bad', style: `width:${Math.max(3, v)}%` })), h('strong', null, `${v}%`)))), h('p', { class: 'hint' }, 'ยิ่งครบ การวิเคราะห์ยิ่งแม่นยำ — เติมข้อมูลได้ที่ “รายละเอียดหนังสือ → แก้ไขข้อมูล” หรือแนบไฟล์ต้นฉบับ'));
+      const gap = (k, l) => h('div', { class: 'sar-line' }, h('span', null, l), h('strong', { class: a.seq[k].gaps ? 'sar-bad-t' : '' }, `ล่าสุด ${a.seq[k].last || '-'} · ใช้ ${a.seq[k].used}${a.seq[k].gaps ? ` · เลขขาด ${a.seq[k].gaps}` : ' · ต่อเนื่อง'}`));
+      const seqCard = h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ความต่อเนื่องของเลขทะเบียน'), gap('in', 'ทะเบียนรับ'), gap('out', 'ทะเบียนส่ง'), (a.seq.in.gaps || a.seq.out.gaps) && staff ? h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => go('numbers', { registry: reg }) }, 'ดูเลขที่ขาด')) : null);
+      box.replaceChildren(head, a.imported ? notice('info', `ข้อมูล ${a.imported} ฉบับนำเข้าจากทะเบียนเดิม`, 'ทะเบียนนี้เป็นข้อมูลสำรองจากสมุดทะเบียนของธุรการ — ระบบไม่ทราบสถานะการดำเนินงานจริง จึงไม่แสดงสถานะ/เลยกำหนด และวิเคราะห์เฉพาะข้อมูลที่มีอยู่') : null, a.masked ? h('p', { class: 'muted' }, `มีหนังสือชั้นความลับ ${a.masked} ฉบับที่นับรวมในตัวเลขแต่ไม่แสดงเนื้อหา`) : null, tiles, months, cards, h('div', { class: 'sar-two' }, quality, seqCard));
+    }
+    async function load() {
+      const my = ++seq; box.replaceChildren(skel());
+      try { const a = await call('analytics', { year: H.year, registry: reg }, 45000); if (my === seq) paint(a); } catch (e) { if (my === seq) box.replaceChildren(retryBox('วิเคราะห์ข้อมูลไม่สำเร็จ', e, load)); }
+    }
+    load(); return box;
+  }
+
   async function homeView(el) {
     const d = await call('dash');
     let q = null; if (staff && cfg.queue && d.queue && d.queue.enabled && d.queue.n) { try { q = await call('queue'); } catch { q = null; } }
     const queueCard = q && q.items.length ? h('div', { class: 'card sar-queue' }, h('div', { class: 'sar-qhead' }, h('h3', { class: 'sar-h3' }, `คิวรอลงรับ (${d.queue.n})`), d.queue.urgent ? badge(`${d.queue.urgent} ฉบับมีคำว่า “ด่วน”`, 'bad') : null),
         ...q.items.slice(0, 6).map((i) => h('div', { class: 'sar-qrow' }, h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, i.subject || '(ไม่มีเรื่อง)'), h('div', { class: 'muted sar-sub' }, [i.bookNo, i.from].filter(Boolean).join(' · ')),
           h('div', { class: 'sar-badges' }, i.urgency ? badge(URGENCY[i.urgency], i.urgency === 'urgent' ? 'warn' : 'bad') : null, i.registered ? badge(`อาจลงรับแล้ว ${i.registered}`, 'warn') : null, badge(`รอ ${ageLabel(i.age)}`, i.age >= 3 ? 'bad' : 'muted'))),
-          h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { inboxId: i.id, subject: i.subject, docNo: i.bookNo, docDate: i.bookDate, party: i.from, urgency: i.urgency || 'normal', channel: 'telegram', file: i.file || (i.urls || [])[0] || '' }) }, 'ลงรับ'))),
+          h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { inboxId: i.id, subject: i.subject, docNo: i.bookNo, docDate: i.bookDate, party: i.from, urgency: i.urgency || 'normal', channel: 'telegram', file: i.file || (i.urls || [])[0] || '' }) }, 'รับหนังสือ'))),
         d.queue.n > 6 ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => go('receive') }, `ดูทั้งหมด ${d.queue.n} ฉบับ`)) : null) : null;
-    /* ศูนย์สารบรรณแยกตามกลุ่มงาน: one tab per registry (งานยุทธศาสตร์ฯ · งานพัฒนาคุณภาพฯ · สารบรรณกลาง) + an overall tab — all numbers come from the one dashboard answer, so switching is instant. */
+    /* One tab per registry (งานยุทธศาสตร์ฯ · งานพัฒนาคุณภาพฯ · สารบรรณกลาง) + an overall tab. The registers and the analytics below follow the chosen group and year. */
     const groups = d.groups || [];
     const all = { code: 'all', name: 'ภาพรวมทั้งหมด', short: 'ภาพรวมทั้งหมด', kpi: d.kpi, days: d.days, channels: d.channels, pending: d.pending };
     const tabs = groups.length > 1 ? [...groups, all] : [];
     let pref = ''; try { pref = localStorage.getItem('sand.sar.home') || ''; } catch { pref = ''; }
     let sel = tabs.length ? (tabs.some((t) => t.code === pref) ? pref : me.exec ? 'all' : (groups.find((g) => g.code === myReg) || groups[0]).code) : 'all';
+    const H = { year: cfg.year };
     const pane = h('div', { class: 'sar-gpane' }); const gbar = tabs.length ? h('div', { class: 'sar-groups', role: 'tablist', 'aria-label': 'กลุ่มงาน' }) : null;
+    const years = []; for (let y = cfg.year; y >= cfg.year - 4; y -= 1) years.push(y);
+    const yearSel = h('select', { 'aria-label': 'ปี พ.ศ. ที่ต้องการดู' }, years.map((y) => opt(String(y), `พ.ศ. ${y}`))); yearSel.addEventListener('change', () => { H.year = Number(yearSel.value); draw(sel); });
     function draw(code) {
       const g = code === 'all' || !groups.length ? (groups.length === 1 ? groups[0] : all) : groups.find((x) => x.code === code) || all; const k = g.kpi; const reg = g.code === 'all' ? '' : g.code;
       const card = (label, value, tone, tab, params) => h('button', { class: `sar-kpi tone-${tone}`, type: 'button', onclick: () => go(tab, { registry: reg, ...params }) }, h('strong', null, String(value)), h('span', null, label));
+      /* No "รอเสนอ" / "ยังไม่ส่งต่อ" count any more: the register is a backup of the clerks' books, so nobody can know the real status of an old letter.
+         Alerts appear only for letters that were really forwarded in this system. */
+      const kpis = [card('ลงรับวันนี้', k.inToday, 'info', 'register'), card('ส่งออกวันนี้', k.outToday, 'info', 'register', { kind: 'out' }), card('รับเดือนนี้', k.inMonth || 0, 'info', 'register'), card('ส่งเดือนนี้', k.outMonth || 0, 'info', 'register', { kind: 'out' })];
+      if (k.routedOpen) kpis.push(card('ส่งต่อแล้ว กำลังดำเนินการ', k.routedOpen, 'info', 'register', { stage: 'open' }));
+      if (k.returned) kpis.push(card('ส่งคืน รอส่งต่อใหม่', k.returned, 'warn', 'register', { stage: 'returned' }));
+      if (k.overdue) kpis.push(card('เลยกำหนด (ที่ส่งต่อแล้ว)', k.overdue, 'bad', 'register', { stage: 'overdue' }));
+      if (k.urgentOpen) kpis.push(card('ด่วนที่ยังค้าง (ที่ส่งต่อแล้ว)', k.urgentOpen, 'bad', 'register', { urgent: true }));
       const max = Math.max(1, ...g.days.map((x) => Math.max(x.in, x.out)));
+      const recent = h('div', { class: 'sar-two' }, h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ปริมาณหนังสือ 14 วันล่าสุด'), h('div', { class: 'sar-bars', role: 'img', 'aria-label': 'แผนภูมิแท่งจำนวนหนังสือรับและส่งรายวัน' }, g.days.map((x) => h('div', { class: 'sar-bar', title: `${thaiDate(x.day)}: รับ ${x.in} ส่ง ${x.out}` }, h('i', { class: 'in', style: `height:${Math.round((x.in / max) * 100)}%` }), h('i', { class: 'out', style: `height:${Math.round((x.out / max) * 100)}%` }), h('span', null, x.day.slice(8))))), h('p', { class: 'muted' }, h('span', { class: 'sar-dot in' }), 'รับ ', h('span', { class: 'sar-dot out' }), 'ส่ง')),
+        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'งานที่ส่งต่อและยังไม่เสร็จ แยกตามหน่วยงาน'), g.pending.length ? g.pending.map((p) => h('div', { class: 'sar-line' }, h('span', null, p.name), h('strong', null, String(p.n)))) : empty('ไม่มีงานค้างที่ส่งต่อในระบบ'), g.channels.length ? h('div', null, h('h4', { class: 'sar-h4' }, 'ช่องทางที่ได้รับ (30 วัน)'), g.channels.map((c) => h('div', { class: 'sar-line' }, h('span', null, (cfg.channels.find((x) => x[0] === c.channel) || [0, c.channel])[1]), h('strong', null, String(c.n))))) : null));
       pane.replaceChildren(
         h('div', { class: 'sar-ghead' }, h('div', null, h('h2', { class: 'sar-gtitle' }, g.name), h('p', { class: 'muted' }, `ปี พ.ศ. ${d.year}: รับ ${k.inYear} · ส่ง ${k.outYear} · เลขรับล่าสุด ${k.lastIn || '-'} · เลขส่งล่าสุด ${k.lastOut || '-'}`)),
-          staff && reg ? h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { registry: reg }) }, 'ลงรับ'), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => go('send', { registry: reg }) }, 'ส่งออก')) : null),
-        h('div', { class: 'sar-kpis' }, card('ลงรับวันนี้', k.inToday, 'info', 'register'), card('ส่งออกวันนี้', k.outToday, 'info', 'register', { kind: 'out' }), card('ยังไม่เสนอ/ส่งต่อ', k.unrouted, k.unrouted ? 'warn' : 'ok', 'register', { stage: 'registered' }),
-          card('เลยกำหนด', k.overdue, k.overdue ? 'bad' : 'ok', 'register', { stage: 'overdue' }), card('ด่วนที่ยังค้าง', k.urgentOpen, k.urgentOpen ? 'bad' : 'ok', 'register', { urgent: true }), card('ส่งคืน รอส่งต่อใหม่', k.returned, k.returned ? 'warn' : 'ok', 'register', { stage: 'returned' })),
-        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ปริมาณหนังสือ 14 วันล่าสุด'), h('div', { class: 'sar-bars', role: 'img', 'aria-label': 'แผนภูมิแท่งจำนวนหนังสือรับและส่งรายวัน' }, g.days.map((x) => h('div', { class: 'sar-bar', title: `${thaiDate(x.day)}: รับ ${x.in} ส่ง ${x.out}` }, h('i', { class: 'in', style: `height:${Math.round((x.in / max) * 100)}%` }), h('i', { class: 'out', style: `height:${Math.round((x.out / max) * 100)}%` }), h('span', null, x.day.slice(8))))), h('p', { class: 'muted' }, h('span', { class: 'sar-dot in' }), 'รับ ', h('span', { class: 'sar-dot out' }), 'ส่ง')),
-        h('div', { class: 'sar-two' }, h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'งานค้างแยกตามหน่วยงาน'), g.pending.length ? g.pending.map((p) => h('div', { class: 'sar-line' }, h('span', null, p.name), h('strong', null, String(p.n)))) : empty('ไม่มีงานค้าง')),
-        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ช่องทางที่ได้รับ (30 วัน)'), g.channels.length ? g.channels.map((c) => h('div', { class: 'sar-line' }, h('span', null, (cfg.channels.find((x) => x[0] === c.channel) || [0, c.channel])[1]), h('strong', null, String(c.n)))) : empty('ยังไม่มีข้อมูล'))));
+          staff && reg ? h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { registry: reg }) }, 'รับหนังสือ'), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => go('send', { registry: reg }) }, 'ส่งออก')) : null),
+        h('div', { class: 'sar-kpis' }, kpis), regBlock(reg), analyticsBlock(H, reg), recent);
     }
+    const regBlock = (reg) => h('div', { class: 'sar-two sar-regs' }, regCard(H, 'in', reg), regCard(H, 'out', reg));
     if (gbar) {
       const mine = (t) => t.code === myReg;
       [...tabs].sort((a, b2) => (mine(b2) - mine(a)) || 0).forEach((t) => gbar.append(h('button', { class: `sar-gtab${t.code === sel ? ' on' : ''}`, type: 'button', role: 'tab', 'aria-selected': String(t.code === sel), dataset: { g: t.code },
         onclick: () => { sel = t.code; [...gbar.children].forEach((b) => { const on = b.dataset.g === sel; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }); try { localStorage.setItem('sand.sar.home', sel); } catch { /* private mode */ } if (sel !== 'all') rememberRegistry(sel); draw(sel); } },
-        t.short || t.name, t.kpi.overdue ? h('em', { class: 'sar-gcount', title: `เลยกำหนด ${t.kpi.overdue} ฉบับ` }, String(t.kpi.overdue)) : null)));
+        t.short || t.name, t.kpi.overdue ? h('em', { class: 'sar-gcount', title: `เลยกำหนด ${t.kpi.overdue} ฉบับ (ที่ส่งต่อแล้ว)` }, String(t.kpi.overdue)) : null)));
     }
     draw(sel);
-    el.append(h('p', { class: 'muted' }, `${thaiDateLong(d.today)} · ${d.org}`), queueCard, gbar, pane);
+    el.append(h('div', { class: 'sar-center-top' }, h('p', { class: 'muted' }, `${thaiDateLong(d.today)} · ${d.org}`), h('label', { class: 'sar-yearpick' }, h('span', null, 'ดูข้อมูลปี'), yearSel)), queueCard, gbar, pane);
   }
 
   /* ----------------------------- งานของฉัน ----------------------------- */
@@ -204,7 +295,7 @@ export async function mount(root) {
     el.append(h('p', { class: 'muted' }, `ค้างดำเนินการ ${r.open} เรื่อง${r.overdue ? ` · เลยกำหนด ${r.overdue} เรื่อง` : ''}`));
     r.items.forEach((i) => {
       const closed = i.status === 'done'; const late = !closed && i.due && i.due < r.today;
-      el.append(h('button', { class: `sar-row tone-${late ? 'bad' : closed ? 'ok' : i.status === 'pending' ? 'warn' : 'info'}`, type: 'button', onclick: () => openDoc(i.id) },
+      el.append(h('button', { class: `sar-row tone-${late ? 'bad' : closed ? 'ok' : i.status === 'pending' ? 'warn' : 'info'}`, type: 'button', onclick: (e) => openDoc(i.id, e.currentTarget) },
         h('div', { class: 'sar-no' }, h('strong', null, i.reg), h('span', null, i.unitName)),
         h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, i.subject), h('div', { class: 'muted sar-sub' }, [i.docNo, i.party].filter(Boolean).join(' · ')),
           h('div', { class: 'sar-badges' }, i.urgency !== 'normal' ? badge(URGENCY[i.urgency], 'bad') : null, i.secrecy !== 'normal' ? badge(SECRECY[i.secrecy], 'bad') : null, badge(ACTION[i.action]), badge(TO_STATUS[i.status], closed ? 'ok' : i.status === 'pending' ? 'warn' : 'info'), i.mine ? badge('มอบหมายให้ฉัน', 'info') : null, i.due ? badge(`กำหนด ${dueLabel(i.due, r.today, closed)}`, late ? 'bad' : 'muted') : null))));
@@ -213,28 +304,40 @@ export async function mount(root) {
 
   /* ----------------------------- ทะเบียน ----------------------------- */
   async function registerView(el, x, p) {
-    const st = { kind: p.kind || 'in', year: cfg.year, q: '', stage: p.stage || '', urgent: !!p.urgent, from: '', to: '', registry: p.registry || '', offset: 0 };
-    const list = h('div', { class: 'sar-list' }); const info = h('p', { class: 'muted' }); const more = h('button', { class: 'btn', type: 'button', hidden: true }, 'โหลดเพิ่ม');
+    const st = { kind: p.kind || 'in', year: cfg.year, q: '', stage: p.stage && p.stage !== 'registered' ? p.stage : '', urgent: !!p.urgent, from: '', to: '', registry: p.registry || '', offset: 0 };
+    const list = h('div', { class: 'sar-list', 'aria-live': 'polite' }); const info = h('p', { class: 'muted' }); const more = h('button', { class: 'btn', type: 'button', hidden: true }, 'โหลดเพิ่ม');
+    const bar = h('div', { class: 'sar-loadbar', hidden: true, 'aria-hidden': 'true' }, h('i'));
     const kindBar = h('div', { class: 'sar-seg' }, [['in', 'ทะเบียนรับ'], ['out', 'ทะเบียนส่ง']].map(([k, l]) => h('button', { type: 'button', class: st.kind === k ? 'on' : '', onclick: (e) => { st.kind = k; [...kindBar.children].forEach((b) => b.classList.toggle('on', b === e.currentTarget)); stageSel.hidden = k === 'out'; load(true); } }, l)));
     const years = []; for (let y = cfg.year; y >= cfg.year - 4; y -= 1) years.push(y);
     const yearSel = h('select', { 'aria-label': 'ปี พ.ศ.' }, years.map((y) => opt(String(y), `พ.ศ. ${y}`))); yearSel.addEventListener('change', () => { st.year = Number(yearSel.value); load(true); });
-    const stageSel = h('select', { 'aria-label': 'สถานะ', hidden: st.kind === 'out' }, opt('', 'ทุกสถานะ'), ...['registered', 'routed', 'inprogress', 'returned', 'done', 'void'].map((k) => opt(k, STAGE[k], k === st.stage)), opt('overdue', 'เลยกำหนด', st.stage === 'overdue')); stageSel.value = st.stage; stageSel.addEventListener('change', () => { st.stage = stageSel.value; load(true); });
+    /* No "ลงรับแล้ว รอเสนอ" filter: the register is a backup, so an unrouted letter has no known status. */
+    const stageSel = h('select', { 'aria-label': 'สถานะการส่งต่อ', hidden: st.kind === 'out' }, opt('', 'ทุกรายการ'), ...['open', 'routed', 'inprogress', 'returned', 'done', 'void'].map((k) => opt(k, k === 'open' ? 'ส่งต่อแล้ว ยังไม่เสร็จ' : STAGE[k])), opt('overdue', 'เลยกำหนด (ที่ส่งต่อแล้ว)')); stageSel.value = st.stage; stageSel.addEventListener('change', () => { st.stage = stageSel.value; load(true); });
     const urg = h('label', { class: 'sar-check' }, h('input', { type: 'checkbox', checked: st.urgent }), h('span', null, 'เฉพาะด่วนมาก/ด่วนที่สุด')); urg.firstChild.addEventListener('change', () => { st.urgent = urg.firstChild.checked; load(true); });
     const search = h('input', { type: 'search', placeholder: 'ค้นหาเลขรับ เลขที่หนังสือ เรื่อง หน่วยงาน…', 'aria-label': 'ค้นหา' }); search.addEventListener('input', debounce(() => { st.q = search.value.trim(); load(true); }, 350));
     const from = h('input', { type: 'date', 'aria-label': 'ตั้งแต่วันที่ลงทะเบียน' }); const to = h('input', { type: 'date', 'aria-label': 'ถึงวันที่ลงทะเบียน' }); from.addEventListener('change', () => { st.from = from.value; load(true); }); to.addEventListener('change', () => { st.to = to.value; load(true); });
     const regSel = regCodes.length ? h('select', { 'aria-label': 'กลุ่มงาน/ทะเบียน' }, opt('', 'ทุกกลุ่มงาน'), opt('central', 'สารบรรณกลาง'), cfg.units.filter((u) => u.registry && u.active).map((u) => opt(u.code, u.name))) : null;
     if (regSel) { regSel.value = st.registry; regSel.addEventListener('change', () => { st.registry = regSel.value; load(true); }); }
     const csv = h('button', { class: 'btn', type: 'button', onclick: () => exportCsv() }, svgIcon(ICONS.download, 18), 'ส่งออก Excel (CSV)');
-    el.append(h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, regSel, yearSel, stageSel, from, to, urg), search, h('div', { class: 'btn-row' }, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)'))), info, list, h('div', { class: 'btn-row' }, more));
+    const filters = h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, regSel, yearSel, stageSel, from, to, urg), search, bar, h('div', { class: 'btn-row' }, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)')));
+    el.append(filters, info, list, h('div', { class: 'btn-row' }, more));
+    let seq = 0;
+    /** Every filter change shows the loading state (top bar + placeholder rows); a slower, older answer can never overwrite a newer one. */
     async function load(reset) {
-      if (reset) { st.offset = 0; list.replaceChildren(); }
-      const r = await call('list', { ...st, limit: 40 });
-      info.textContent = `ปี พ.ศ. ${r.year}: ${r.counts.total} ฉบับ (วันนี้ ${r.counts.today}) · เลขล่าสุด ${r.counts.lastNo || '-'} · ยกเลิก ${r.counts.void}${r.total !== r.counts.total ? ` · ตรงเงื่อนไข ${r.total}` : ''}`;
-      r.items.forEach((d) => list.append(docRow(d)));
-      if (!r.items.length && reset) list.append(empty('ไม่พบหนังสือตามเงื่อนไข'));
-      st.offset += r.items.length; more.hidden = !r.more;
+      const my = ++seq; bar.hidden = false; filters.setAttribute('aria-busy', 'true'); list.setAttribute('aria-busy', 'true');
+      if (reset) { st.offset = 0; more.hidden = true; info.textContent = 'กำลังโหลดทะเบียน…'; list.replaceChildren(...rowSkeletons(5)); } else { more.classList.add('is-loading'); more.disabled = true; }
+      try {
+        const r = await call('list', { ...st, limit: 40 }); if (my !== seq) return;
+        if (reset) list.replaceChildren();
+        info.textContent = `ปี พ.ศ. ${r.year}: ${r.counts.total} ฉบับ (วันนี้ ${r.counts.today}) · เลขล่าสุด ${r.counts.lastNo || '-'} · ยกเลิก ${r.counts.void}${r.total !== r.counts.total ? ` · ตรงเงื่อนไข ${r.total}` : ''}`;
+        r.items.forEach((d) => list.append(docRow(d)));
+        if (!r.items.length && reset) list.append(empty('ไม่พบหนังสือตามเงื่อนไข'));
+        st.offset += r.items.length; more.hidden = !r.more;
+      } catch (e) {
+        if (my !== seq) return; if (reset) { list.replaceChildren(); info.textContent = ''; }
+        list.append(notice('error', 'โหลดทะเบียนไม่สำเร็จ', errText(e)), h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => load(reset) }, 'ลองอีกครั้ง')));
+      } finally { if (my === seq) { bar.hidden = true; filters.removeAttribute('aria-busy'); list.removeAttribute('aria-busy'); more.classList.remove('is-loading'); more.disabled = false; } }
     }
-    more.addEventListener('click', () => load(false).catch((e) => toast(errText(e), 'error')));
+    more.addEventListener('click', () => load(false));
     async function printReg() {
       const r = await act(() => call('rows', st, 60000)); if (!r) return;
       printHtml(buildRegisterHtml({ org: cfg.org, kind: r.kind, year: r.year, rows: r.rows }));
@@ -243,8 +346,8 @@ export async function mount(root) {
     async function exportCsv() {
       const r = await act(() => call('rows', st, 60000)); if (!r) return;
       const out = r.kind === 'out';
-      const head = ['เลข' + (out ? 'ส่ง' : 'รับ'), 'วันที่ลงทะเบียน', 'เลขที่หนังสือ', 'ลงวันที่', out ? 'ถึง' : 'จาก', 'เรื่อง', 'ชั้นความเร็ว', 'ชั้นความลับ', 'สถานะ', 'การปฏิบัติ', 'หมายเหตุ'];
-      const rows = r.rows.map((d) => [d.reg, thaiDateTime(d.at), d.docNo, thaiDate(d.docDate), d.party, d.subject, URGENCY[d.urgency], SECRECY[d.secrecy], STAGE[d.stage], d.action, d.note]);
+      const head = ['เลข' + (out ? 'ส่ง' : 'รับ'), 'วันที่ลงทะเบียน', 'เลขที่หนังสือ', 'ลงวันที่', out ? 'ถึง' : 'จาก', 'เรื่อง', 'ชั้นความเร็ว', 'ชั้นความลับ', 'สถานะการส่งต่อ', 'การปฏิบัติ', 'หมายเหตุ'];
+      const rows = r.rows.map((d) => [d.reg, thaiDateTime(d.at), d.docNo, thaiDate(d.docDate), d.party, d.subject, URGENCY[d.urgency], SECRECY[d.secrecy], stageLabel(d.stage), d.action, d.note]);
       const blob = new Blob([toCsv(head, rows)], { type: 'text/csv;charset=utf-8' }); const a = h('a', { href: URL.createObjectURL(blob), download: `ทะเบียน${out ? 'ส่ง' : 'รับ'}_${r.year}.csv` }); document.body.append(a); a.click(); a.remove();
       toast(`ส่งออก ${r.rows.length} รายการ${r.truncated ? ' (ตัดที่ 5,000 รายการ — กรองช่วงวันที่แล้วส่งออกใหม่)' : ''}`, 'success');
     }
@@ -382,8 +485,10 @@ export async function mount(root) {
 
   /* ----------------------------- รายละเอียดหนังสือ ----------------------------- */
   let closeDetail = null;
-  async function openDoc(id) {
-    let r; try { r = await call('get', { id }); } catch (e) { toast(errText(e), 'error', 6000); return; }
+  async function openDoc(id, src) {
+    const stop = busyShow('กำลังเปิดรายละเอียดหนังสือ…', src);
+    let r; try { r = await call('get', { id }); } catch (e) { stop(); toast(errText(e), 'error', 6000); return; }
+    stop();
     if (closeDetail) closeDetail(); const d = r.doc; const out = d.kind === 'out';
     const row = (k, v) => (v ? h('div', { class: 'sar-kv' }, h('span', null, k), h('div', null, v)) : null);
     const reload = () => { openDoc(id); };
@@ -417,7 +522,8 @@ export async function mount(root) {
     const cancelDlg = async () => { const a = await ask(`ยกเลิกเลข ${d.reg}`, [{ name: 'reason', label: 'เหตุผล *', type: 'textarea', rows: 2, required: true, min: 5 }], 'ยกเลิกเลข', { danger: true, intro: 'เลขนี้จะยังอยู่ในทะเบียนในสถานะ “ยกเลิก” และนำกลับมาใช้ไม่ได้' }); if (a && await act(() => call('cancelno', { id, reason: a.reason }), 'ยกเลิกเลขแล้ว')) reload(); };
     const parties = (d.parties || []).map((p) => h('div', { class: 'muted' }, `${p.name} — ${(cfg.channels.find((c) => c[0] === p.channel) || [0, p.channel])[1]}${p.email ? ` · ${p.email}` : ''}${p.trackingNo ? ` · พัสดุ ${p.trackingNo}` : ''}${p.receivedBy ? ` · ผู้รับ ${p.receivedBy}` : ''}`));
     const m = modal(`${out ? 'เลขส่ง' : 'เลขรับ'} ${d.reg}`, [
-      h('div', { class: 'sar-badges' }, badge(STAGE[d.stage] || d.stage, stageTone(d.stage, 0)), d.urgency !== 'normal' ? badge(URGENCY[d.urgency], 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null),
+      h('div', { class: 'sar-badges' }, stageLabel(d.stage) ? badge(stageLabel(d.stage), stageTone(d.stage, 0)) : null, d.urgency !== 'normal' ? badge(URGENCY[d.urgency], 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null),
+      d.legacy ? notice('info', 'ข้อมูลจากทะเบียนเดิม', 'นำเข้าจากสมุดทะเบียนของธุรการ (ข้อมูลสำรอง) — ไม่ทราบสถานะการดำเนินงานจริง ระบบจึงไม่แสดงสถานะ ถ้าต้องการให้หน่วยงานดำเนินการ กด “ส่งต่อ”') : null,
       r.access === 'masked' ? notice('warn', 'หนังสือชั้นความลับ', 'คุณเห็นได้เฉพาะเลขทะเบียนและสถานะ — เนื้อหาเปิดให้ผู้ที่ได้รับอนุญาตและผู้รับที่ระบุเท่านั้น') : null,
       h('div', { class: 'sar-kvs' }, row('เรื่อง', d.subject), row('เลขที่หนังสือ', d.docNo), row('ลงวันที่', thaiDate(d.docDate)), row(out ? 'ถึง' : 'จาก', d.party), row('เรียน', d.salut), row('อ้างถึง', d.refs), row('สิ่งที่ส่งมาด้วย', d.encl),
         row('กำหนดเสร็จ', !out && r.dueDate ? dueLabel(d.due || r.dueDate, cfg.today, d.stage === 'done') + (d.due ? '' : ' (ตามชั้นความเร็ว)') : thaiDate(d.due)), row('ช่องทาง', (cfg.channels.find((c) => c[0] === d.channel) || [0, ''])[1]), row('หมวด', (cfg.categories.find((c) => c[0] === d.cat) || [0, ''])[1]),
@@ -425,7 +531,7 @@ export async function mount(root) {
       files.length ? h('div', { class: 'sar-files' }, files) : null,
       recv.length ? h('div', null, h('h3', { class: 'sar-h3' }, 'การส่งต่อและผู้ปฏิบัติ'), recv) : null,
       h('div', null, h('h3', { class: 'sar-h3' }, 'ประวัติ'), h('ol', { class: 'sar-timeline' }, (r.events || []).map((e) => h('li', null, h('strong', null, EVENT[e.type] || e.type), ` ${e.unit ? `[${unitName(e.unit)}] ` : ''}${e.text || ''}`, h('div', { class: 'muted' }, `${thaiDateTime(e.at)} · ${e.by}`)))))],
-    [r.can.route ? btn('ส่งต่อ', () => routeDlg(false), 'btn btn-primary') : null, r.can.command ? btn('สั่งการ', () => routeDlg(true), 'btn btn-primary') : null, r.can.edit ? btn('แก้ไขข้อมูล', editDlg) : null, r.can.attach ? btn('แนบไฟล์', () => attach.click()) : null, !out && d.stage !== 'void' && r.access !== 'masked' ? btn('พิมพ์ตรารับ', () => printHtml(buildReceiptHtml({ org: cfg.org, doc: d }))) : null,
+    [r.can.route ? btn('ส่งต่อหนังสือ', () => routeDlg(false), 'btn btn-primary') : null, r.can.command ? btn('สั่งการ', () => routeDlg(true), 'btn btn-primary') : null, r.can.edit ? btn('แก้ไขข้อมูล', editDlg) : null, r.can.attach ? btn('แนบไฟล์', () => attach.click()) : null, !out && d.stage !== 'void' && r.access !== 'masked' ? btn('พิมพ์ตรารับ', () => printHtml(buildReceiptHtml({ org: cfg.org, doc: d }))) : null,
       r.can.cancel ? btn('ยกเลิกเลข', cancelDlg, 'btn btn-danger') : null, btn('ปิด', () => m.close()), attach], { wide: true, onClose: () => { if (closeDetail === m.close) closeDetail = null; } });
     closeDetail = m.close;
   }

@@ -126,3 +126,73 @@
 .sar-numbox input:disabled { opacity: .55; }
 .sar-more { margin: .5rem 0; } .sar-more summary { display: flex; align-items: center; min-height: 44px; color: var(--primary); font-weight: 600; cursor: pointer; }
 .sar-numprev { margin: .6rem 0 0; font-weight: 600; overflow-wrap: anywhere; }
+
+/* ===================== v1.10 — loading ทุกครั้งที่กรอง/เปิดรายละเอียด · ศูนย์สารบรรณ (ทะเบียนรับ-ส่ง + วิเคราะห์) · ขั้นตอนรับหนังสือ ===================== */
+.sar-busy { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; background: rgb(15 23 42 / .3); cursor: progress; animation: sar-in .15s ease both; }
+.sar-busy-box { display: flex; align-items: center; gap: .8rem; padding: .95rem 1.4rem; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg); font-weight: 600; }
+.sar-spin { display: inline-block; flex: none; width: 1.4rem; height: 1.4rem; border: 3px solid var(--primary-soft); border-top-color: var(--primary); border-radius: 50%; animation: sar-spin .7s linear infinite; }
+.sar-row.is-loading, .sar-mini.is-loading { position: relative; cursor: progress; border-color: var(--primary); background: var(--primary-soft); }
+.sar-row.is-loading::after, .sar-mini.is-loading::after { content: ""; position: absolute; right: .9rem; top: .9rem; width: 1.1rem; height: 1.1rem; border: 2px solid var(--primary); border-right-color: transparent; border-radius: 50%; animation: sar-spin .7s linear infinite; }
+.sar-filters[aria-busy="true"] .sar-loadbar { margin: .6rem 0 .2rem; }
+.sar-filters .sar-loadbar { margin: .6rem 0 .2rem; }
+.sar-list[aria-busy="true"] { cursor: progress; }
+.sar-h4 { font-size: .9rem; margin: 1rem 0 .4rem; color: var(--text-2); }
+.sar-bad-t { color: var(--error); }
+@media (prefers-reduced-motion: reduce) { .sar-busy, .sar-spin, .sar-row.is-loading::after, .sar-mini.is-loading::after { animation: none; } }
+
+/* ศูนย์สารบรรณ */
+.sar-center-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .6rem; margin-bottom: .2rem; }
+.sar-yearpick { display: inline-flex; align-items: center; gap: .5rem; color: var(--text-2); font-weight: 600; } .sar-yearpick select { width: auto; min-height: 40px; }
+.sar-regs { align-items: start; } .sar-reg-card { margin: 0; } .sar-reg-card.is-in { border-top: 4px solid var(--primary); } .sar-reg-card.is-out { border-top: 4px solid var(--success); }
+.sar-reg-card .sar-h3 { margin: 0; } .sar-reg-card input[type="search"] { margin: .6rem 0 0; }
+.sar-mini-list { display: flex; flex-direction: column; margin-top: .3rem; }
+.sar-mini { display: grid; grid-template-columns: 4.6rem 1fr; gap: .7rem; width: 100%; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-left: 4px solid transparent; padding: .6rem .5rem; cursor: pointer; min-height: 44px; border-radius: 6px; }
+.sar-mini:hover { background: var(--primary-soft); } .sar-mini:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--primary-ring); }
+.sar-mini-no { font-variant-numeric: tabular-nums; font-size: 1rem; } .sar-mini-main { min-width: 0; }
+.sar-mini-subject { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sar-mini.tone-bad { border-left-color: var(--error); } .sar-mini.tone-warn { border-left-color: var(--warning); } .sar-mini.tone-ok { border-left-color: var(--success); } .sar-mini.tone-info { border-left-color: var(--primary); }
+.sar-mini.sar-skel-card { cursor: default; }
+.sar-an { margin-top: .4rem; }
+.sar-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .6rem; margin: .4rem 0 1rem; }
+.sar-tile { display: flex; flex-direction: column; gap: .15rem; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius); padding: .75rem .9rem; }
+.sar-tile span { color: var(--muted); font-size: .82rem; } .sar-tile strong { font-size: 1.6rem; line-height: 1.15; font-variant-numeric: tabular-nums; } .sar-tile em { font-style: normal; color: var(--text-2); font-size: .78rem; }
+.sar-tile.tone-in { border-left-color: var(--primary); } .sar-tile.tone-out { border-left-color: var(--success); } .sar-tile.tone-warn { border-left-color: var(--warning); }
+.sar-mbars { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: .3rem; height: 170px; padding-top: 1.2rem; margin-bottom: 1.6rem; }
+.sar-mbar { position: relative; display: flex; flex-direction: column; height: 100%; } .sar-mbar-cols { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 2px; border-bottom: 1px solid var(--border); }
+.sar-mbar-cols i { position: relative; display: block; width: 44%; min-height: 2px; border-radius: 3px 3px 0 0; } .sar-mbar-cols i.in { background: var(--primary); } .sar-mbar-cols i.out { background: var(--success); }
+.sar-mbar-cols i b { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); font-size: .66rem; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.sar-mbar > span { text-align: center; font-size: .7rem; color: var(--muted); margin-top: .25rem; }
+.sar-hbars { display: flex; flex-direction: column; gap: .45rem; margin: .3rem 0; }
+.sar-hbar { display: grid; grid-template-columns: minmax(0, 11rem) 1fr 3.2rem; align-items: center; gap: .6rem; font-size: .88rem; } .sar-hbar-l { overflow-wrap: anywhere; line-height: 1.25; } .sar-hbar strong { text-align: right; font-variant-numeric: tabular-nums; }
+.sar-hbar-t { height: .7rem; background: var(--surface-2, var(--surface)); border-radius: 999px; overflow: hidden; } .sar-hbar-t i { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.sar-hbar-t i.out { background: var(--success); } .sar-hbar-t i.ok { background: var(--success); } .sar-hbar-t i.warn { background: var(--warning); } .sar-hbar-t i.bad { background: var(--error); } .sar-hbar-t i.info { background: var(--info, var(--primary)); }
+.sar-split { display: flex; height: .9rem; border-radius: 999px; overflow: hidden; background: var(--surface-2, var(--surface)); margin: .3rem 0 .5rem; } .sar-split i.a, .sar-dot.a { background: var(--primary); } .sar-split i.b, .sar-dot.b { background: var(--warning); }
+.sar-wbars { display: grid; grid-template-columns: repeat(7, 1fr); gap: .35rem; height: 130px; margin-bottom: .4rem; } .sar-wbar { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.sar-wbar i { display: block; width: 62%; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--primary); } .sar-wbar b { font-size: .7rem; font-variant-numeric: tabular-nums; color: var(--text-2); order: -1; min-height: 1em; } .sar-wbar span { font-size: .72rem; color: var(--muted); margin-top: .2rem; }
+@media (max-width: 640px) { .sar-hbar { grid-template-columns: minmax(0, 7.5rem) 1fr 2.6rem; } .sar-mbars { gap: .15rem; } .sar-mbar-cols i b { font-size: .58rem; } .sar-tile strong { font-size: 1.35rem; } }
+
+/* รับหนังสือ: ขั้นตอน 1-4 */
+.sar-wiz { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; margin: .4rem 0 1rem; padding: 0; }
+.sar-wiz li { display: flex; align-items: center; gap: .5rem; min-height: 44px; padding: .4rem .7rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: .88rem; font-weight: 600; }
+.sar-wiz-n { display: inline-grid; place-items: center; flex: none; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--surface-2, var(--surface)); border: 1px solid var(--border); font-size: .8rem; }
+.sar-wiz li.on { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); } .sar-wiz li.on .sar-wiz-n { background: var(--primary); border-color: var(--primary); color: var(--primary-contrast); }
+.sar-wiz li.done { color: var(--success); border-color: var(--success); background: var(--success-bg); } .sar-wiz li.done .sar-wiz-n { background: var(--success); border-color: var(--success); color: #fff; }
+@media (max-width: 640px) { .sar-wiz { grid-template-columns: repeat(2, 1fr); } }
+div.sar-drop { display: flex; } div.sar-drop:focus-visible { outline: 0; box-shadow: 0 0 0 4px var(--primary-ring); } .sar-drop.over { background: var(--primary-soft); border-style: solid; }
+.sar-scan .btn-row { margin-top: .8rem; }
+.sar-scan-steps { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; margin: 1rem 0 .4rem; padding: 0; counter-reset: sc; }
+.sar-scan-steps li { counter-increment: sc; padding-top: .5rem; border-top: 4px solid var(--border); color: var(--muted); font-size: .85rem; } .sar-scan-steps li::before { content: counter(sc) ". "; }
+.sar-scan-steps li.done { border-top-color: var(--success); color: var(--success); } .sar-scan-steps li.now { border-top-color: var(--primary); color: var(--primary); font-weight: 700; animation: sar-pulse 1.2s ease-in-out infinite; }
+@keyframes sar-pulse { 50% { opacity: .55; } } @media (prefers-reduced-motion: reduce) { .sar-scan-steps li.now { animation: none; } }
+.sar-check-top { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: 1rem; margin-bottom: 1rem; align-items: start; } @media (max-width: 720px) { .sar-check-top { grid-template-columns: 1fr; } }
+.sar-preview { display: flex; flex-direction: column; align-items: center; gap: .4rem; padding: .6rem; border: 1px dashed var(--border); border-radius: var(--radius); background: var(--surface-2, var(--surface)); color: var(--muted); text-align: center; min-height: 90px; justify-content: center; }
+.sar-preview-img { max-width: 100%; max-height: 220px; border-radius: 6px; border: 1px solid var(--border); object-fit: contain; background: #fff; }
+.sar-found-h { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .5rem; } .sar-found-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+.sar-chip { display: inline-flex; align-items: center; padding: .2rem .7rem; border-radius: 999px; font-size: .8rem; font-weight: 600; border: 1px solid var(--border); }
+.sar-chip.ok { background: var(--success-bg); color: var(--success); border-color: var(--success); } .sar-chip.miss { background: var(--surface-2, var(--surface)); color: var(--muted); }
+.sar-fwd { border-top: 4px solid var(--primary); } .sar-fwd .chip.sar-sug { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); font-weight: 600; }
+
+/* ส่งต่อ: เลือกหน่วยงานจำนวนมาก (ค้นหา + เลื่อน) */
+.sar-unit-row[hidden] { display: none; }
+.sar-units { max-height: 340px; overflow-y: auto; padding-right: .2rem; margin-top: .3rem; }
+.sar-unit-pick input[type="search"] { margin: .3rem 0 .2rem; }

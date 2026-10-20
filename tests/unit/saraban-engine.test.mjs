@@ -67,3 +67,9 @@ test('v1.8.0 print sheets: register (A4 landscape, escaped, void struck) and rec
   const r = buildReceiptHtml({ org: 'รพ.สันทราย', doc: { reg: '5/2569', at: '2026-10-14 09:30:00' } });
   assert.match(r, /เลขรับ 5\/2569/); assert.match(r, /14 ต\.ค\. 2569/); assert.match(r, /เวลา 09\.30 น\./);
 });
+
+test('v1.10 parseLetter: letter numbers with "ว." / "พิเศษ" and a sender from the letterhead', () => {
+  const a = parseLetter('ที่ อว78.06/ว.20419\nสำนักงานสาธารณสุขจังหวัดเชียงใหม่\n10 ตุลาคม 2569\nเรื่อง ขอเชิญประชุม\nเรียน ผู้อำนวยการโรงพยาบาลสันทราย');
+  assert.equal(a.docNo, 'อว78.06/ว.20419'); assert.equal(a.party, 'สำนักงานสาธารณสุขจังหวัดเชียงใหม่'); assert.equal(a.docDate, '2026-10-10'); assert.equal(a.subject, 'ขอเชิญประชุม');
+  assert.equal(parseLetter('ที่ สธ 0123/พิเศษ 9\nกระทรวงสาธารณสุข\nเรื่อง ก').docNo, 'สธ 0123/พิเศษ 9');
+});
