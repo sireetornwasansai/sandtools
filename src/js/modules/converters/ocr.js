@@ -13,7 +13,12 @@ const OCR_MAX_PIXELS = 24e6;               // memory guard for one page canvas (
 const INIT_TIMEOUT_MS = 180000;            // first run downloads the model (~4 MB gzip) and compiles the WASM core (~4 MB)
 
 const unavailable = (detail) => new ConversionError('OCR_UNAVAILABLE',
-  'ไม่สามารถเปิดระบบอ่านข้อความจากภาพ (OCR) ได้ — ตรวจสอบการเชื่อมต่อแล้วลองใหม่ หรือแจ้งผู้ดูแลระบบให้ติดตั้งไฟล์ OCR (npm run ocr:fetch)', detail);
+  'ไฟล์นี้เป็นภาพสแกน ต้องใช้ระบบอ่านข้อความจากภาพ (OCR) แต่เว็บยังไม่มีไฟล์ OCR (โฟลเดอร์ src/js/vendor/ocr) — ผู้ดูแลเว็บต้องรัน “npm run ocr:fetch” แล้ว commit โฟลเดอร์นั้นขึ้น GitHub (ดู docs/DEPLOYMENT.md) หรือถ้าไฟล์มีอยู่แล้ว ให้ตรวจสอบการเชื่อมต่อแล้วกด Ctrl+Shift+R ลองใหม่', detail);
+
+/** Quick check that the self-hosted OCR files are really deployed (a missing folder is the usual reason scanned PDFs fail). */
+export async function ocrFilesPresent() {
+  try { const r = await fetch(new URL('tha.traineddata.gz', VENDOR).href, { method: 'HEAD', cache: 'no-store' }); return r.ok; } catch { return false; }
+}
 
 /**
  * Start a Tesseract worker. Resolves with {recognize(blob), terminate()}.
@@ -21,6 +26,7 @@ const unavailable = (detail) => new ConversionError('OCR_UNAVAILABLE',
  */
 export async function createOcrEngine(o = {}) {
   let mod;
+  if (!(await ocrFilesPresent())) throw unavailable('missing vendor/ocr/tha.traineddata.gz');
   try { mod = await import('../../vendor/ocr/tesseract.esm.min.js'); } catch (e) { throw unavailable(String(e && e.message)); }
   const Tesseract = mod.default || mod;
   let worker = null; let dead = false;

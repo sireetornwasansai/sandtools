@@ -33,12 +33,14 @@ export const INBOX_ROUTE = { id: 'inbox', path: '/inbox', title: 'หนัง�
   icon: '<path d="M4 13l2-8h12l2 8"/><path d="M4 13v6a1 1 0 001 1h14a1 1 0 001-1v-6h-5a3 3 0 01-6 0z"/>', keywords: 'inbox หนังสือรับเข้า หนังสือเวียน ธุรการ เลขรับ telegram เทเลแกรม ทะเบียนหนังสือ สารบรรณ', load: () => import('../modules/inbox.js') };
 export const SARABAN_ROUTE = { id: 'saraban', path: '/saraban', title: 'สารบรรณ', fullTitle: 'สารบรรณอิเล็กทรอนิกส์', desc: 'ลงรับ ส่งออก ทะเบียน เลขทะเบียน ส่งต่อ/สั่งการ และติดตามหนังสือราชการ',
   icon: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>', keywords: 'saraban สารบรรณ ทะเบียนรับ ทะเบียนส่ง ลงรับ เลขรับ เลขส่ง หนังสือราชการ หนังสือส่ง ส่งต่อ สั่งการ ติดตามหนังสือ ตรารับ ผู้บริหาร', load: () => import('../modules/saraban.js') };
+export const HR_ROUTE = { id: 'hr', path: '/hr', title: 'บันทึกปฏิบัติงาน', fullTitle: 'ระบบบันทึกการปฏิบัติงาน', desc: 'ปฏิทินการลา ประชุม อบรม ไปราชการ รายงานรายเดือน จัดการเจ้าหน้าที่และวันหยุด',
+  icon: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 15l2.5 2.5L16 13"/>', keywords: 'hr ลา ลากิจ ลาป่วย ลาพักผ่อน ปฏิทิน ประชุม อบรม ไปราชการ บุคลากร บันทึกการปฏิบัติงาน บันทึกประจำวัน โปรเจค วันหยุด รายงาน', load: () => import('../modules/hr.js') };
 export const HISTORY_ROUTE = { id: 'history', path: '/history', title: 'ประวัติ', fullTitle: 'ประวัติการใช้งาน', desc: 'ดูประวัติการใช้งานที่หน่วยงานบันทึกไว้',
   icon: ICONS.list, keywords: 'history log ประวัติ บันทึก การใช้งาน', load: () => import('../modules/history.js') };
 export const SETTINGS_ROUTE = { id: 'settings', path: '/settings', title: 'ตั้งค่า', fullTitle: 'Settings', desc: 'ธีม ความเป็นส่วนตัว สถานะระบบ',
   icon: ICONS.settings, keywords: 'settings ตั้งค่า theme ธีม dark light privacy ล้างข้อมูล', load: () => import('../modules/settings.js') };
 export const HOME_ROUTE = { id: 'home', path: '/', title: 'หน้าแรก', fullTitle: 'Dashboard', desc: 'หน้าแรก', icon: ICONS.home, keywords: 'home dashboard หน้าแรก', load: () => import('../modules/dashboard.js') };
-export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
+export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
 
 /** Parse "#/path?x=1" into {path, params}. */
 export function parseHash(hash = location.hash) {
@@ -55,7 +57,7 @@ export function navigate(path, params) {
 /** Score tools against a query (title, id, keywords). Empty query returns everything. */
 export function searchTools(query) {
   const q = query.trim().toLowerCase();
-  const all = [...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
+  const all = [...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
   if (!q) return all;
   const scored = all.map((t) => {
     const hay = `${t.title} ${t.fullTitle} ${t.id} ${t.keywords} ${t.desc}`.toLowerCase();

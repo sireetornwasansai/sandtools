@@ -161,8 +161,19 @@ export async function convertTo(file, target, opts) {
 
     // --- PDF → Word keeping the look of the PDF (default); 'flow' falls through to the Markdown route below
     if (id === 'pdf' && target === 'docx' && opts.docxMode !== 'flow') {
-      const r = await pdfToDocxLayout(buf, baseName(file.name), o, opts, warnings);
-      return out(r.blob, { pages: r.pages, font: r.font.id });
+      const mark = warnings.length;
+      try {
+        const r = await pdfToDocxLayout(buf, baseName(file.name), o, opts, warnings);
+        return out(r.blob, { pages: r.pages, font: r.font.id });
+      } catch (e) {
+        // User-facing problems (password, corrupt file, timeout, cancelled, no text at all) are reported as they are.
+        // Anything else is a bug in the page-layout path: do not leave the user with nothing, fall back to the re-flowed text route.
+        const fatal = e && e.name === 'ConversionError' && ['ENCRYPTED', 'CORRUPT', 'TIMEOUT', 'CANCELLED', 'TOO_LARGE', 'EMPTY', 'MISMATCH', 'PDF_NO_TEXT', 'OCR_UNAVAILABLE'].includes(e.code);
+        if (fatal || (ac.signal && ac.signal.aborted)) throw e;
+        console.warn('PDF→Word layout mode failed, falling back to flow mode', e);
+        warnings.length = mark;
+        warnings.push('โหมด “คงหน้าตาเดิม” ใช้กับไฟล์นี้ไม่ได้ ระบบจึงแปลงด้วยโหมด “จัดเรียงใหม่” ให้อัตโนมัติ (ข้อความและตารางครบ แต่หน้าตาไม่เหมือนต้นฉบับทุกจุด)');
+      }
     }
 
     // --- read into the common model

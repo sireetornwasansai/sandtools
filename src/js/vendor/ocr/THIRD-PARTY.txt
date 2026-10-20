@@ -1,0 +1,7 @@
+Self-hosted OCR engine used by the File Converter (src/js/modules/converters/ocr.js). Unmodified upstream files, Apache License 2.0.
+
+- tesseract.esm.min.js, worker.min.js   : tesseract.js 7.0.0  (https://github.com/naptha/tesseract.js)
+- tesseract-core-simd-lstm.wasm.js      : tesseract.js-core 7.0.0  (Tesseract OCR compiled to WebAssembly, LSTM-only, SIMD)
+- tha.traineddata.gz, eng.traineddata.gz: @tesseract.js-data/{tha,eng} 4.0.0_best_int  (Tesseract "best" models, integer-quantised)
+
+To upgrade: run `npm run ocr:fetch` again and bump OCR_CACHE in src/sw.js so browsers fetch the new copy.

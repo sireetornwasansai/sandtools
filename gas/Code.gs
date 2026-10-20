@@ -1,12 +1,13 @@
 /**
  * SAND Office Tools — backend (Google Apps Script web app).  FINAL (v1.8.0 — สารบรรณ: one register for receive / send, shared with the Inbox page)
  *
- * This project has SIX script files — keep them together:
+ * This project has SEVEN script files — keep them together:
  *   Code.gs     (this file)  entry points, login/session, usage log, file archive, history
  *   Library.gs               คลังข้อมูล: browse/manage the Drive archive, tags, search index   (action "library")
  *   Links.gs                 ลิงก์ย่อ + ประวัติ QR Code + สถิติการคลิก/สแกน                    (actions "links", "go", "click")
  *   Analytics.gs             โครงการและสถิติเว็บไซต์ (แนบเว็บ/โครงการเพื่อนับผู้เข้าชม)         (actions "projects", "hit")
  *   Saraban.gs               สารบรรณ: ทะเบียนรับ-ส่ง เลขทะเบียน ส่งต่อ/สั่งการ ติดตาม                  (action "saraban")
+ *   Hr.gs                    ระบบบันทึกการปฏิบัติงาน: ปฏิทินลา/ประชุม/อบรม/ไปราชการ รายงาน วันหยุด (action "hr")
  *   Inbox.gs                 หนังสือรับเข้า (ธุรการ): ดึงหนังสือเวียนจากกลุ่ม Telegram แบบเงียบ   (actions "inbox", "tg")
  *
  * Responsibilities (kept deliberately small — everything else runs in the browser):
@@ -40,9 +41,9 @@
  * One-time setup (run from the editor):  setup → setupSheet → setupSearchIndex → setupLinks → setupAnalytics
  */
 
-var APP_VERSION = '1.7.0';
+var APP_VERSION = '1.8.3';
 /** Reported by ?action=health so the frontend can detect an out-of-date deployment (e.g. Code.gs without Analytics.gs wiring). */
-var APP_FEATURES = ['login', 'log', 'archive', 'history', 'library', 'links', 'qr', 'projects', 'qrx', 'qrimg', 'inbox', 'saraban'];
+var APP_FEATURES = ['login', 'log', 'archive', 'history', 'library', 'links', 'qr', 'projects', 'qrx', 'qrimg', 'inbox', 'saraban', 'hr'];
 var TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo?id_token=';
 var VALID_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
 var MAX_BODY_CHARS = 8192;
@@ -72,14 +73,15 @@ function doPost(e) {
   var ctx = newCtx('post');
   try {
     var raw = (e && e.postData && e.postData.contents) || '';
-    if (raw.length > MAX_ARCHIVE_CHARS || (raw.length > MAX_BODY_CHARS && raw.indexOf('"archive"') < 0 && raw.indexOf('"saveimg"') < 0 && raw.indexOf('"saraban"') < 0)) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
+    if (raw.length > MAX_ARCHIVE_CHARS || (raw.length > MAX_BODY_CHARS && raw.indexOf('"archive"') < 0 && raw.indexOf('"saveimg"') < 0 && raw.indexOf('"saraban"') < 0 && raw.indexOf('"saveData"') < 0 && raw.indexOf('"updateRecord"') < 0)) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
     var body;
     try { body = JSON.parse(raw); } catch (x) { throw httpError('BAD_REQUEST', 'รูปแบบคำขอไม่ถูกต้อง'); }
     if (!body || typeof body !== 'object') throw httpError('BAD_REQUEST', 'รูปแบบคำขอไม่ถูกต้อง');
     ctx.op = String(body.action || '');
     var isImg = body.action === 'links' && body.op === 'saveimg';   // a QR picture is the only other request allowed to be large
     var isSarUp = body.action === 'saraban' && body.op === 'upload';   // a letter's scan is the only Saraban request allowed to be large
-    if (body.action !== 'archive' && !isImg && !isSarUp && raw.length > MAX_BODY_CHARS) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
+    var isHrUp = body.action === 'hr' && (body.op === 'saveData' || body.op === 'updateRecord');   // an HR record may carry an attached PDF/JPG/PNG (base64)
+    if (body.action !== 'archive' && !isImg && !isSarUp && !isHrUp && raw.length > MAX_BODY_CHARS) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
     if (isImg && raw.length > MAX_QRIMG_CHARS) throw httpError('REQUEST_TOO_LARGE', 'รูป QR ใหญ่เกินไป');
     switch (body.action) {
       case 'health': return respond(ctx, { status: 'ok', version: APP_VERSION, time: new Date().toISOString(), configured: isConfigured(), features: APP_FEATURES });
@@ -94,6 +96,7 @@ function doPost(e) {
       case 'click': return respond(ctx, lnkClick(body));                                                                // Links.gs (edge function only)
       case 'hit': return respond(ctx, anaHit(body));                                                                    // Analytics.gs (edge function only)
       case 'inbox': ctx.op = 'inbox:' + String(body.op || '').slice(0, 10); return respond(ctx, inbox(body));           // Inbox.gs (clerks)
+      case 'hr': ctx.op = 'hr:' + String(body.op || '').slice(0, 16); return respond(ctx, hr(body));                              // Hr.gs (บันทึกการปฏิบัติงาน)
       case 'saraban': ctx.op = 'saraban:' + String(body.op || '').slice(0, 10); return respond(ctx, saraban(body));                  // Saraban.gs (clerks, units, executives)
       case 'tg': return respond(ctx, inbHook(body));                                                                    // Inbox.gs (edge function only; silent Telegram intake)
       default: throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');

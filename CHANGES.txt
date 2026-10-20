@@ -1,12 +1,18 @@
-v1.8.3 — แก้แบนเนอร์เหลือง "ยังไม่มีโหมดเล่นซ้ำวันจริง" และ "โหลดส่วนย่อยทีละระบบ (ช้ากว่า)" ในผังโรงพยาบาลสันทราย
-สาเหตุ: หน้าเว็บ (site-sim.js) เรียก projects/replay และ projects/wings แต่ Apps Script ไม่มีสองคำสั่งนี้ → ตอบ UNKNOWN_ACTION
-        (wings ยังทำงานได้ด้วยการเรียก pages ทีละระบบ จึงช้ากว่า · replay ไม่มีตัวสำรอง ผังเลยถอยไปแสดง "วันทั่วไป (เฉลี่ย)")
-แก้:   gas/Analytics.gs — เพิ่ม case 'replay' และ 'wings' ใน projects() + ฟังก์ชัน simReplay / simWings ต่อท้ายไฟล์ (Code.gs ไม่ต้องแก้)
-       replay = วันนี้ / วันที่คนใช้มากสุดใน 30 วัน แยกผู้ใช้ใหม่ · กลับมาใหม่ (ห่างเกิน 30 นาที) · เปิดหน้าอื่นในการเข้าครั้งเดียวกัน (ไม่ส่งค่า hash ออกไป)
-       wings  = หน้าย่อย/บทบาทผู้ใช้/เส้นทางระหว่างหน้าของทุกโครงการ อ่านชีต Hits ครั้งเดียว แคช 60 วินาที
-ต้องทำ: วาง gas/Analytics.gs ทับของเดิมใน Apps Script แล้ว Deploy → Manage deployments → Edit → New version
-ไม่ต้องแตะ: gas/Code.gs · เว็บฝั่งหน้าบ้าน (ไม่ต้อง build ใหม่)
-ทดสอบ: tests/gas-sim.test.mjs (7 ข้อ รวมการส่งผลลัพธ์ผ่าน normalizeReplay/normalizeWings ของหน้าเว็บ) · 
+v1.8.3 — นำระบบบันทึกการปฏิบัติงาน (HR) เข้า sandtools + แก้ PDF → Word ให้ใช้งานได้จริง
+PDF → Word:
+  สาเหตุ: ไม่มีโฟลเดอร์ src/js/vendor/ocr/ ในเว็บ (PDF สแกนจึงแปลงไม่ได้) และโหมด "คงหน้าตาเดิม" ไม่มีระบบสำรอง
+  แก้:   convert-to.js — ถ้าโหมดคงหน้าตาเดิมล้ม สลับไปโหมด "จัดเรียงใหม่" อัตโนมัติ + แจ้งผู้ใช้
+         ocr.js — ตรวจว่าไฟล์ OCR มีจริงก่อนเริ่ม และบอกวิธีแก้ (npm run ocr:fetch แล้ว commit src/js/vendor/ocr/)
+  ต้องทำ: รัน  npm run ocr:fetch  แล้ว commit โฟลเดอร์ src/js/vendor/ocr/ (≈8 MB) ขึ้น GitHub (ชุดนี้แนบไฟล์มาให้แล้ว)
+บันทึกการปฏิบัติงาน (HR): เมนูใหม่ "บันทึกปฏิบัติงาน" (#/hr)
+  ใหม่:  gas/Hr.gs · src/js/modules/hr.js, hr-engine.js, hr-html.js, hr-legacy.js · src/css/hr.css · src/css/flatpickr.min.css
+         src/js/vendor/hr/ (FullCalendar 6.1.8 + flatpickr 4.6.13 แบบโฮสต์เอง ไม่พึ่ง CDN) · tests/hr.test.mjs · tests/helpers/hr-env.mjs · tests/unit/hr-engine.test.mjs
+  แก้:   gas/Code.gs (action "hr", รับคำขอใหญ่เมื่อแนบไฟล์) · core/routes.js · main.js · core/api.js · modules/history.js · package.json
+  สิทธิ์: ทุกคนที่เข้าสู่ระบบ ดูปฏิทิน/รายงาน บันทึก และแก้/ลบ "รายการของตนเอง" · ผู้ดูแล (ADMIN_EMAILS + HR_ADMIN_EMAILS) จัดการเจ้าหน้าที่ วันหยุด ส่งออก CSV · HR_DEV_EMAILS ใช้บันทึกประจำวัน/โปรเจค
+  ตั้งค่า: Script properties (ไม่บังคับ) HR_SHEET_ID (ชี้ไปสเปรดชีตเดิมเพื่อใช้ข้อมูลเดิม) · HR_ADMIN_EMAILS · HR_DEV_EMAILS · HR_EDIT_ALL · HR_FILE_SHARING
+  ขั้นตอน: เพิ่มไฟล์ Hr.gs ใน Apps Script → วาง Code.gs ใหม่ → รัน setupHr() → Deploy เวอร์ชันใหม่
+  ปรับจากระบบเดิม: ต้องล็อกอิน · ปิดช่อง XSS (ชื่อ/หมายเหตุ/ภารกิจ/ลิงก์ไฟล์) · ไม่มี inline onclick (ผ่าน CSP) · แสดงใน Shadow DOM ไม่ชนสไตล์ · โหมดมืด/มือถือ
+  ทดสอบ: backend 8 ข้อ (รันโค้ด Hr.gs จริง) + เปิดหน้าใน Chrome จริงกับ backend นั้น (ฟอร์ม รายงาน เจ้าหน้าที่ วันหยุด สิทธิ์ผู้ใช้ทั่วไป)
 
 v1.8.2 — แก้ PDF → Word แปลงไม่ได้ ("ไฟล์ PDF เสียหายหรือเปิดไม่ได้ · Setting up fake worker failed") + ซ่อมวรรณยุกต์ไทยที่เพี้ยน
 สาเหตุ 1: core/polyfills.js ถูก import ใน Web Worker ของ pdf.js ด้วย แต่เรียก Element (ไม่มีใน Worker) → worker ตายตอนเริ่ม → pdf.js ถอยไปใช้ "fake worker"
