@@ -993,3 +993,16 @@ tbody tr:hover { background: var(--bg); }
 
 /* drop work that is invisible anyway */
 .sidebar-brand, .brand-row { display: none !important; }
+
+/* =====================================================================================
+   v1.2 — calendar notice (why it may look empty · records hidden on a weekend · nothing in this period) + Sat/Sun toggle
+   ===================================================================================== */
+.cal-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px 14px; flex-wrap: wrap; margin: 0 0 10px; padding: 9px 14px; border-radius: var(--radius, 8px); border: 1px solid var(--border); background: var(--white); color: var(--text2); font-size: 13px; line-height: 1.5; }
+.cal-notice[hidden] { display: none; }
+.cal-notice > span { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.cal-notice.warn { background: var(--amber-bg, rgba(207,151,73,0.14)); border-color: var(--amber, #cf9749); color: var(--text); }
+.cal-notice.error { background: rgba(150,56,35,0.08); border-color: var(--danger, #963823); color: var(--danger, #963823); }
+.cal-notice-btn { flex: 0 0 auto; min-height: 34px; padding: 5px 14px; border-radius: 8px; border: 1px solid var(--primary, #c4623d); background: var(--white); color: var(--primary, #c4623d); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.cal-notice-btn:hover { background: var(--primary-bg, rgba(196,98,61,0.1)); }
+.view-pill-btn.wknd { margin-left: 6px; border-left: 1px solid var(--border); }
+.view-pill-btn.wknd.active { background: var(--primary); color: #fff; }
