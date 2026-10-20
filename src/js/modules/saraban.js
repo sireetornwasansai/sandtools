@@ -40,7 +40,7 @@ export async function mount(root) {
   }
   const me = cfg.me; const unitName = (c) => { const u = cfg.units.find((x) => x.code === c); return u ? u.short || u.name : c; };
   const staff = me.staff; const reader = me.staff || me.exec;
-  const TABS = [['home', 'ศูนย์สารบรรณ', reader], ['my', 'งานของฉัน', true], ['receive', 'ลงรับ', staff], ['send', 'ส่งออก', staff], ['register', 'ทะเบียน', reader], ['track', 'ติดตาม', true], ['numbers', 'เลขทะเบียน', staff], ['units', 'หน่วยงาน', me.admin]].filter((t) => t[2]);
+  const TABS = [['home', 'ศูนย์สารบรรณ', reader], ['my', 'งานของฉัน', true], ['receive', 'ลงรับ', staff], ['send', 'ส่งออก', staff], ['register', 'ทะเบียน', reader], ['track', 'ติดตาม', true], ['numbers', 'เลขทะเบียน', staff], ['units', 'หน่วยงาน', me.admin], ['import', 'นำเข้าทะเบียนเดิม', me.admin]].filter((t) => t[2]);
   const bar = h('div', { class: 'sar-tabs', role: 'tablist', 'aria-label': 'เมนูสารบรรณ' }); const view = h('div', { class: 'sar-view' });
   let current = ''; let ver = 0;
   const X = { call, cfg, openDoc, go, refresh: (t) => go(t || current), me, unitName };
@@ -54,7 +54,7 @@ export async function mount(root) {
   }
   TABS.forEach(([k, l]) => bar.append(h('button', { class: 'sar-tab', type: 'button', role: 'tab', dataset: { tab: k }, onclick: () => go(k) }, l)));
   body.append(bar, view);
-  const VIEWS = { home: homeView, my: myView, receive: receiveTab, send: (el, x, p) => sendView(el, x, p), register: registerView, track: trackView, numbers: numbersView, units: unitsView };
+  const VIEWS = { home: homeView, my: myView, receive: receiveTab, send: (el, x, p) => sendView(el, x, p), register: registerView, track: trackView, numbers: numbersView, units: unitsView, import: importView };
   const want = new URLSearchParams((location.hash.split('?')[1]) || '').get('tab');
   go(TABS.some((t) => t[0] === want) ? want : reader ? 'home' : 'my');
 
@@ -242,6 +242,73 @@ export async function mount(root) {
       });
     }
     await load();
+  }
+
+  /* ----------------------------- นำเข้าทะเบียนเดิม (Google Sheet ของธุรการ → ทะเบียนสารบรรณ) ----------------------------- */
+  async function importView(el) {
+    const st = { sheet: '', scan: null, rows: [] };
+    const out = h('div'); const tabsBox = h('div'); const actions = h('div', { class: 'btn-row' });
+    const input = h('input', { type: 'url', class: 'sar-imp-url', placeholder: 'วางลิงก์ Google Sheet ทะเบียนหนังสือของธุรการ (https://docs.google.com/spreadsheets/d/…)', 'aria-label': 'ลิงก์ Google Sheet', autocomplete: 'off', maxlength: '400' });
+    const scanBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: scan }, 'ตรวจไฟล์');
+    const syncBtn = h('button', { class: 'btn', type: 'button', onclick: sync }, 'ซิงก์แถวใหม่จากไฟล์เดิม');
+    el.append(h('div', { class: 'card' },
+      h('p', { class: 'muted' }, 'นำทะเบียนรับ-ส่งเดิมของธุรการ (Google Sheet) เข้าสู่ทะเบียนสารบรรณ — ระบบหาคอลัมน์จาก “ชื่อหัวตาราง” ไฟล์เดิมไม่ถูกแก้ไข นำเข้าซ้ำได้อย่างปลอดภัย (เพิ่มเฉพาะแถวใหม่) และเลขใหม่จะต่อจากเลขล่าสุดที่นำเข้า'),
+      h('p', { class: 'hint' }, 'ต้องแชร์ไฟล์ให้บัญชีที่ Deploy Apps Script (สิทธิ์ “ผู้ดู” ก็พอ) · ก่อนนำเข้า ควรสร้างหน่วยงานที่ “มีทะเบียนของตนเอง” (เช่น งานยุทธศาสตร์ฯ งานพัฒนาคุณภาพฯ) ที่แท็บ “หน่วยงาน” ก่อน'),
+      h('div', { class: 'sar-imp-row' }, input, scanBtn, syncBtn)), tabsBox, actions, out);
+    syncBtn.hidden = true;
+    const regs = () => cfg.units.filter((u) => u.registry && u.active);
+    const guessRegistry = (t, saved) => {
+      if (saved && saved.registry) return saved.registry;
+      if (t.suggest) { const u = regs().find((x) => String(x.name).includes(t.suggest)); if (u) return u.code; }
+      return 'central';
+    };
+    async function scan() {
+      const v = input.value.trim(); if (!v) { toast('วางลิงก์ Google Sheet ก่อน', 'error'); return; }
+      out.replaceChildren(); tabsBox.replaceChildren(); actions.replaceChildren();
+      let r; try { r = await call('impscan', { sheet: v }, 60000); } catch (e) { out.append(notice('error', 'ตรวจไฟล์ไม่สำเร็จ', errText(e))); return; }
+      st.sheet = v; st.scan = r; const saved = (r.saved && r.saved.tabs) || [];
+      st.rows = r.tabs.map((t) => { const sv = saved.find((x) => String(x.gid) === String(t.gid)); return { t, include: !!t.kind && t.rows > 0 && t.problems.length === 0, registry: guessRegistry(t, sv), numbering: sv ? sv.numbering : (t.noIsNumber || t.kind === 'out' ? 'keep' : 'new') }; });
+      syncBtn.hidden = !saved.length;
+      draw();
+    }
+    function draw() {
+      const r = st.scan; tabsBox.replaceChildren(); actions.replaceChildren();
+      tabsBox.append(h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, `ไฟล์: ${r.name}`), h('p', { class: 'muted' }, `พบ ${r.tabs.length} แท็บ — เลือกแท็บที่จะนำเข้า ทะเบียนปลายทาง และวิธีออกเลข`)));
+      st.rows.forEach((x) => {
+        const t = x.t; const kindTxt = t.kind === 'in' ? 'ทะเบียนรับ' : t.kind === 'out' ? 'ทะเบียนส่ง' : 'ไม่ทราบชนิด';
+        const chk = h('input', { type: 'checkbox', checked: x.include, 'aria-label': `นำเข้าแท็บ ${t.name}` }); chk.addEventListener('change', () => { x.include = chk.checked; });
+        const reg = h('select', { 'aria-label': 'ทะเบียนปลายทาง' }, opt('central', 'สารบรรณกลาง', x.registry === 'central'), regs().map((u) => opt(u.code, u.name, x.registry === u.code))); reg.addEventListener('change', () => { x.registry = reg.value; });
+        const num = h('select', { 'aria-label': 'วิธีออกเลข' }, opt('keep', 'ใช้เลขเดิมในไฟล์ (ซ้ำ/ว่าง → ออกเลขใหม่)', x.numbering === 'keep'), opt('new', 'ออกเลขใหม่เรียงตามวันที่', x.numbering === 'new')); num.addEventListener('change', () => { x.numbering = num.value; });
+        const m = t.mapped || {};
+        tabsBox.append(h('div', { class: `card sar-imp-tab${t.problems.length ? ' has-problem' : ''}` },
+          h('label', { class: 'sar-imp-head' }, chk, h('strong', null, t.name), badge(kindTxt, t.kind === 'in' ? 'info' : t.kind === 'out' ? 'ok' : 'bad'), h('span', { class: 'muted' }, `${t.rows} แถว${t.skipped ? ` · ข้าม ${t.skipped}` : ''}${t.from ? ` · ${thaiDate(t.from)} – ${thaiDate(t.to || t.from)}` : ''}`)),
+          t.problems.length ? notice('warn', 'อ่านโครงสร้างตารางไม่ครบ', t.problems.join(' · ')) : null,
+          h('p', { class: 'hint' }, `คอลัมน์ที่จับคู่: เรื่อง ← ${m.subject || '-'} · เลข ← ${m.number || '-'} · เลขที่หนังสือ ← ${m.docNo || '-'} · ${t.kind === 'out' ? 'ผู้รับ' : 'ผู้ส่ง'} ← ${m.party || '-'} · วันที่ ← ${m.date || '-'}`),
+          (t.sample || []).length ? h('div', { class: 'sar-imp-sample' }, t.sample.map((e) => h('div', { class: 'muted' }, `แถว ${e.row}: ${[e.no, e.docNo, e.date, e.subject, e.party].filter(Boolean).join(' · ')}`))) : null,
+          h('div', { class: 'sar-imp-opts' }, h('label', null, h('span', null, 'ทะเบียนปลายทาง'), reg), h('label', null, h('span', null, 'วิธีออกเลข'), num))));
+      });
+      actions.append(h('button', { class: 'btn', type: 'button', onclick: () => run(true) }, 'ทดลองนำเข้า (ไม่บันทึก)'), h('button', { class: 'btn btn-primary', type: 'button', onclick: () => run(false) }, 'นำเข้าจริง'));
+    }
+    const planOf = () => ({ tabs: st.rows.filter((x) => x.include).map((x) => ({ gid: x.t.gid, registry: x.registry, numbering: x.numbering, include: true })) });
+    async function run(dry) {
+      const plan = planOf(); if (!plan.tabs.length) { toast('ยังไม่ได้เลือกแท็บที่จะนำเข้า', 'error'); return; }
+      if (!dry && !(await confirmBox({ title: 'นำเข้าทะเบียนเดิม', message: `นำเข้า ${plan.tabs.length} แท็บ เข้าทะเบียนสารบรรณ — ทำซ้ำได้ ระบบจะเพิ่มเฉพาะแถวใหม่ (ควรกด “ทดลองนำเข้า” ตรวจผลก่อน)`, confirm: 'นำเข้าจริง' }))) return;
+      out.replaceChildren(h('p', { class: 'muted' }, dry ? 'กำลังทดลองนำเข้า…' : 'กำลังนำเข้า… (อาจใช้เวลาสักครู่)'));
+      let r; try { r = await call('import', { sheet: st.sheet, plan, dry }, 180000); } catch (e) { out.replaceChildren(notice('error', 'นำเข้าไม่สำเร็จ', errText(e))); return; }
+      report(r);
+      if (!dry) { toast(`นำเข้าแล้ว ${r.imported} แถว`, 'success'); syncBtn.hidden = false; try { Object.assign(cfg, await call('config')); } catch { /* the register is already written */ } }
+    }
+    async function sync() {
+      if (!(await confirmBox({ title: 'ซิงก์แถวใหม่', message: 'ดึงเฉพาะแถวใหม่จากไฟล์เดิมที่เคยนำเข้า เข้าทะเบียนสารบรรณ', confirm: 'ซิงก์' }))) return;
+      out.replaceChildren(h('p', { class: 'muted' }, 'กำลังซิงก์…'));
+      try { const r = await call('impsync', {}, 180000); report(r); toast(`ซิงก์แล้ว ${r.imported} แถวใหม่`, 'success'); } catch (e) { out.replaceChildren(notice('error', 'ซิงก์ไม่สำเร็จ', errText(e))); }
+    }
+    function report(r) {
+      out.replaceChildren(notice(r.dry ? 'info' : 'success', r.dry ? `ทดลอง: จะนำเข้า ${r.imported} แถว (ยังไม่บันทึก)` : `นำเข้าแล้ว ${r.imported} แถว`, 'รายละเอียดแต่ละแท็บ'),
+        ...r.tabs.map((t) => h('div', { class: 'card' }, h('strong', null, t.tab),
+          t.error ? notice('error', 'ข้ามแท็บนี้', t.error) : h('p', { class: 'muted' }, `พบ ${t.found} · นำเข้า ${t.imported} · มีอยู่แล้ว ${t.already}${t.renumbered ? ` · ออกเลขใหม่ ${t.renumbered}` : ''}${(t.skipped || []).length ? ` · ข้าม ${t.skipped.length}` : ''}`),
+          (t.warnings || []).length ? h('ul', { class: 'sar-imp-warn' }, t.warnings.map((w) => h('li', null, `แถว ${w.row}: ${w.text}`))) : null)));
+    }
   }
 
   /* ----------------------------- รายละเอียดหนังสือ ----------------------------- */
