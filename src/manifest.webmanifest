@@ -8,6 +8,10 @@
   "display": "standalone",
   "background_color": "#f4f6f9",
   "theme_color": "#0b2a4a",
+  "shortcuts": [
+    { "name": "ลงลา / ไปราชการ", "short_name": "ลงลา", "url": "./#/leave", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "สัปดาห์นี้ใครลา", "short_name": "ใครลา", "url": "./#/leave?tab=who", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

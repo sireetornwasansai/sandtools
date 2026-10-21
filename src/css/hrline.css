@@ -1,0 +1,24 @@
+/* SAND Office Tools — แจ้งเตือน LINE (modules/hrline.js). Uses the tokens in app.css. */
+.hl-body { display: grid; gap: 1rem; max-width: 980px; }
+.hl-card h2 { margin: 0 0 .5rem; font-size: 1.1rem; } .hl-card > p { margin: 0 0 .8rem; }
+.hl-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .6rem; margin-bottom: .9rem; }
+.hl-stat { display: flex; flex-direction: column; gap: .15rem; padding: .7rem .85rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.hl-stat small { color: var(--muted); font-size: .78rem; } .hl-stat b { font-size: 1rem; overflow-wrap: anywhere; }
+.hl-stat.ok { border-color: color-mix(in srgb, var(--success) 40%, var(--border)); background: var(--success-bg); } .hl-stat.bad { border-color: color-mix(in srgb, var(--error) 40%, var(--border)); background: var(--error-bg); }
+.hl-row { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; margin-bottom: .9rem; }
+.hl-seg { display: inline-grid; grid-auto-flow: column; gap: .25rem; padding: .25rem; border-radius: 12px; background: var(--surface-2); }
+.hl-seg button { min-height: 40px; padding: 0 1rem; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.hl-seg button[aria-pressed="true"] { background: var(--surface); color: var(--primary); font-weight: 700; box-shadow: var(--shadow); } .hl-seg button:disabled { opacity: .45; cursor: not-allowed; }
+.hl-url { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .25rem; } .hl-url code { flex: 1 1 14rem; min-width: 0; padding: .55rem .75rem; border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; font-family: var(--mono); font-size: .88rem; }
+.hl-how { margin-top: .9rem; } .hl-how summary { cursor: pointer; color: var(--primary); font-weight: 600; } .hl-how ol { margin: .6rem 0 0; padding-left: 1.3rem; display: grid; gap: .35rem; font-size: .92rem; }
+.hl-job { padding: .85rem 0; border-top: 1px solid var(--border); } .hl-job:first-of-type { border-top: 0; }
+.hl-job-grid { display: grid; grid-template-columns: minmax(160px, 1fr) 140px minmax(220px, 2fr); gap: .5rem .9rem; margin-top: .6rem; } .hl-job-grid .field { margin-bottom: 0; }
+.hl-chk { display: inline-flex; align-items: center; gap: .45rem; min-height: 38px; cursor: pointer; } .hl-chk input { width: 18px; height: 18px; min-height: 0; flex: none; } .hl-chk-lg { font-size: 1rem; }
+.hl-chks { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.hl-sendrow { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; } .hl-sendrow select { width: auto; min-width: 12rem; } .hl-month { display: flex; gap: .4rem; } .hl-month select { min-width: 7rem; }
+.hl-preview { margin: .9rem 0 0; padding: .9rem 1rem; max-height: 26rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 12px; background: #e9f7e4; color: #14231a; font: inherit; font-size: .92rem; line-height: 1.55; border: 1px solid #c9e8bf; }
+:root[data-theme="dark"] .hl-preview { background: #1d3326; color: #dff5e1; border-color: #2c4c38; }
+.hl-users { display: grid; gap: .45rem; }
+.hl-user { display: grid; grid-template-columns: minmax(0, 1fr) 190px auto; align-items: center; gap: .6rem; padding: .55rem .75rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.hl-user.is-off { opacity: .6; } .hl-user-main { display: flex; flex-direction: column; min-width: 0; } .hl-user-main b { overflow-wrap: anywhere; }
+@media (max-width: 860px) { .hl-job-grid { grid-template-columns: 1fr 1fr; } .hl-roles { grid-column: 1 / -1; } .hl-user { grid-template-columns: 1fr; } }

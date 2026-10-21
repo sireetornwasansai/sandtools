@@ -35,12 +35,16 @@ export const SARABAN_ROUTE = { id: 'saraban', path: '/saraban', title: 'สา�
   icon: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>', keywords: 'saraban สารบรรณ ทะเบียนรับ ทะเบียนส่ง ลงรับ เลขรับ เลขส่ง หนังสือราชการ หนังสือส่ง ส่งต่อ สั่งการ ติดตามหนังสือ ตรารับ ผู้บริหาร', load: () => import('../modules/saraban.js') };
 export const HR_ROUTE = { id: 'hr', path: '/hr', title: 'บันทึกปฏิบัติงาน', fullTitle: 'ระบบบันทึกการปฏิบัติงาน', desc: 'ปฏิทินการลา ประชุม อบรม ไปราชการ รายงานรายเดือน จัดการเจ้าหน้าที่และวันหยุด',
   icon: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 15l2.5 2.5L16 13"/>', keywords: 'hr ลา ลากิจ ลาป่วย ลาพักผ่อน ปฏิทิน ประชุม อบรม ไปราชการ บุคลากร บันทึกการปฏิบัติงาน บันทึกประจำวัน โปรเจค วันหยุด รายงาน', load: () => import('../modules/hr.js') };
+export const LEAVE_ROUTE = { id: 'leave', path: '/leave', title: 'ลงลา (มือถือ)', fullTitle: 'ลงลา / ไปราชการ จากมือถือ', desc: 'บันทึกลา ไปราชการ อบรม ประชุมในไม่กี่ปุ่ม และดูว่าสัปดาห์นี้/สัปดาห์หน้าใครลา',
+  icon: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/><path d="M9 8l2 2 4-4"/><path d="M9 13h6"/>', keywords: 'leave ลา ลากิจ ลาป่วย ลาพักผ่อน ลงลา มือถือ mobile ใครลา สัปดาห์นี้ สัปดาห์หน้า ไปราชการ อบรม ประชุม line ไลน์ ริชเมนู', load: () => import('../modules/leave.js') };
+export const HRLINE_ROUTE = { id: 'hrline', path: '/hr-line', title: 'แจ้งเตือน LINE', fullTitle: 'แจ้งเตือน LINE (HR)', desc: 'ตั้งเวลาส่งรายงานลา/ไปราชการ/อบรมเข้า LINE กำหนดผู้รับ ทดสอบและส่งทันที',
+  icon: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>', keywords: 'line ไลน์ แจ้งเตือน รายงาน ศุกร์ สิ้นเดือน ริชเมนู webhook โควต้า token ผู้รับ บทบาท hr ใครลา', load: () => import('../modules/hrline.js') };
 export const HISTORY_ROUTE = { id: 'history', path: '/history', title: 'ประวัติ', fullTitle: 'ประวัติการใช้งาน', desc: 'ดูประวัติการใช้งานที่หน่วยงานบันทึกไว้',
   icon: ICONS.list, keywords: 'history log ประวัติ บันทึก การใช้งาน', load: () => import('../modules/history.js') };
 export const SETTINGS_ROUTE = { id: 'settings', path: '/settings', title: 'ตั้งค่า', fullTitle: 'Settings', desc: 'ธีม ความเป็นส่วนตัว สถานะระบบ',
   icon: ICONS.settings, keywords: 'settings ตั้งค่า theme ธีม dark light privacy ล้างข้อมูล', load: () => import('../modules/settings.js') };
 export const HOME_ROUTE = { id: 'home', path: '/', title: 'หน้าแรก', fullTitle: 'Dashboard', desc: 'หน้าแรก', icon: ICONS.home, keywords: 'home dashboard หน้าแรก', load: () => import('../modules/dashboard.js') };
-export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
+export const ALL_ROUTES = [HOME_ROUTE, ...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
 
 /** Parse "#/path?x=1" into {path, params}. */
 export function parseHash(hash = location.hash) {
@@ -57,7 +61,7 @@ export function navigate(path, params) {
 /** Score tools against a query (title, id, keywords). Empty query returns everything. */
 export function searchTools(query) {
   const q = query.trim().toLowerCase();
-  const all = [...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
+  const all = [...TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, HISTORY_ROUTE, SETTINGS_ROUTE];
   if (!q) return all;
   const scored = all.map((t) => {
     const hay = `${t.title} ${t.fullTitle} ${t.id} ${t.keywords} ${t.desc}`.toLowerCase();
