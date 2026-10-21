@@ -46,7 +46,7 @@ var HRL_QUICK = [['สัปดาห์นี้', 'สัปดาห์นี
 
 /* ------------------------------- LINE API (token, push, reply) ------------------------------ */
 function hrlProps() { return PropertiesService.getScriptProperties(); }
-function hrlToken(which) { return hrlProps().getProperty(which === 'backup' ? 'LINE_CHANNEL_ACCESS_TOKEN_BACKUP' : 'LINE_CHANNEL_ACCESS_TOKEN') || ''; }
+function hrlToken(which) { return String(hrlProps().getProperty(which === 'backup' ? 'LINE_CHANNEL_ACCESS_TOKEN_BACKUP' : 'LINE_CHANNEL_ACCESS_TOKEN') || '').replace(/[\s"']+/g, ''); }   // a token never contains spaces / line breaks / quotes — they come from copy-paste
 function hrlActiveChannel() { var v = hrlProps().getProperty('LINE_ACTIVE_CHANNEL') || 'primary'; return v === 'backup' && hrlToken('backup') ? 'backup' : 'primary'; }
 function hrlActiveToken() { return hrlToken(hrlActiveChannel()); }
 

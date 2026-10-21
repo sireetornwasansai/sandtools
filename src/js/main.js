@@ -5,7 +5,8 @@ import { ICONS } from './core/icons.js';
 import { config, APP_NAME } from './core/config.js';
 import { getSettings, setSettings, addRecent } from './core/store.js';
 import { recording } from './core/logger.js';
-import { TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, LEAVE_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
+import { TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
+import { buildBottomNav, initMobileHelpers } from './core/mobile-nav.js';
 import { openPalette } from './core/palette.js';
 import { backendConfigured, warmBackend } from './core/api.js';
 import { loginRequired, getSession, revalidateInBackground, preloadLogin, renderLogin, currentUser, signOut } from './core/auth.js';
@@ -16,6 +17,7 @@ import { initDates } from './core/datefield.js';
 const app = document.getElementById('app');
 let main;
 let unmountCurrent = null;
+let mobileNav = null;   // bottom bar + "เมนู" sheet (core/mobile-nav.js)
 let routeToken = 0;
 const bar = h('div', { id: 'route-bar', 'aria-hidden': 'true' });
 // Thin activity bar under the top edge while any backend (Apps Script) call is running.
@@ -62,17 +64,30 @@ function buildShell() {
   const searchBtn = h('button', { class: 'search-btn', type: 'button', onclick: openPalette, 'aria-label': 'ค้นหาเครื่องมือ (Ctrl+K)' },
     svgIcon(ICONS.search, 18), h('span', { class: 'search-text' }, 'ค้นหาเครื่องมือ…'), h('kbd', null, isMac ? '⌘K' : 'Ctrl K'));
 
+  // Mobile (≤ 860px): 4 shortcuts + "เมนู" button → bottom sheet listing EVERY page (the sidebar is hidden on a phone)
+  const full = backendConfigured() && !!user;
+  const tool = (id) => TOOLS.find((t) => t.id === id);
+  const primary = full ? [HOME_ROUTE, SARABAN_ROUTE, LEAVE_ROUTE, tool('qr')] : [HOME_ROUTE, tool('qr'), tool('converter'), tool('pdf')];
+  mobileNav = buildBottomNav({
+    primary: primary.filter(Boolean),
+    sections: [
+      { title: 'เครื่องมือ', routes: [HOME_ROUTE, ...TOOLS] },
+      { title: 'ข้อมูลของฉัน', routes: [...(full ? [SARABAN_ROUTE, INBOX_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE] : []), ...(recording() ? [HISTORY_ROUTE] : [])] },
+      { title: 'ระบบ', routes: [SETTINGS_ROUTE] },
+    ],
+  });
+
   const shell = h('div', { class: 'shell', dataset: { collapsed: String(settings.sidebarCollapsed) } },
     h('header', { class: 'topbar' }, wordmark(), searchBtn, h('div', { class: 'spacer' }), themeBtn,
       h('a', { class: 'icon-btn', href: `#${SETTINGS_ROUTE.path}`, 'aria-label': 'ตั้งค่า', title: 'ตั้งค่า' }, svgIcon(ICONS.settings)), userBox),
     h('nav', { class: 'sidebar', 'aria-label': 'เมนูหลัก' },
       h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), h('div', { class: 'nav-title' }, 'เครื่องมือ'), ...TOOLS.map((t) => navLink(t)),
         ...((backendConfigured() && user) || recording() ? [h('div', { class: 'nav-title' }, 'ข้อมูลของฉัน')] : []),
-        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE), navLink(LINKS_ROUTE), navLink(QRS_ROUTE), navLink(PROJECTS_ROUTE), navLink(INBOX_ROUTE), navLink(SARABAN_ROUTE), navLink(HR_ROUTE), navLink(LEAVE_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
+        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE), navLink(LINKS_ROUTE), navLink(QRS_ROUTE), navLink(PROJECTS_ROUTE), navLink(INBOX_ROUTE), navLink(SARABAN_ROUTE), navLink(HR_ROUTE), navLink(LEAVE_ROUTE), navLink(HRLINE_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
       h('div', { class: 'nav-group nav-bottom' }, navLink(SETTINGS_ROUTE), collapseBtn)),
     (main = h('main', { id: 'main', class: 'main', tabindex: '-1' })),
-    h('nav', { class: 'bottomnav', 'aria-label': 'เมนูหลัก (มือถือ)', style: `grid-template-columns:repeat(${TOOLS.length + 1},1fr)` }, navLink(HOME_ROUTE, 'bn-link'), ...TOOLS.map((t) => navLink(t, 'bn-link'))));
-  app.replaceChildren(shell, bar, netBar);
+    mobileNav.nav);
+  app.replaceChildren(shell, bar, netBar, mobileNav.sheet);
   return shell;
 }
 
@@ -87,7 +102,7 @@ async function route() {
   const { path, params } = parseHash();
   const r = findRoute(path) || HOME_ROUTE;
   if (unmountCurrent) { try { await unmountCurrent(); } catch { /* ignore */ } unmountCurrent = null; }
-  setActive(r.id);
+  setActive(r.id); if (mobileNav) mobileNav.sync(r.id);
   document.title = r.id === 'home' ? `${APP_NAME} — เครื่องมือดิจิทัลสำหรับงานสำนักงาน` : `${r.fullTitle} · ${APP_NAME}`;
   barStart();
   main.replaceChildren(skeleton());
@@ -150,6 +165,7 @@ async function boot() {
   // Landing page by e-mail: the backend marks accounts listed in HOME_SARABAN_EMAILS (user.home) — they open on สารบรรณ instead of the tool grid.
   const me = currentUser(); if (me && me.home === 'saraban' && /^#?\/?$/.test(location.hash)) location.replace('#/saraban');
   buildShell();
+  initMobileHelpers(main);
   installGlobalHandlers();
   await route();
   if ('serviceWorker' in navigator && location.protocol !== 'file:' && config.version !== 'dev') {

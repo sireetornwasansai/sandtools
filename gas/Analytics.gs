@@ -342,6 +342,7 @@ function projects(b) {
     case 'stats':  return anaStats(anaOwned(sc, b.key), b.days);
     case 'replay': return simReplay(sc, b);   // 3D plan: replay of a real day (below)
     case 'wings':  return simWings(sc, b);    // 3D plan: pages of every system in one call (below)
+    case 'floor':  return simFloor(sc, b);    // 3D plan: every project's totals + hourly profile in ONE call (below)
     default: throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');
   }
 }
@@ -444,9 +445,12 @@ function setupAnalytics() {
  * วางต่อท้าย Analytics.gs แล้วเพิ่ม 2 บรรทัดใน switch ของ projects():
  *     case 'replay': return simReplay(sc, b);
  *     case 'wings':  return simWings(sc, b);
+ *     case 'floor':  return simFloor(sc, b);
  *
  *   projects/replay {mode: 'today' | 'peak'}   → {mode, day, today, byDay:[{d,pv}], scale, sites:[{key, n, uv, fresh, back, ev:[[นาทีของวัน, ผู้เข้าชม#, f, หน้า#]], pgs:[พาธ]}]}
  *        f = 0 เข้าครั้งแรกของวัน · 1 กลับมาใหม่หลังห่างเกิน 30 นาที · 2 เปิดหน้าอื่นในการเข้าครั้งเดียวกัน   (ผู้เข้าชม# เป็นเลขรัน ไม่ใช่ค่าแฮช)
+ *   projects/floor  {days: 7 | 30 | 90 | 365}  → {days, total, generated, sites:[{key, name, url, tags, status, track, pv, prev, uv, realtime, last, byHour[24]}]}
+ *        ทุกโครงการของผู้ใช้ในครั้งเดียว: ยอดดู (pv) เทียบช่วงก่อนหน้า (prev) · ผู้เข้าชมไม่ซ้ำรายวัน (uv) · คนออนไลน์ 5 นาทีล่าสุด (realtime) · เวลาล่าสุด (last) · ยอดดูรายชั่วโมงเวลาไทย (byHour) · แคช 60 วินาที
  *   projects/wings  {days: 7 | 30 | 90 | 365}  → {days, sites:[{site, uv, realtime, pages:[{path, pv, uv, realtime, byHour[24], rl}], other, flows:[{from, to, n}]}]}
  *        รูปแบบเดียวกับ op "pages" ของแต่ละโครงการ แต่อ่านชีต Hits ครั้งเดียวสำหรับทุกโครงการ (เร็วกว่าเรียกทีละระบบมาก) · แคช 60 วินาที
  *
@@ -613,4 +617,36 @@ function simWingSite(s, rows, days, now) {
   });
   var flows = Object.keys(flow).map(function (k) { var x = k.split('\u0001'); return { from: x[0], to: x[1], n: flow[k] }; }).sort(function (a, c) { return c.n - a.n; }).slice(0, 40);
   return { days: days, site: { key: s.key, name: s.name, url: s.url, tags: s.tags }, uv: Object.keys(siteUv).length, realtime: Object.keys(siteRt).length, pages: keep.map(simPageOut), other: other, flows: flows };
+}
+
+/* ------------------------------- projects/floor ------------------------------- */
+
+/**
+ * ข้อมูลที่ผัง 3 มิติหน้าแรกต้องใช้ของทุกโครงการ ในการอ่านชีต Hits รอบเดียว (แคช 60 วินาทีต่อผู้ใช้)
+ * ชื่อฟิลด์ตรงกับ site() / normalizeFloor() ใน site-engine.js · ไม่นับบอตและ event · โครงการที่ยังไม่มีข้อมูลก็ส่งไป (เป็น 0) เพื่อแสดงว่า "ยังไม่มีข้อมูล"
+ */
+function simFloor(sc, b) {
+  var days = [7, 30, 90, 365].indexOf(Number(b && b.days)) >= 0 ? Number(b.days) : 30, ck = 'sf:' + simScope(sc) + ':' + days, hit = simCacheGet(ck);
+  if (hit) return hit;
+  if (typeof anaFlush === 'function') anaFlush();
+  var mine = simSites(sc), agg = Object.create(null);
+  mine.forEach(function (s) { agg[s.key] = { pv: 0, prev: 0, uvd: Object.create(null), rt: Object.create(null), last: 0, byHour: simZero24() }; });
+  var now = Date.now(), cut = now - days * 86400000, pcut = now - 2 * days * 86400000, five = now - 5 * 60000, anon = 0;
+  anaRead(null).forEach(function (r) {
+    var a = agg[r.key]; if (!a || r.bot) return;
+    if (r.t > a.last) a.last = r.t;
+    if (r.type !== 'pv' || r.t < pcut) return;
+    if (r.t < cut) { a.prev++; return; }
+    a.pv++; a.byHour[lnkHourOf(r.t)]++;
+    a.uvd[(r.vid || ('x' + (++anon))) + anaDay(r.t)] = 1;
+    if (r.t >= five && r.vid) a.rt[r.vid] = 1;
+  });
+  var sites = mine.map(function (s) {
+    var a = agg[s.key];
+    return { key: s.key, name: s.name, url: s.url, tags: s.tags, status: s.status, track: s.track, pv: a.pv, prev: a.prev, uv: Object.keys(a.uvd).length,
+      realtime: Object.keys(a.rt).length, last: a.last ? new Date(a.last).toISOString() : '', byHour: a.byHour };
+  });
+  var out = { days: days, total: sites.length, generated: now, sites: sites };
+  simCachePut(ck, out, 60);
+  return out;
 }
