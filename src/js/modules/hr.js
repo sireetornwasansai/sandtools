@@ -2,6 +2,7 @@ import { h } from '../core/dom.js';
 import { loadScript } from '../core/dom.js';
 import { getSession } from '../core/auth.js';
 import { sessionCall, cacheGet, cacheSet } from '../core/ops.js';
+import { backendHealth, warmBackend } from '../core/api.js';
 import { notice } from '../core/notices.js';
 import { runHandler } from './hr-engine.js';
 import { HR_HTML } from './hr-html.js';
@@ -86,16 +87,54 @@ export async function mount(root) {
   const freshP = needFresh ? call('boot', []).then((b) => { cacheSet(CACHE_KEY, b); return b; }) : null;
   if (freshP) freshP.catch(() => {});    // handled below; avoids an "unhandled rejection" when the page is closed meanwhile
 
-  body.append(h('div', { class: 'skeleton', style: 'height:60vh', role: 'status', 'aria-label': 'กำลังโหลด' }));
-  let boot = cached ? cached.d : null;
+  warmBackend();   // wake the (possibly sleeping) Apps Script right away
+  const status = h('p', { class: 'muted', style: 'text-align:center;margin:.75rem 0', text: cached ? '' : 'กำลังเชื่อมต่อ…' });
+  body.append(h('div', { class: 'skeleton', style: 'height:50vh', role: 'status', 'aria-label': 'กำลังโหลด' }), status);
+  const slow = setTimeout(() => { if (!cached) status.textContent = 'Backend กำลังตื่นหลังว่างนาน อาจใช้เวลา 10–20 วินาที — ระบบกำลังลองใหม่ให้อัตโนมัติ'; }, 6000);
+
+  // Safe mode: when boot() fails, assemble the page from the smaller calls — it opens with whatever the server can still answer.
+  const fallbackBoot = async () => {
+    const [hol, stf, all] = await Promise.allSettled([call('getHolidayMap', []), call('getStaffList', []), call('getAll', [])]);
+    if (all.status !== 'fulfilled') throw all.reason;
+    return { me: {}, holidays: hol.status === 'fulfilled' ? hol.value : {}, staff: stf.status === 'fulfilled' ? stf.value : [], dashboard: all.value.dashboard, events: all.value.events || [] };
+  };
+  // Error screen with a self-test, so "blank page" never happens and the cause is visible.
+  const failView = (e) => {
+    const out = h('pre', { class: 'muted', style: 'white-space:pre-wrap;font-size:.85rem;margin:.75rem 0 0' });
+    const lines = []; const add = (t) => { lines.push(t); out.textContent = lines.join('\n'); };
+    const run = async () => {
+      lines.length = 0; add('กำลังตรวจสอบ…');
+      try {
+        const hl = await backendHealth();
+        add(`✓ Backend ตอบสนอง (${hl.ms} ms) · เวอร์ชัน ${hl.version}`);
+        if (!(hl.features || []).includes('hr')) { add('✗ Backend ยังไม่มีระบบ HR → เพิ่มไฟล์ Hr.gs แล้ว Deploy เวอร์ชันใหม่'); return; }
+      } catch (x) { add(`✗ Backend ไม่ตอบสนอง: ${errText(x)}\n  → ตรวจ GAS URL / Deploy ว่าเป็น Web app (Anyone)`); return; }
+      try {
+        const p = await sessionCall('hr', 'ping', { args: [] }, 20000);
+        add(`✓ โค้ด HR ทำงานอยู่ (v${p.version})`);
+        add('✗ แต่การอ่านชีตล้มเหลว → ดู Apps Script ▸ Executions (doPost) ว่าขึ้น error อะไร และตรวจว่ารัน setupHr() แล้ว');
+      } catch (x) { add(`✗ โค้ด HR ตอบกลับไม่ได้: ${errText(x)}\n  → Deploy ▸ Manage deployments ▸ แก้ไข ▸ เวอร์ชันใหม่ (New version)`); }
+    };
+    return h('div', null, notice('error', 'เปิดระบบบันทึกการปฏิบัติงานไม่ได้', errText(e)),
+      h('div', { style: 'display:flex;gap:.5rem;margin-top:.75rem;flex-wrap:wrap' },
+        h('button', { class: 'btn', type: 'button', onclick: () => location.reload() }, 'ลองใหม่'),
+        h('button', { class: 'btn', type: 'button', onclick: run }, 'ตรวจสอบระบบ')), out);
+  };
+
+  let boot = cached ? cached.d : null; let safeMode = false;
   try {
     if (boot) await libsP;                                  // cached data → only the (cached) scripts are awaited
-    else { [boot] = await Promise.all([freshP, libsP]); }   // first ever visit → wait for the server once
+    else {
+      try { [boot] = await Promise.all([freshP, libsP]); }  // first ever visit → wait for the server once
+      catch (e1) { await libsP; boot = await fallbackBoot().catch(() => { throw e1; }); safeMode = true; }
+    }
   } catch (e) {
-    body.replaceChildren(notice('error', 'เปิดระบบบันทึกการปฏิบัติงานไม่ได้', `${errText(e)} — ถ้าเพิ่งติดตั้ง ให้ผู้ดูแลระบบเพิ่มไฟล์ Hr.gs ใน Apps Script, รัน setupHr() แล้ว Deploy เวอร์ชันใหม่`));
+    clearTimeout(slow);
+    body.replaceChildren(failView(e));
     if (mainEl) mainEl.style.paddingInline = oldPad;
     return undefined;
   }
+  clearTimeout(slow);
   const showingCache = !!cached;
 
   const host = h('div', { class: 'hr-host' });
@@ -129,6 +168,7 @@ export async function mount(root) {
     hide(g('nav-dailylog'), !dev); hide(g('nav-projects'), !dev); hide(sec, !dev);
   };
   gate(boot.me);
+  if (safeMode) body.prepend(notice('warn', 'เปิดในโหมดสำรอง', 'ระบบหลักตอบช้าหรือขัดข้อง จึงโหลดข้อมูลแบบย่อ — เมนูสำหรับผู้ดูแลถูกซ่อนไว้ชั่วคราว ลองรีเฟรชอีกครั้งภายหลัง'));
   g('loadingScreen')?.remove();   // the page is already painted from real data — the second "loading" overlay only added a delay
 
   // delegated "inline" handlers (the CSP forbids onclick="…")
