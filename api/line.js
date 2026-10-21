@@ -8,11 +8,22 @@
 // 3. answers LINE with an empty 200 at once and forwards the slim events to Apps Script (action "line") in the background
 //    (Apps Script replies to the user itself with the reply token, which costs no message quota)
 // Environment variables: SAND_GAS_URL, SAND_EDGE_SECRET (both already used by the other edge functions), SAND_LINE_CHANNEL_SECRET (new)
+//
+// Troubleshooting "Verify → 401": the only 401 this function returns is a signature mismatch. The reason is in the response header  x-sand-reason
+//   no-secret      SAND_LINE_CHANNEL_SECRET is empty in the deployment that answered (not set for Production, or set but NOT redeployed — Vercel applies variables only to NEW deployments)
+//   bad-secret     the value is set but is not a LINE channel secret (a channel secret is exactly 32 hex characters — the access token / another channel's secret was pasted)
+//   no-signature   the call carries no X-Line-Signature (not from LINE)
+//   bad-signature  well-formed secret, wrong value (secret of another channel / old secret / a hidden space or line break was copied with it)
+// Open  https://<domain>/api/line  in a browser (GET) to see a safe self-check: which variables exist and whether the secret has the right shape.
 export const config = { runtime: 'edge' };
 
 const OK = () => new Response(null, { status: 200, headers: { 'cache-control': 'no-store' } });
 const str = (v, max) => String(v == null ? '' : v).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, max);
-const BATCH = 6;                                                   // events per request to Apps Script (its body limit is 8 KB)
+const BATCH = 6;
+const JSON_HEAD = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+/** Variables pasted into Vercel often carry a trailing space / line break or surrounding quotes — none of them is ever part of a real secret. */
+const clean = (v) => String(v == null ? '' : v).trim().replace(/^(["'])(.*)\1$/s, '$2').trim();
+const looksLikeChannelSecret = (v) => /^[0-9a-f]{32}$/i.test(v);                                                   // events per request to Apps Script (its body limit is 8 KB)
 
 function same(a, b) {                                              // constant-time compare
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length || !a) return false;
@@ -49,17 +60,30 @@ export function slim(body) {
   return out;
 }
 
+/** Pure: why a call is refused (only the category — never any part of the secret or the signature). */
+export async function refusal(secret, bodyBytes, signature) {
+  if (!secret) return 'no-secret';
+  if (!looksLikeChannelSecret(secret)) return 'bad-secret';
+  if (!signature) return 'no-signature';
+  return (await verifySignature(secret, bodyBytes, signature)) ? '' : 'bad-signature';
+}
+
 export default async function handler(request, context) {
+  const channelSecret = clean(process.env.SAND_LINE_CHANNEL_SECRET);
+  if (request.method === 'GET') {                                  // safe self-check for the admin: booleans only, nothing secret
+    return new Response(JSON.stringify({ route: 'line', ok: true, secretSet: !!channelSecret, secretLooksValid: looksLikeChannelSecret(channelSecret),
+      gasUrlSet: !!clean(process.env.SAND_GAS_URL), edgeSecretSet: !!clean(process.env.SAND_EDGE_SECRET), deployment: process.env.VERCEL_ENV || '' }), { status: 200, headers: JSON_HEAD });
+  }
   if (request.method !== 'POST') return OK();
-  const channelSecret = process.env.SAND_LINE_CHANNEL_SECRET || '';
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.length > 200000) return new Response(null, { status: 413 });
-  if (!(await verifySignature(channelSecret, bytes, request.headers.get('x-line-signature') || ''))) return new Response(null, { status: 401 });
+  const why = await refusal(channelSecret, bytes, request.headers.get('x-line-signature') || '');
+  if (why) return new Response(null, { status: 401, headers: { 'x-sand-reason': why, 'cache-control': 'no-store' } });
 
   let body = null;
   try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { body = null; }
   const events = slim(body);
-  const gas = process.env.SAND_GAS_URL; const secret = process.env.SAND_EDGE_SECRET || '';
+  const gas = clean(process.env.SAND_GAS_URL); const secret = clean(process.env.SAND_EDGE_SECRET);
   if (!events.length || !gas || !secret) return OK();              // LINE's "Verify" button sends no events: 200 is the right answer
 
   const job = (async () => {
