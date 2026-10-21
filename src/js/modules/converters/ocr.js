@@ -4,6 +4,7 @@
 // caches them on first use in its own cache (see sw.js).
 import { ConversionError, Deadline } from './common.js';
 import { tesseractToMarkdown, wordsFromTesseract } from './ocr-layout.js';
+import { preprocess, toGray, toRgba } from './ocr-preprocess.js';
 
 const VENDOR = new URL('../../vendor/ocr/', import.meta.url);
 export const OCR_LANGS = ['tha', 'eng'];
@@ -57,10 +58,12 @@ export async function createOcrEngine(o = {}) {
     if (e instanceof ConversionError) throw e;
     throw unavailable(String(e && e.message || e));
   } finally { clearTimeout(timer); }
+  let curPsm = 0;
   return {
-    /** @param {Blob} image @returns {Promise<any>} Tesseract.js page data */
-    async recognize(image) {
+    /** @param {Blob} image @param {number} [psm] tesseract page-segmentation mode (6 = one block of lines) @returns {Promise<any>} Tesseract.js page data */
+    async recognize(image, psm) {
       if (dead || !worker) throw new ConversionError('CANCELLED', 'ยกเลิกการแปลงแล้ว');
+      if (psm && psm !== curPsm) { await worker.setParameters({ tessedit_pageseg_mode: String(psm) }); curPsm = psm; }
       const { data } = await worker.recognize(image, {}, { text: true, blocks: true });
       return data;
     },
@@ -86,6 +89,64 @@ async function renderPage(pdf, pageNo) {
 
 const toBlob = (canvas) => new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('canvas.toBlob failed'))), 'image/png'));
 
+/** Clean a rendered page/photo in place (lighting, contrast, tilt, scale — see ocr-preprocess.js). Falls back to the original on any failure. */
+export function enhanceCanvas(canvas) {
+  try {
+    const ctx = canvas.getContext('2d'); const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const r = preprocess(toGray(img.data, img.width, img.height));
+    if (!r.steps.length || r.steps[0] === 'bilevel') return { canvas, steps: r.steps, skew: 0 };
+    const out = document.createElement('canvas'); out.width = r.plane.w; out.height = r.plane.h;
+    out.getContext('2d').putImageData(new ImageData(toRgba(r.plane), r.plane.w, r.plane.h), 0, 0);
+    return { canvas: out, steps: r.steps, skew: r.skew };
+  } catch { return { canvas, steps: [], skew: 0 }; }
+}
+
+function rotatedCanvas(src, quarter) {
+  const c = document.createElement('canvas'); const swap = quarter % 2 === 1;
+  c.width = swap ? src.height : src.width; c.height = swap ? src.width : src.height;
+  const x = c.getContext('2d'); x.translate(c.width / 2, c.height / 2); x.rotate((quarter * Math.PI) / 2); x.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+}
+
+/** Decode an image Blob to a canvas (EXIF orientation honoured), long side capped so a 48 MP phone photo cannot exhaust memory. */
+async function imageToCanvas(blob) {
+  const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+  try {
+    const k = Math.min(1, 5200 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(bmp, 0, 0, c.width, c.height);
+    return c;
+  } finally { if (bmp.close) bmp.close(); }
+}
+
+/**
+ * OCR one photo/scan image directly (no image→PDF round trip, so nothing is lost to re-encoding). Cleans the picture first, reads it, and when the
+ * result is poor tries the page turned 90/180/270° (people photograph letters sideways). Page-segmentation 6 (one block of lines) is used: official letters are a single column.
+ * @param {Blob} blob
+ * @param {{signal?:AbortSignal,onStatus?:(s:string)=>void,engine?:any}} [opts] pass a running `engine` to reuse it
+ * @returns {Promise<{markdown:string,confidence:number,words:any[],width:number,height:number,steps:string[],rotated:number}>}
+ */
+export async function ocrImageBlob(blob, opts = {}) {
+  const own = !opts.engine; const engine = opts.engine || await createOcrEngine({ signal: opts.signal, onStatus: opts.onStatus });
+  try {
+    if (opts.onStatus) opts.onStatus('กำลังปรับภาพให้อ่านง่าย');
+    let base = await imageToCanvas(blob); const enh = enhanceCanvas(base); base = enh.canvas;
+    const run = async (cv) => { const data = await engine.recognize(await toBlob(cv), 6); const r = tesseractToMarkdown(data, { width: cv.width }); return { data, r, cv }; };
+    if (opts.onStatus) opts.onStatus('กำลังอ่านข้อความภาษาไทย');
+    let best = await run(base); let rotated = 0;
+    const score = (x) => (x.r.markdown ? x.r.confidence * Math.min(1, x.r.markdown.length / 200 + 0.3) : 0);
+    if (score(best) < 55) {
+      for (const q of [1, 3, 2]) {
+        if (opts.signal && opts.signal.aborted) break;
+        if (opts.onStatus) opts.onStatus('ลองหมุนภาพเพื่ออ่านให้ถูกทิศ');
+        const t = await run(rotatedCanvas(base, q));
+        if (score(t) > score(best) + 8) { best = t; rotated = q * 90; }
+      }
+    }
+    return { markdown: best.r.markdown, confidence: best.r.confidence || 0, words: wordsFromTesseract(best.data), width: best.cv.width, height: best.cv.height, steps: enh.steps, rotated };
+  } finally { if (own) await engine.terminate(); }
+}
+
 /**
  * OCR the given pages of an open PDF.js document.
  * @param {any} pdf PDF.js document
@@ -108,7 +169,9 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
       deadline.check();
       if (opts.signal && opts.signal.aborted) throw new ConversionError('CANCELLED', 'ยกเลิกการแปลงแล้ว');
       if (opts.onStatus) opts.onStatus(`กำลังอ่านข้อความจากภาพ หน้า ${n + 1} จาก ${todo.length}`);
-      const canvas = await renderPage(pdf, todo[n] + 1);
+      const rendered = await renderPage(pdf, todo[n] + 1);
+      const canvas = opts.enhance === false ? rendered : enhanceCanvas(rendered).canvas;   // scanned PDFs are photos too: flatten light, straighten, size text
+      if (canvas !== rendered) { rendered.width = 0; rendered.height = 0; }
       let data; const width = canvas.width, height = canvas.height;
       try { data = await engine.recognize(await toBlob(canvas)); } finally { canvas.width = 0; canvas.height = 0; }
       const r = tesseractToMarkdown(data, { width });

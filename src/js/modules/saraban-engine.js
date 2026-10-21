@@ -32,8 +32,57 @@ export function parseThaiDate(text) {
   let m = /(\d{1,2})\s*(มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s*(\d{4})/.exec(t);
   if (m) return isoFrom(m[3], monthIndex(m[2]), m[1]);
   m = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/.exec(t);
-  return m ? isoFrom(m[3], m[2], m[1]) : '';
+  if (m) return isoFrom(m[3], m[2], m[1]);
+  m = /(\d{1,2})\s*([ก-๙.]{3,12})\s*(\d{4})/.exec(t);     // OCR-damaged month name
+  if (m) { const mo = fuzzyMonth(m[2]); if (mo) return isoFrom(m[3], mo, m[1]); }
+  return '';
 }
+
+/* ---- OCR-tolerant reading (v1.11): scanned Thai loses/moves tone marks and splits words, so labels are matched by their consonant skeleton ---- */
+const MARKS = /[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]/g;      // vowel marks above/below + tone marks + thanthakhat — the first things OCR drops or swaps
+/** "เรื่อง" → "เรอง": remove marks and spaces, keep letters. */
+export const skeleton = (s) => String(s || '').replace(MARKS, '').replace(/[\s.:：]/g, '');
+export function editDistance(a, b) {
+  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i += 1) { const cur = [i]; for (let j = 1; j <= n; j += 1) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+  return prev[n];
+}
+const LABELS = ['เรื่อง', 'เรียน', 'อ้างถึง', 'สิ่งที่ส่งมาด้วย', 'ลงวันที่'].map((l) => ({ l, k: skeleton(l) }));
+/**
+ * Put the standard labels (เรื่อง เรียน อ้างถึง สิ่งที่ส่งมาด้วย ลงวันที่) back in place when OCR garbled them ("เรอ่ง", "เร ียน", "อางถึง"…).
+ * Only the start of a line is touched, and only when the match is close — body text is never rewritten. Returns the text and what was repaired.
+ */
+export function repairLabels(text) {
+  const fixed = [];
+  const out = String(text || '').split('\n').map((line) => {
+    const t = line.trim(); if (t.length < 3) return line;
+    for (const { l, k } of LABELS) {
+      if (t.startsWith(l)) return line;                                  // already right
+      const allow = k.length >= 6 ? 2 : k.length >= 4 ? 1 : 0; if (!allow) continue;
+      // grow a prefix of the line until its skeleton is as long as the label's, then compare
+      let sk = '', i = 0;
+      for (; i < t.length && i < k.length + 10; i += 1) { sk += skeleton(t[i]); if (sk.length >= k.length) break; }
+      if (!sk.length || editDistance(sk, k) > allow) continue;
+      let end = i + 1; while (end < t.length && /[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]/.test(t[end])) end += 1;   // swallow trailing marks of the last letter
+      const rest = t.slice(end).replace(/^[\s:：.]+/, '');
+      if (!rest) continue;                                               // a bare word is not a label line
+      fixed.push(l); return `${l} ${rest}`;
+    }
+    return line;
+  });
+  return { text: out.join('\n'), fixed };
+}
+/** A month word that OCR damaged ("ตลุาคม", "ตุลาคน") → month number (0 = no match). */
+export function fuzzyMonth(word) {
+  const w = skeleton(word); if (w.length < 3) return 0; let best = 0, bd = 9;
+  for (let i = 0; i < 12; i += 1) for (const name of [MONTH_FULL[i], MONTHS[i]]) {
+    const k = skeleton(name), d = editDistance(w, k); if (d < bd && d <= (k.length >= 6 ? 1 : 0)) { bd = d; best = i + 1; }
+  }
+  return best;
+}
+/** Digits that OCR confuses with letters, repaired only inside numeric tokens (O→0, l/I→1, S→5, B→8). */
+export const fixDigitLook = (s) => String(s || '').replace(/(?<=[\d/.])[OoQ](?=[\d/.])|(?<=\d)[OoQ]\b/g, '0').replace(/(?<=[\d/.])[lI|](?=[\d/.])|(?<=\d)[lI|](?![ก-๙A-Za-z])/g, '1').replace(/(?<=[\d/])S(?=\d)/g, '5');
 
 /** Strip the markdown the converters add, keep line structure. */
 export function plainText(md) {
@@ -46,16 +95,17 @@ const ORG_RE = /(โรงพยาบาล|รพ\.|สำนักงาน|�
  * nothing here is trusted blindly. `dueDays` is "within N days" (counted from the registration day by the caller).
  */
 export function parseLetter(raw) {
-  const text = thaiDigitsToArabic(plainText(raw));
+  const rep = repairLabels(fixDigitLook(thaiDigitsToArabic(plainText(raw))));
+  const text = rep.text;
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   // The letterhead = everything above เรื่อง / เรียน / อ้างถึง (date, urgency, secrecy and the sender are printed there).
   let cut = lines.findIndex((l) => /^(เรื่อง|เรียน|อ้างถึง|สิ่งที่ส่งมาด้วย)/.test(l));
   if (cut < 0) cut = Math.min(lines.length, 4);
   const headLines = lines.slice(0, Math.min(cut, 12)); const head = headLines.join('\n');
-  const out = { docNo: '', docDate: '', subject: '', party: '', salut: '', refs: '', encl: '', urgency: 'normal', secrecy: 'normal', due: '', dueDays: 0, found: {} };
+  const out = { docNo: '', docDate: '', subject: '', party: '', salut: '', refs: '', encl: '', urgency: 'normal', secrecy: 'normal', due: '', dueDays: 0, found: {}, repaired: rep.fixed };
   const tag = (k, ok) => { if (ok) out.found[k] = true; };
 
-  let m = /ที่\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(text) || /ที่\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?[ก-ฮ]?\d*)/.exec(text);   // ที่ ชม 0033.002/ว1190 · ที่ อว78.06/ว.20419 · ที่ สธ 0123/พิเศษ 9
+  let m = /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(text) || /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?[ก-ฮ]?\d*)/.exec(text);   // ที่ ชม 0033.002/ว1190 · ที่ อว78.06/ว.20419 · ที่ สธ 0123/พิเศษ 9
   if (m) out.docNo = m[1].replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
   tag('docNo', !!out.docNo);
 
@@ -162,6 +212,6 @@ export function changeLabel(now, prev) {
 /** Share of `n` in `total` as a whole percent (0 when total is 0). */
 export const pct = (n, total) => (total ? Math.round((Number(n) * 100) / total) : 0);
 /** Steps of the receive wizard (the order the clerk works in). */
-export const RECEIVE_STEPS = [['scan', 'อัปโหลด/สแกน'], ['check', 'ตรวจข้อมูล'], ['number', 'ลงเลขรับ'], ['forward', 'ส่งต่อ']];
+export const RECEIVE_STEPS = [['import', 'นำเข้า'], ['read', 'อ่านอัตโนมัติ'], ['dup', 'ตรวจซ้ำ'], ['number', 'ออกเลขรับ'], ['forward', 'ส่งต่อ']];
 /** Human names of the fields the on-device reader fills in. */
 export const SCAN_FIELD_LABELS = { docNo: 'เลขที่หนังสือ', docDate: 'ลงวันที่', subject: 'เรื่อง', party: 'จาก', salut: 'เรียน', refs: 'อ้างถึง', encl: 'สิ่งที่ส่งมาด้วย', urgency: 'ชั้นความเร็ว', secrecy: 'ชั้นความลับ', due: 'กำหนดเสร็จ' };

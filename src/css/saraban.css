@@ -196,3 +196,40 @@ div.sar-drop { display: flex; } div.sar-drop:focus-visible { outline: 0; box-sha
 .sar-unit-row[hidden] { display: none; }
 .sar-units { max-height: 340px; overflow-y: auto; padding-right: .2rem; margin-top: .3rem; }
 .sar-unit-pick input[type="search"] { margin: .3rem 0 .2rem; }
+
+/* ===== v1.11 รับหนังสือ: dropzone, 5-step wizard, side queue, camera scanner ===== */
+.sar-wiz { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 900px) { .sar-wiz { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 520px) { .sar-wiz { grid-template-columns: repeat(2, 1fr); } }
+.sar-rcv-top { display: flex; justify-content: space-between; align-items: center; gap: .8rem; flex-wrap: wrap; margin-bottom: .4rem; }
+.sar-h2 { font-size: 1.25rem; margin: 0; }
+.sar-qlink { font-weight: 600; color: var(--primary); text-decoration: none; padding: .35rem .8rem; border-radius: 999px; background: var(--primary-soft); min-height: 36px; display: inline-flex; align-items: center; }
+.sar-rcv { display: block; }
+.sar-rcv.has-side { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 960px) { .sar-rcv.has-side { grid-template-columns: 1fr; } }
+.sar-rcv-side { position: sticky; top: calc(var(--topbar-h, 60px) + .6rem); }
+@media (max-width: 960px) { .sar-rcv-side { position: static; } }
+.sar-rcv-side .sar-queue { border-color: var(--border); max-height: 78vh; overflow-y: auto; }
+.sar-queue-h { display: flex; justify-content: space-between; align-items: center; gap: .6rem; } .sar-queue-h .sar-h3 { margin: 0; }
+.sar-rcv-side .sar-qrow { flex-direction: column; align-items: stretch; }
+.sar-qpick { display: block; width: 100%; text-align: left; font: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; border-radius: 8px; }
+.sar-qpick:hover .sar-subject { color: var(--primary); } .sar-qpick:focus-visible { outline: 0; box-shadow: 0 0 0 4px var(--primary-ring); }
+.sar-qpick .sar-badges { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .35rem; }
+.sar-dz { border: 2px dashed var(--border-strong); border-radius: var(--radius-lg); padding: 2rem 1.2rem 1.4rem; gap: .5rem; background: var(--surface); transition: background .15s, border-color .15s; }
+.sar-dz.over { border-color: var(--primary); background: var(--primary-soft); }
+.sar-dz strong { font-size: 1.15rem; color: var(--text); }
+.sar-dz-ic { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--primary-soft); color: var(--primary); }
+.sar-dz-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; margin: .5rem 0 .2rem; }
+.sar-dz-actions label.btn { cursor: pointer; }
+.sar-linkbtn { background: none; border: 0; color: var(--primary); font: inherit; text-decoration: underline; cursor: pointer; padding: .4rem; min-height: 40px; }
+.sar-dz-feat { list-style: none; display: grid; gap: .35rem; margin: .9rem .2rem 0; padding: 0; color: var(--text-2); font-size: .92rem; }
+.sar-dz-feat li { display: flex; align-items: center; gap: .5rem; } .sar-dz-feat .icon { color: var(--success); }
+/* camera scanner */
+.sar-cam-stage { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; aspect-ratio: 3 / 4; max-height: 44vh; margin: 0 auto; }
+.sar-cam-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sar-cam-frame { position: absolute; inset: 6%; border: 2px dashed rgb(255 255 255 / .85); border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 999px rgb(0 0 0 / .25); }
+.sar-cam-bar { align-items: center; margin-top: .7rem; }
+.sar-cam-strip { display: flex; gap: .5rem; overflow-x: auto; padding: .5rem 0; }
+.sar-cam-thumb { position: relative; margin: 0; flex: none; } .sar-cam-thumb img { height: 84px; border-radius: 6px; border: 1px solid var(--border); display: block; }
+.sar-cam-x { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--error); color: #fff; cursor: pointer; line-height: 1; }
+@media (prefers-reduced-motion: reduce) { .sar-dz { transition: none; } }

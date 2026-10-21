@@ -3,6 +3,7 @@ import { ICONS } from '../core/icons.js';
 import { notice, privacyNotice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { modal } from '../core/layers.js';
+import { cameraSupported, openScanner, cameraErrorText } from './saraban-scan.js';
 import { URGENCY, SECRECY, RECEIVE_STEPS, SCAN_FIELD_LABELS, parseLetter, plainText, addDays, newRid, fileToBase64 } from './saraban-engine.js';
 
 const badge = (label, tone = 'muted') => h('span', { class: `sar-badge sar-${tone}` }, label);
@@ -26,10 +27,29 @@ async function toPdfFile(input) {
   }
   throw Object.assign(new Error('ไฟล์ที่ใช้อ่านข้อมูลได้คือ PDF หรือรูปภาพ (JPG/PNG) — ไฟล์อื่นแนบในภายหลังได้'), { fatal: true });
 }
-/** Read the letter on this device (PDF text layer, or on-device OCR for scans). Nothing is sent anywhere. */
-async function readLetter(file, onStatus) {
+/**
+ * Read the letter on this device (PDF text layer, or on-device OCR for scans). Nothing is sent anywhere.
+ * Photos are OCR-ed directly (cleaned first — see converters/ocr-preprocess.js) instead of going through the image→PDF copy that is stored.
+ * @param {File} pdf the single PDF that will be stored  @param {File[]} originals what the clerk picked/photographed
+ */
+async function readLetter(pdf, originals, onStatus) {
+  const imgs = originals.filter((f) => /^image\//.test(f.type));
+  if (imgs.length && imgs.length === originals.length) {
+    const { ocrImageBlob, createOcrEngine } = await import('./converters/ocr.js');
+    const engine = await createOcrEngine({ onStatus });
+    try {
+      const parts = [];
+      for (let i = 0; i < imgs.length && i < 6; i += 1) {
+        if (onStatus && imgs.length > 1) onStatus(`กำลังอ่านหน้า ${i + 1} จาก ${imgs.length}`);
+        const r = await ocrImageBlob(imgs[i], { engine, onStatus: imgs.length > 1 ? undefined : onStatus });
+        parts.push(r.markdown);
+        if (i === 0 && /(เรื่อง|เรียน)/.test(r.markdown) && parts.join('').length > 400) break;   // the first page carries every field we need
+      }
+      return plainText(parts.join('\n\n'));
+    } finally { await engine.terminate(); }
+  }
   const { convertFile } = await import('./converters/index.js');
-  const r = await convertFile(file, { maxBytes: 15 * 1024 * 1024, timeoutMs: 90000, ocr: true, ocrTimeoutMs: 4 * 60 * 1000, onStatus });
+  const r = await convertFile(pdf, { maxBytes: 15 * 1024 * 1024, timeoutMs: 90000, ocr: true, ocrTimeoutMs: 4 * 60 * 1000, onStatus });
   return plainText(r.markdown);
 }
 
@@ -79,11 +99,11 @@ export function unitPicker(X, state) {
 }
 
 /* ============================== RECEIVE (รับหนังสือ) ==============================
-   ขั้นตอน:  1 อัปโหลด/สแกน (อ่านข้อมูลอัตโนมัติบนเครื่อง)  →  2 ตรวจ/แก้ไขข้อมูล  →  3 ยืนยันและออกเลขรับ (+ประทับตรา)  →  4 ส่งต่อให้หน่วยงาน
+   ขั้นตอน (v1.11):  1 นำเข้า (ไฟล์/กล้อง/คิว)  →  2 อ่านอัตโนมัติบนเครื่อง  →  3 ตรวจซ้ำ + แก้ไขข้อมูล  →  4 ออกเลขรับ (+ประทับตรา)  →  5 ส่งต่อ
    ข้อมูลที่อ่านได้แก้ไขได้ทุกช่องจนกว่าจะกดยืนยัน · เลขรับออกครั้งเดียว (rid กันกดซ้ำ) · การส่งต่อทำหลังมีเลขรับแล้ว (op route) */
 
 export function receiveView(root, X, pre = {}) {
-  let pdf = null; let rid = newRid(); const inboxId = pre.inboxId || ''; let busy = false; let step = pre.inboxId ? 'check' : 'scan'; let suggestions = []; let previewUrl = ''; let scanRun = 0;
+  let pdf = null; let rid = newRid(); const inboxId = pre.inboxId || ''; let busy = false; let step = pre.inboxId ? 'read' : 'import'; let suggestions = []; let previewUrl = ''; let scanRun = 0;
   const today = X.cfg.today; const F = {}; const touched = new Set();
   const mk = (name, label, input, hint) => { F[name] = input; input.addEventListener('input', () => touched.add(name)); return field(label, input, hint); };
   const text = (name, label, ph, max = 300, hint) => mk(name, label, h('input', { type: 'text', maxlength: max, placeholder: ph || '', autocomplete: 'off', value: pre[name] || '' }), hint);
@@ -95,21 +115,32 @@ export function receiveView(root, X, pre = {}) {
   function setStep(k) {
     step = k; const idx = RECEIVE_STEPS.findIndex((s) => s[0] === k);
     [...stepper.children].forEach((li, i) => { li.classList.toggle('on', i === idx); li.classList.toggle('done', i < idx); if (i === idx) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); });
-    scanCard.hidden = k !== 'scan'; checkCard.hidden = !(k === 'check' || (k === 'number' && !resultCard.childNodes.length)); resultCard.hidden = !(k === 'forward' || k === 'number'); fwdCard.hidden = k !== 'forward';
+    scanCard.hidden = !(k === 'import' || k === 'read'); checkCard.hidden = !(k === 'dup' || (k === 'number' && !resultCard.childNodes.length)); resultCard.hidden = !(k === 'forward' || k === 'number'); fwdCard.hidden = k !== 'forward';
   }
 
-  /* ---- step 1: upload / scan ---- */
-  const fileIn = h('input', { type: 'file', accept: 'application/pdf,image/jpeg,image/png,image/webp,.pdf', multiple: true, hidden: true });
-  const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
+  /* ---- steps 1–2: import (file / camera) → automatic reading ---- */
+  const fileIn = h('input', { type: 'file', accept: '.pdf,image/*', multiple: true, hidden: true });
+  const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });   // fallback where getUserMedia is unavailable
   const status = h('p', { class: 'muted sar-status', role: 'status', 'aria-live': 'polite' });
-  const drop = h('div', { class: 'sar-drop', tabindex: '0', role: 'button', 'aria-label': 'อัปโหลดหนังสือ PDF หรือรูปสแกน', onclick: () => fileIn.click(), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileIn.click(); } } },
-    svgIcon(ICONS.upload, 30), h('strong', null, 'อัปโหลดหนังสือ — ระบบสแกนและกรอกข้อมูลให้อัตโนมัติ'), h('span', { class: 'muted' }, 'ลากไฟล์มาวาง หรือกดเลือก · PDF หรือรูปสแกน (หลายรูป = หลายหน้า รวมเป็น PDF ฉบับเดียว) · อ่านบนเครื่องคุณ ไม่ส่งออกอินเทอร์เน็ต'));
+  const manual = () => { pdf = null; fileLine.replaceChildren(); foundBox.replaceChildren(); status.textContent = ''; setStep('dup'); F.subject.focus(); };
+  async function useCamera() {
+    if (!cameraSupported()) { camIn.click(); return; }
+    try { const shots = await openScanner(); if (shots && shots.length) pickFiles(shots); } catch (e) { toast(cameraErrorText(e), 'error', 7000); if (e && e.name !== 'NotAllowedError') camIn.click(); }
+  }
+  const pick = h('label', { class: 'btn btn-primary' }, svgIcon(ICONS.upload, 18), 'เลือกไฟล์', fileIn);
+  const drop = h('div', { class: 'sar-drop sar-dz', tabindex: '0', role: 'group', 'aria-label': 'นำเข้าหนังสือ' },
+    h('div', { class: 'sar-dz-ic' }, svgIcon(ICONS.upload, 34)),
+    h('strong', null, 'ลากไฟล์หนังสือมาวางที่นี่'),
+    h('span', { class: 'muted' }, 'PDF หรือรูปสแกน/ภาพถ่าย (หลายรูป = หลายหน้า) · อ่านข้อความทันทีเมื่อวางไฟล์'),
+    h('div', { class: 'sar-dz-actions' }, h('button', { class: 'btn', type: 'button', dataset: { act: 'scan' }, onclick: useCamera }, 'สแกนด้วยกล้อง'), pick),
+    h('button', { class: 'sar-linkbtn', type: 'button', onclick: manual }, 'กรอกข้อมูลเอง (ไม่มีไฟล์)'));
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', (e) => { const fs = e.dataTransfer && e.dataTransfer.files; if (fs && fs.length) pickFiles(fs); });
-  const scanSteps = h('ol', { class: 'sar-scan-steps', hidden: true }, ['เตรียมไฟล์', 'อ่านข้อความ (PDF/OCR)', 'จัดข้อมูลลงแบบฟอร์ม'].map((l) => h('li', null, l)));
-  const scanBtns = h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => fileIn.click() }, svgIcon(ICONS.upload, 18), 'เลือกไฟล์'), h('button', { class: 'btn', type: 'button', onclick: () => camIn.click() }, 'ถ่ายภาพ/สแกนด้วยกล้อง'), h('button', { class: 'btn', type: 'button', onclick: () => { pdf = null; fileLine.replaceChildren(); foundBox.replaceChildren(); status.textContent = ''; setStep('check'); } }, 'ข้าม — กรอกข้อมูลเอง'));
-  scanCard.append(drop, scanSteps, status, scanBtns, fileIn, camIn);
+  const bullets = h('ul', { class: 'sar-dz-feat' }, ['อ่านข้อความ PDF / OCR ภาษาไทย (ในเครื่อง)', 'AI เติมเลขที่ เรื่อง จาก เรียน กำหนด', 'ตรวจหนังสือซ้ำอัตโนมัติ', 'ออกเลขรับและประทับตราบนหน้าจริง'].map((t) => h('li', null, svgIcon(ICONS.check, 16), t)));
+  const scanSteps = h('ol', { class: 'sar-scan-steps', hidden: true }, ['เตรียมไฟล์', 'ปรับภาพ + อ่านข้อความ (PDF/OCR)', 'จัดข้อมูลลงแบบฟอร์ม'].map((l) => h('li', null, l)));
+  const scanBtns = h('div', { class: 'sar-scan-more' }, bullets);
+  scanCard.append(drop, scanSteps, status, scanBtns, camIn);
   function markScan(i) { [...scanSteps.children].forEach((li, j) => { li.classList.toggle('done', j < i); li.classList.toggle('now', j === i); }); }
 
   /* ---- step 2: check / edit ---- */
@@ -137,14 +168,14 @@ export function receiveView(root, X, pre = {}) {
   }
   async function pickFiles(list) {
     const files = [...(list || [])].filter(Boolean); if (!files.length) return;
-    const run = ++scanRun; scanSteps.hidden = false; drop.hidden = true; scanBtns.hidden = true; markScan(0); status.textContent = 'กำลังเตรียมไฟล์…'; setStep('scan');
+    const run = ++scanRun; scanSteps.hidden = false; drop.hidden = true; scanBtns.hidden = true; markScan(0); status.textContent = 'กำลังเตรียมไฟล์…'; setStep('read');
     let found = {}; let note = '';
     try {
       pdf = await toPdfFile(files); if (run !== scanRun) return;
       fileLine.replaceChildren(svgIcon(ICONS.file, 18), `${pdf.name} · ${(pdf.size / 1048576).toFixed(2)} MB`); setPreview(files);
       if (pdf.size > 10 * 1024 * 1024) throw Object.assign(new Error('ไฟล์ใหญ่เกิน 10 MB — ลดขนาดด้วยเครื่องมือ “ย่อไฟล์” ก่อน'), { fatal: true });
       markScan(1); status.textContent = 'กำลังอ่านข้อมูลจากหนังสือ (ในเครื่อง ไม่ส่งออกอินเทอร์เน็ต)…';
-      const t = await readLetter(pdf, (s) => { if (run === scanRun) status.textContent = s; }); if (run !== scanRun) return;
+      const t = await readLetter(pdf, files, (s) => { if (run === scanRun) status.textContent = s; }); if (run !== scanRun) return;
       markScan(2); const r = parseLetter(t);
       const set = (k, v) => { if (v && (!F[k].value.trim() || !touched.has(k))) F[k].value = v; };    // a re-scan never overwrites what the clerk typed
       ['docNo', 'docDate', 'subject', 'party', 'salut', 'refs', 'encl', 'due'].forEach((k) => set(k, r[k]));
@@ -160,11 +191,22 @@ export function receiveView(root, X, pre = {}) {
       if (!pdf) { drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = `${errText(e)}`; return; }
       note = `${errText(e)} — กรอกข้อมูลเองได้`;
     }
-    status.textContent = ''; scanSteps.hidden = true; drop.hidden = false; scanBtns.hidden = false; paintFound(found, note); setStep('check');
+    status.textContent = ''; scanSteps.hidden = true; drop.hidden = false; scanBtns.hidden = false; paintFound(found, note); setStep('dup');
     checkCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   fileIn.addEventListener('change', () => { const fs = fileIn.files; const l = fs ? [...fs] : []; fileIn.value = ''; pickFiles(l); });
   camIn.addEventListener('change', () => { const fs = camIn.files; const l = fs ? [...fs] : []; camIn.value = ''; pickFiles(l); });
+  /* a queue item (Telegram / e-mail copy kept in Drive): fetch its file and read it exactly like an upload */
+  async function loadQueueFile() {
+    status.textContent = 'กำลังดึงไฟล์จากคิว…'; scanSteps.hidden = false; markScan(0);
+    try {
+      const r = await X.call('queuefile', { inboxId }, 60000);
+      const bin = atob(r.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i += 1) u8[i] = bin.charCodeAt(i);
+      await pickFiles([new File([u8], r.name || 'queue.pdf', { type: r.mime })]);
+    } catch (e) {
+      status.textContent = ''; scanSteps.hidden = true; paintFound({}, `${errText(e)} — ตรวจข้อมูลจากคิวและแก้ไขได้ หรืออัปโหลดไฟล์เอง`); setStep('dup');
+    }
+  }
 
   const grid = h('div', { class: 'sar-grid' },
     text('docNo', 'เลขที่หนังสือ', 'เช่น สธ 0123.4/ว567').root, mk('docDate', 'ลงวันที่', h('input', { type: 'date', value: pre.docDate || '' })).root,
@@ -202,7 +244,7 @@ export function receiveView(root, X, pre = {}) {
       const body = { rid, dupOk, inboxId, files, route: { mode: 'none' }, ...Object.fromEntries(Object.keys(F).map((k) => [k, v(k)])) };
       const r = await X.call('receive', body, 40000);
       if (r.needsConfirm) {
-        busy = false; submit.disabled = false; submit.classList.remove('is-loading'); status2.textContent = ''; setStep('check');
+        busy = false; submit.disabled = false; submit.classList.remove('is-loading'); status2.textContent = ''; setStep('dup');
         let m = null;
         m = modal('พบหนังสือที่เหมือนกัน', [h('p', null, 'ระบบพบหนังสือเลขที่/เรื่อง/ผู้ส่งเดียวกันที่ลงรับหรืออยู่ในคิวแล้ว:'), h('ul', null, r.dups.map((d) => h('li', null, `${d.reg ? `เลขรับ ${d.reg}` : 'อยู่ในคิว'} — ${d.docNo || '-'} · ${d.subject}`))), h('p', { class: 'muted' }, 'ถ้าเป็นฉบับเดียวกัน ไม่ควรลงรับซ้ำ — เลขรับจะถูกใช้ไปและยกเลิกได้เฉพาะพร้อมเหตุผล')],
           [h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { m.close(); go(true); } }, 'ลงรับซ้ำจริง ๆ'), h('button', { class: 'btn btn-primary', type: 'button', onclick: () => m.close() }, 'ยกเลิก ไม่ลงรับ')]);
@@ -210,7 +252,7 @@ export function receiveView(root, X, pre = {}) {
       }
       await done(r);
     } catch (e) {
-      busy = false; submit.disabled = false; submit.classList.remove('is-loading'); status2.textContent = ''; setStep('check');
+      busy = false; submit.disabled = false; submit.classList.remove('is-loading'); status2.textContent = ''; setStep('dup');
       if (e && (e.code === 'NETWORK' || e.code === 'TIMEOUT' || e.code === 'BAD_RESPONSE')) toast('ไม่แน่ใจว่าบันทึกสำเร็จหรือไม่ — กด “ยืนยัน” อีกครั้งได้เลย ระบบจะไม่ออกเลขซ้ำ', 'error', 8000);
       else toast(errText(e), 'error', 7000);
     }
@@ -252,11 +294,14 @@ export function receiveView(root, X, pre = {}) {
     return panel;
   }
 
-  checkCard.append(h('div', { class: 'sar-check-top' }, h('div', { class: 'sar-check-file' }, preview, fileLine, h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { scanRun += 1; drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = ''; setStep('scan'); } }, pdf ? 'เปลี่ยนไฟล์ / สแกนใหม่' : 'อัปโหลดไฟล์'))), foundBox), dupBox, grid,
+  checkCard.append(h('div', { class: 'sar-check-top' }, h('div', { class: 'sar-check-file' }, preview, fileLine, h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { scanRun += 1; drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = ''; setStep('import'); } }, pdf ? 'เปลี่ยนไฟล์ / สแกนใหม่' : 'อัปโหลดไฟล์'))), foundBox), dupBox, grid,
     h('div', { class: 'btn-row sar-submit' }, submit, h('button', { class: 'btn', type: 'button', onclick: () => X.refresh('receive') }, 'ล้างแบบฟอร์ม')), status2);
   root.append(privacyNotice({ detail: 'หนังสือราชการอาจมีชื่อ-ข้อมูลผู้ป่วย ไฟล์ที่ลงรับจะเก็บใน Google Drive ของหน่วยงานในโฟลเดอร์ _saraban เฉพาะเจ้าหน้าที่ที่ได้รับสิทธิ์ — การอ่านข้อความด้วย OCR ทำบนเครื่องของคุณ ไม่ส่งออกอินเทอร์เน็ต' }), stepper, scanCard, checkCard, resultCard, fwdCard);
-  if (pre.inboxId) { checkCard.prepend(notice('info', 'ลงรับจากคิว Telegram', pre.file ? 'ไฟล์จาก Telegram จะถูกแนบเป็นลิงก์ให้อัตโนมัติ — อัปโหลดไฟล์ซ้ำที่นี่หากต้องการสแกนและประทับตรารับ' : 'ตรวจข้อมูลที่ระบบดึงมา แล้วกดยืนยันเพื่อออกเลขรับ'), ); setTimeout(() => dupCheck.flush(), 50); }
-  setStep(step);
+  if (pre.inboxId) {
+    checkCard.prepend(notice('info', 'ลงรับจากคิว', 'ระบบดึงไฟล์จากคิวมาอ่านให้อัตโนมัติ — ตรวจทานและแก้ไขได้ทุกช่องก่อนกดยืนยัน'));
+    setTimeout(() => dupCheck.flush(), 50);
+    setStep(step); loadQueueFile();
+  } else setStep(step);
 }
 
 /* ============================== SEND ============================== */

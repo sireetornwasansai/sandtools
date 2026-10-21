@@ -20,12 +20,15 @@ export function normalizeThai(s) {
     .replace(/ํ([่-๋])า/g, '$1ำ')      // ํ + ้ + า  →  ้ + ำ
     .replace(/ํา/g, 'ำ')                          // ํ + า      →  ำ
     .replace(new RegExp(`\\s+([${THAI_COMBINING}])`, 'g'), '$1') // "ก ำ", "ก ้" → no space before a combining mark
+    .replace(/(?<![ก-๙])([ก-ฮ]) (?=[ก-ฮเ-ไ])/g, '$1')            // a lone consonant cut off from its word ("อ นุเคราะห์")
+    .replace(/(?<=[ก-๙]) ([ะาำ])/g, '$1')                   // a following vowel that lost its consonant ("ควา ม" / "ร า")
     .replace(/[ \t]+/g, ' ')
     .trim();
 }
 
 const BULLET = /^[•●▪◦‣∙·\uF0B7\uF0A7\uF0D8\uF076]\s*/;
 const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)]; };
+const percentile = (arr, q) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(s.length * q))]; };
 const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
 
 /**
@@ -66,20 +69,22 @@ function buildRows(words, H) {
 }
 
 /** Join the words of one run: a visible gap means a space (Thai writes spaces between phrases), touching words are glued. */
-function joinWords(ws, H) {
+function joinWords(ws, H, HS = H) {
+  // HS = spacing height: the TALL words (those carrying tone marks / vowels above the line). When Tesseract cuts Thai into single letters the median height
+  // shrinks and ordinary letter gaps looked like spaces ("ขอคว า มอ นุ"), so the space threshold follows the tall words instead.
   let text = '';
-  ws.forEach((w, i) => { if (i) text += (w.bbox.x0 - ws[i - 1].bbox.x1) > 0.22 * H ? ' ' : ''; text += w.text; });
+  ws.forEach((w, i) => { if (i) text += (w.bbox.x0 - ws[i - 1].bbox.x1) > 0.22 * HS ? ' ' : ''; text += w.text; });
   return normalizeThai(text);
 }
 
-function splitCells(row, H, gap) {
+function splitCells(row, H, gap, HS) {
   const cells = []; let cur = [];
   row.words.forEach((w, i) => {
     if (i && (w.bbox.x0 - row.words[i - 1].bbox.x1) > gap) { cells.push(cur); cur = []; }
     cur.push(w);
   });
   if (cur.length) cells.push(cur);
-  return cells.map((ws) => ({ x0: ws[0].bbox.x0, x1: Math.max(...ws.map((w) => w.bbox.x1)), text: joinWords(ws, H) })).filter((c) => c.text);
+  return cells.map((ws) => ({ x0: ws[0].bbox.x0, x1: Math.max(...ws.map((w) => w.bbox.x1)), text: joinWords(ws, H, HS) })).filter((c) => c.text);
 }
 
 /** A row with no letter or digit at all (ruled lines, stamps, specks). \w is ASCII-only in JS, so Thai must be matched with \p{L}. */
@@ -96,10 +101,11 @@ export function layoutToMarkdown(words, opts = {}) {
   const clean = words.filter((w) => w.bbox.y1 > w.bbox.y0 && w.bbox.x1 > w.bbox.x0);
   if (!clean.length) return { markdown: '', confidence: 0, words: 0 };
   const H = Math.max(8, median(clean.map((w) => w.bbox.y1 - w.bbox.y0)));
+  const HS = Math.max(H, percentile(clean.map((w) => w.bbox.y1 - w.bbox.y0), 0.9));
   const pageW = opts.width || Math.max(...clean.map((w) => w.bbox.x1));
   const confidence = Math.round(mean(clean.map((w) => w.confidence == null ? 100 : w.confidence)));
 
-  const rows = buildRows(clean, H).map((r) => ({ ...r, cells: splitCells(r, H, (opts.cellGap || 1.6) * H) })).filter((r) => r.cells.length && !isNoise(r.cells.map((c) => c.text).join('')));
+  const rows = buildRows(clean, H).map((r) => ({ ...r, cells: splitCells(r, H, (opts.cellGap || 1.6) * H, HS) })).filter((r) => r.cells.length && !isNoise(r.cells.map((c) => c.text).join('')));
   if (!rows.length) return { markdown: '', confidence, words: clean.length };
 
   // --- find tables: runs of rows that have ≥2 cells whose left edges line up

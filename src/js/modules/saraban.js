@@ -52,7 +52,7 @@ export async function mount(root) {
   }
   /* Screens people flip between (dashboard, my work, lists …) are remembered for 25 s, so a tab switch is instant and the slow Apps Script is hit less.
      Any write (everything not listed here) drops all of it, and clicking the open tab again always reloads. Backend keeps its own 30 s cache too. */
-  const READ_OPS = new Set(['config', 'dash', 'my', 'units', 'numbers', 'nextno', 'queue', 'list']); const PASS_OPS = new Set(['get', 'track', 'dup', 'rows', 'parties', 'impscan']);
+  const READ_OPS = new Set(['config', 'dash', 'my', 'units', 'numbers', 'nextno', 'queue', 'list']); const PASS_OPS = new Set(['get', 'track', 'dup', 'rows', 'parties', 'impscan', 'queuefile']);
   const memo = new Map(); const MEMO_MS = 25000;
   const seed = (op, params, data) => memo.set(`${op}:${JSON.stringify(params)}`, { t: Date.now(), p: Promise.resolve(data) });
   function call(op, params = {}, timeout = 30000) {
@@ -154,21 +154,32 @@ export async function mount(root) {
 
   /* ----------------------------- ลงรับ: คิว Telegram + แบบฟอร์ม ----------------------------- */
   async function receiveTab(el, x, p) {
-    const qbox = h('div'); el.append(qbox);
-    if (!p.inboxId && cfg.queue) (async () => {
-      qbox.append(h('div', { class: 'card sar-skel-card' }, sk('line m'), sk('line l')));
-      let q = { items: [] }; try { q = await call('queue'); } catch (e) { qbox.replaceChildren(notice('warn', 'อ่านคิว Telegram ไม่ได้', errText(e))); return; }
-      qbox.replaceChildren();
-      if (q.items.length) {
-        const box = h('div', { class: 'card sar-queue' }, h('h3', { class: 'sar-h3' }, `รอลงรับจากกลุ่ม Telegram (${q.items.length})`), h('p', { class: 'muted' }, 'ตรวจข้อมูลที่ระบบดึงมา แล้วกด “ลงรับ” เพื่อออกเลขรับในทะเบียนเดียวกัน — ฉบับที่ไม่ใช่หนังสือถึงหน่วยงานกด “ไม่นำเข้า”'));
-        q.items.forEach((i) => box.append(h('div', { class: 'sar-qrow' }, h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, i.subject || '(ไม่มีเรื่อง)'), h('div', { class: 'muted sar-sub' }, [i.bookNo, i.from, i.bookDate ? `ลงวันที่ ${thaiDate(i.bookDate)}` : '', i.received ? thaiDateTime(i.received) : ''].filter(Boolean).join(' · ')),
-          h('div', { class: 'sar-badges' }, i.urgency ? badge(URGENCY[i.urgency], i.urgency === 'urgent' ? 'warn' : 'bad') : i.urgentHint ? badge('มีคำว่าด่วน', 'bad') : null, i.registered ? badge(`อาจลงรับแล้ว เลขรับ ${i.registered}`, 'warn') : null, i.age != null ? badge(`รอ ${ageLabel(i.age)}`, i.age >= 3 ? 'bad' : 'muted') : null, ...(i.suggest || []).slice(0, 2).map((g) => badge(`น่าจะเกี่ยวกับ ${g.name}`, 'info')), ...(i.urls || []).slice(0, 2).map((u) => h('a', { class: 'sar-badge sar-muted', href: safeUrl(u), target: '_blank', rel: 'noopener noreferrer' }, `เปิดลิงก์ · ${host(u)}`)))),
-        h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => go('receive', { inboxId: i.id, subject: i.subject, docNo: i.bookNo, docDate: i.bookDate, party: i.from, urgency: i.urgency || 'normal', channel: 'telegram', file: i.file || (i.urls || [])[0] || '' }) }, 'ลงรับ'),
-          h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => { const a = await ask('ไม่นำเข้าหนังสือนี้', [{ name: 'reason', label: 'เหตุผล *', type: 'textarea', rows: 2, required: true, min: 5, placeholder: 'เช่น ไม่เกี่ยวข้องกับโรงพยาบาล / ซ้ำกับฉบับที่ลงรับแล้ว' }], 'ไม่นำเข้า', { danger: true }); if (a && await act(() => call('reject', { id: i.id, reason: a.reason }), 'ย้ายไป “ไม่นำเข้า” แล้ว')) go('receive'); } }, 'ไม่นำเข้า')))));
-        qbox.append(box);
-      }
-    })();
-    const host2 = h('div'); el.append(host2); receiveView(host2, x, p);
+    const showQ = !p.inboxId && cfg.queue;
+    const qbox = h('aside', { class: 'sar-rcv-side', hidden: !showQ, 'aria-label': 'คิวรอลงรับ' });
+    const qlink = h('a', { class: 'sar-qlink', href: '#sar-queue', hidden: true, onclick: (e) => { e.preventDefault(); qbox.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 'คิวรอรับ');
+    const host2 = h('div', { class: 'sar-rcv-main' });
+    el.append(h('div', { class: 'sar-rcv-top' }, h('h2', { class: 'sar-h2' }, 'ลงรับหนังสือ'), qlink), h('div', { class: `sar-rcv${showQ ? ' has-side' : ''}` }, host2, qbox));
+    receiveView(host2, x, p);
+    if (!showQ) return;
+    qbox.id = 'sar-queue';
+    qbox.append(h('div', { class: 'card sar-skel-card' }, sk('line m'), sk('line l')));
+    let q = { items: [] }; try { q = await call('queue'); } catch (e) { qbox.replaceChildren(notice('warn', 'อ่านคิวไม่ได้', errText(e))); return; }
+    qbox.replaceChildren();
+    qlink.textContent = `คิวรอรับ (${q.items.length})`; qlink.hidden = !q.items.length;
+    const box = h('div', { class: 'card sar-queue' }, h('div', { class: 'sar-queue-h' }, h('h3', { class: 'sar-h3' }, 'เลือกจากคิวรอลงรับ'), badge(String(q.items.length), q.items.length ? 'info' : 'muted')));
+    if (!q.items.length) box.append(h('p', { class: 'muted' }, 'ไม่มีหนังสือรอลงรับในคิว'));
+    q.items.forEach((i) => {
+      const open = () => go('receive', { inboxId: i.id, subject: i.subject, docNo: i.bookNo, docDate: i.bookDate, party: i.from, urgency: i.urgency || 'normal', channel: i.source === 'email' ? 'email' : 'telegram', file: i.file || (i.urls || [])[0] || '' });
+      box.append(h('div', { class: 'sar-qrow' },
+        h('button', { class: 'sar-qpick', type: 'button', onclick: open, 'aria-label': `ลงรับ ${i.subject || ''}` },
+          h('div', { class: 'sar-subject' }, i.subject || '(ไม่มีเรื่อง)'),
+          h('div', { class: 'muted sar-sub' }, [i.from, i.bookNo, i.bookDate ? `ลงวันที่ ${thaiDate(i.bookDate)}` : '', i.received ? thaiDateTime(i.received) : ''].filter(Boolean).join(' · ')),
+          h('div', { class: 'sar-badges' }, i.file ? badge('มีไฟล์แนบ', 'ok') : (i.urls || []).length ? badge('ลิงก์', 'muted') : null, i.urgency ? badge(URGENCY[i.urgency], i.urgency === 'urgent' ? 'warn' : 'bad') : i.urgentHint ? badge('มีคำว่าด่วน', 'bad') : null, i.registered ? badge(`อาจลงรับแล้ว ${i.registered}`, 'warn') : null, i.age != null ? badge(ageLabel(i.age), i.age >= 3 ? 'bad' : 'muted') : null, ...(i.suggest || []).slice(0, 1).map((g) => badge(g.name, 'info')))),
+        h('div', { class: 'btn-row' },
+          ...(i.urls || []).slice(0, 1).map((u) => h('a', { class: 'btn btn-sm', href: safeUrl(u), target: '_blank', rel: 'noopener noreferrer' }, `ลิงก์ · ${host(u)}`)),
+          h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => { const a = await ask('ไม่นำเข้าหนังสือนี้', [{ name: 'reason', label: 'เหตุผล *', type: 'textarea', rows: 2, required: true, min: 5, placeholder: 'เช่น ไม่เกี่ยวข้องกับโรงพยาบาล / ซ้ำกับฉบับที่ลงรับแล้ว' }], 'ไม่นำเข้า', { danger: true }); if (a && await act(() => call('reject', { id: i.id, reason: a.reason }), 'ย้ายไป “ไม่นำเข้า” แล้ว')) go('receive'); } }, 'ไม่นำเข้า'))));
+    });
+    qbox.append(box);
   }
 
   /* ----------------------------- ศูนย์สารบรรณ: ทะเบียนรับ-ส่ง + วิเคราะห์ข้อมูล ----------------------------- */

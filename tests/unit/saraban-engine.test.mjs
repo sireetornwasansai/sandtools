@@ -73,3 +73,15 @@ test('v1.10 parseLetter: letter numbers with "ว." / "พิเศษ" and a se
   assert.equal(a.docNo, 'อว78.06/ว.20419'); assert.equal(a.party, 'สำนักงานสาธารณสุขจังหวัดเชียงใหม่'); assert.equal(a.docDate, '2026-10-10'); assert.equal(a.subject, 'ขอเชิญประชุม');
   assert.equal(parseLetter('ที่ สธ 0123/พิเศษ 9\nกระทรวงสาธารณสุข\nเรื่อง ก').docNo, 'สธ 0123/พิเศษ 9');
 });
+
+import { repairLabels, fuzzyMonth, skeleton, editDistance, RECEIVE_STEPS } from '../../src/js/modules/saraban-engine.js';
+test('v1.11 OCR-tolerant reading: damaged labels, months and digits are repaired, body text is not', () => {
+  assert.equal(skeleton('เรื่อง'), 'เรอง'); assert.equal(editDistance('เรอง', 'เรยน'), 2);
+  const r = repairLabels('เรอ่ ง ขอเชิญประชุม\nเร ยีน ผู้อำนวยการ\nอางถึง หนังสือเดิม\nเรื่อง ปกติ\nเรียนรู้ได้ทุกวัน');
+  assert.deepEqual(r.fixed, ['เรื่อง', 'เรียน', 'อ้างถึง']);
+  assert.match(r.text, /^เรื่อง ขอเชิญประชุม\nเรียน ผู้อำนวยการ\nอ้างถึง หนังสือเดิม\nเรื่อง ปกติ\nเรียนรู้ได้ทุกวัน$/);
+  assert.equal(fuzzyMonth('ตลุาคม'), 10); assert.equal(fuzzyMonth('กนั'), 0);
+  const p = parseLetter('ที่ สธ 0O12.4/ว 56l\nสำนักงานสาธารณสุขจังหวัดทดสอบ\n๙ ตลุาคม ๒๕๖๙\nเรอ่ ง ขอเชิญประชุม\nเร ยีน ผอ.โรงพยาบาล');
+  assert.equal(p.docDate, '2026-10-09'); assert.equal(p.subject, 'ขอเชิญประชุม'); assert.equal(p.salut, 'ผอ.โรงพยาบาล'); assert.match(p.docNo, /^สธ 0012\.4\/ว 561$/);
+  assert.deepEqual(RECEIVE_STEPS.map((s) => s[0]), ['import', 'read', 'dup', 'number', 'forward']);
+});

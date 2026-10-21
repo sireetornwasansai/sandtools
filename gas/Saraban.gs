@@ -977,6 +977,28 @@ function sarQueue(sc) {
     return { id: q.id, subject: q.subject, bookNo: q.bookNo, bookDate: q.bookDate, from: q.from, file: q.file, urls: q.urls, received: q.received, msgTime: q.msgTime, urgentHint: urgent, urgency: sarGuessUrgency(q.subject + ' ' + q.text), age: age >= 0 ? age : 0, registered: (q.bookNo && dups[sarNorm(q.bookNo)]) || '', source: q.source, suggest: sarSuggestUnits(q.subject, units) };
   }) };
 }
+/**
+ * v1.11 — the bytes of the file attached to a queue item, so the receive page can read (scan) it on the clerk's device and stamp it.
+ * Staff only; only pending queue rows; only a Drive file (the Telegram copy made by Inbox.gs), ≤ 10 MB, PDF/image only.
+ * @param {{inboxId:string}} b @returns {{name:string,mime:string,size:number,data:string}}
+ */
+function sarQueueFile(sc, b) {
+  sarNeedStaff(sc);
+  rateLimit('sarqfile', intProp('SARABAN_UPLOAD_PER_MIN', 40));
+  var id = String(b.inboxId || '');
+  if (!id || typeof inbAll !== 'function') throw httpError('BAD_REQUEST', 'ไม่พบรายการคิว');
+  var q = inbAll(inbSheet()).filter(function (r) { return r.id === id && r.status === 'pending'; })[0];
+  if (!q) throw httpError('NOT_FOUND', 'ไม่พบรายการในคิว หรือถูกลงรับ/ปฏิเสธไปแล้ว');
+  var m = /\/(?:file\/)?d\/([\w-]{20,})|[?&]id=([\w-]{20,})/.exec(String(q.file || ''));
+  if (!m) throw httpError('NO_FILE', 'รายการนี้ไม่มีไฟล์ในระบบ (เป็นลิงก์ภายนอก) — เปิดลิงก์แล้วอัปโหลดไฟล์เข้ามาเอง');
+  var file;
+  try { file = DriveApp.getFileById(m[1] || m[2]); } catch (x) { throw httpError('NO_FILE', 'เปิดไฟล์ในไดรฟ์ไม่ได้'); }
+  if (file.getSize() > SAR_FILE_MAX) throw httpError('FILE_TOO_LARGE', 'ไฟล์ใหญ่เกิน 10 MB');
+  var bytes = file.getBlob().getBytes(), mime = sarMagicOk(bytes);
+  if (mime !== 'application/pdf' && mime.indexOf('image/') !== 0) throw httpError('BAD_FILE', 'ไฟล์ในคิวไม่ใช่ PDF หรือรูปภาพ — อ่านอัตโนมัติไม่ได้');
+  sarLog(sc.email, 'queuefile', id, { size: bytes.length });
+  return { name: file.getName(), mime: mime, size: bytes.length, data: Utilities.base64Encode(bytes) };
+}
 function sarAgg() { return { k: { inToday: 0, outToday: 0, inYear: 0, outYear: 0, lastIn: 0, lastOut: 0, unrouted: 0, overdue: 0, urgentOpen: 0, returned: 0, inprogress: 0, routedOpen: 0, imported: 0, inMonth: 0, outMonth: 0 }, ch: {}, perDay: {}, pend: {} }; }
 function sarAggAdd(a, o, tos, pub, c) {
   var k = a.k, day = String(o.at).slice(0, 10);
@@ -1156,6 +1178,7 @@ function sarabanOp(u, op, b) {
     case 'get':      return sarGet(sc, b);
     case 'units':    return sarCached(sc, 'units', '', 30, function () { return sarUnitsOp(sc); });
     case 'queue':    return sarQueue(sc);
+    case 'queuefile': return sarQueueFile(sc, b);
     case 'reject':   return sarReject(sc, b);
     case 'dup':      sarNeedStaff(sc); { var f = sarFields(b, 'in'); return { items: sarDupFind(sarAll(sarTab(SAR_TAB)), f, String(b.inboxId || ''), sarInboxRows()).map(function (d) { return sarDupPublic(sc, d); }), suggest: sarSuggestUnits(f.subject, sarUnits(sc)) }; }
     case 'upload':   return sarUpload(sc, b);
