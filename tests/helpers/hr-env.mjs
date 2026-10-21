@@ -10,7 +10,7 @@ const HR = fs.readFileSync(path.join(root, 'gas', 'Hr.gs'), 'utf8');
 export function hrEnv(props = {}, now = '2026-10-19T03:00:00Z') {
   const store = { ADMIN_EMAILS: 'admin@x.go.th', HR_DEV_EMAILS: 'dev@x.go.th', ...props };
   const sheets = {}; const who = { email: 'user@x.go.th' }; const files = [];
-  const clock = { t: Date.parse(now) };
+  const clock = { t: Date.parse(now) }; const cache = {};
   const mk = (name) => {
     const g = (sheets[name] = sheets[name] || []); const sh = {
       getLastRow: () => g.length, getMaxColumns: () => 40, getParent: () => ({ getSpreadsheetTimeZone: () => 'Asia/Bangkok' }),
@@ -37,7 +37,8 @@ export function hrEnv(props = {}, now = '2026-10-19T03:00:00Z') {
       getUuid: () => 'xxxxxxxx-' + Math.random().toString(16).slice(2), base64Decode: (s) => [...Buffer.from(s, 'base64')], newBlob: (b, mime, name) => ({ b, mime, name }),
       formatDate: (d, tz, f) => { const t = new Date(d.getTime() + 7 * 3600e3); const Y = t.getUTCFullYear(), M = pad(t.getUTCMonth() + 1), D = pad(t.getUTCDate()), h = pad(t.getUTCHours()), m = pad(t.getUTCMinutes()), s = pad(t.getUTCSeconds()); return f.replace('yyyy', Y).replace('MM', M).replace('dd', D).replace('HH', h).replace('mm', m).replace('ss', s); }
     },
-    DriveApp: { Access: { ANYONE_WITH_LINK: 1, DOMAIN_WITH_LINK: 2 }, Permission: { VIEW: 1 }, getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => ({ createFile: (blob) => { files.push(blob); return { setSharing() {}, addViewer() {}, getUrl: () => `https://drive.google.com/file/d/${files.length}/view` }; } }) },
+    DriveApp: { Access: { ANYONE_WITH_LINK: 1, DOMAIN_WITH_LINK: 2 }, Permission: { VIEW: 1 }, getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => ({ createFile: (blob) => { files.push(blob); const id = 'FILEID' + String(files.length).padStart(6, '0') + 'abcdef'; return { setSharing() {}, addViewer() {}, getId: () => id, getName: () => blob.name, getUrl: () => `https://drive.google.com/file/d/${id}/view` }; } }) },
+    CacheService: { getScriptCache: () => ({ get: (k) => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = v; }, removeAll() {} }) },
     SpreadsheetApp: { newDataValidation: () => ({ requireValueInList() { return this; }, setAllowInvalid() { return this; }, build() { return {}; } }) }
   };
   vm.createContext(ctx); vm.runInContext(HR, ctx);

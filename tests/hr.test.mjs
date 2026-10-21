@@ -101,3 +101,34 @@ test('a name typed with a double space is stored with one space (it used to beco
   const e = hrEnv(); e.call('saveData', [rec({ name: 'ทวีศักดิ์  สายเขียว' })]);
   assert.equal(e.call('getEvents')[0].extendedProps.name, 'ทวีศักดิ์ สายเขียว');
 });
+
+// ---- v1.13 / Hr.gs 1.2.0: one file per uploadFile call, records carry only links
+const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString('base64');
+test('uploadFile → saveData with links: several files, newline-separated, only links this user uploaded', () => {
+  const e = hrEnv();
+  const u1 = e.call('uploadFile', [{ fileBase64: PDF, fileName: 'a.pdf' }]); const u2 = e.call('uploadFile', [{ fileBase64: JPG, fileName: 'b.jpg' }]);
+  assert.equal(u1.status, 'success'); assert.match(u1.url, /^https:\/\/drive\.google\.com\//);
+  const r = e.call('saveData', [rec({ files: [u1.url, u2.url], clientId: 'abcd1234-aaaa' })]); assert.equal(r.status, 'success');
+  assert.equal(e.call('getEvents')[0].extendedProps.file.split('\n').length, 2);
+  // a link nobody uploaded (or somebody else's) is refused
+  assert.equal(e.call('saveData', [rec({ files: ['https://drive.google.com/file/d/NOTMINE123456789/view'] })]).status, 'error');
+  const other = e.call('uploadFile', [{ fileBase64: PDF, fileName: 'c.pdf' }], 'other@x.go.th');
+  assert.equal(e.call('saveData', [rec({ files: [other.url] })], 'user@x.go.th').status, 'error');
+  assert.equal(e.call('uploadFile', [{ fileBase64: Buffer.from('MZ evil').toString('base64'), fileName: 'x.pdf' }]).status, 'error');
+});
+test('saveData with the same clientId is answered, not repeated (double tap / retry after a lost answer)', () => {
+  const e = hrEnv();
+  assert.equal(e.call('saveData', [rec({ clientId: 'dup00001-xyz' })]).status, 'success');
+  const again = e.call('saveData', [rec({ clientId: 'dup00001-xyz' })]);
+  assert.equal(again.status, 'success'); assert.equal(again.duplicate, true);
+  assert.equal(e.call('getEvents').length, 1);
+});
+test('updateRecord: keepFiles drops removed attachments, new links are added, max 3 files', () => {
+  const e = hrEnv();
+  const ups = ['a', 'b', 'c', 'd'].map((n) => e.call('uploadFile', [{ fileBase64: PDF, fileName: n + '.pdf' }]).url);
+  const id = e.call('saveData', [rec({ files: ups.slice(0, 2) })]).id;
+  assert.equal(e.call('updateRecord', [rec({ id, files: [ups[2]], keepFiles: [ups[0]] })]).status, 'success');
+  assert.deepEqual(e.call('getEvents')[0].extendedProps.file.split('\n'), [ups[0], ups[2]]);
+  assert.equal(e.call('updateRecord', [rec({ id, files: [ups[3]], keepFiles: [ups[0], ups[2]] })]).status, 'success');
+  assert.equal(e.call('updateRecord', [rec({ id, files: [e.call('uploadFile', [{ fileBase64: PDF, fileName: 'e.pdf' }]).url], keepFiles: [ups[0], ups[2], ups[3]] })]).status, 'error');
+});

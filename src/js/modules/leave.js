@@ -6,6 +6,7 @@ import { notice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { confirmBox } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
+import { time24Field, toMinutes } from '../core/timefield.js';
 
 /**
  * ลงลา / ไปราชการ / อบรม / ประชุม จากมือถือ — one screen, no calendar library: pick name → pick type → pick day → save.
@@ -19,6 +20,8 @@ const LEAVE_BASE = ['ลากิจ', 'ลาป่วย', 'ลาพักผ
 const MAIN_TYPES = [['ลากิจ', '🧳'], ['ลาป่วย', '🤒'], ['ลาพักผ่อน', '🌴'], ['ลาไปเรียน', '📚'], ['ไปราชการ', '🚗'], ['อบรม', '🎓'], ['ประชุม', '👥']];
 const CACHE_KEY = 'hr:mboot';
 const NAME_KEY = 'sand:leave:name';
+// quick times for trips / training / meetings — same defaults as the HR page
+const TIME_PRESETS = [['ทั้งวัน 08:00–16:00', '08:00', '16:00'], ['เช้า 08:00–12:00', '08:00', '12:00'], ['บ่าย 13:00–16:00', '13:00', '16:00']];
 
 const pad = (n) => String(n).padStart(2, '0');
 const parse = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null; };
@@ -109,6 +112,7 @@ export async function mount(root, ctx) {
     const hintEl = h('p', { class: 'lv-hint', role: 'status' });
     const start = h('input', { type: 'date', id: 'lv-start', value: f.start, required: true, onchange: () => { f.start = start.value; if (f.end && f.end < f.start) f.end = f.start; hint(hintEl); if (end) end.min = f.start; } });
     const end = h('input', { type: 'date', id: 'lv-end', value: f.end || f.start, min: f.start, onchange: () => { f.end = end.value; hint(hintEl); } });
+    start._dfMark = (d) => boot.holidays[d] || ''; end._dfMark = start._dfMark;   // the calendar paints official holidays red
     const quick = h('div', { class: 'lv-quick' }, ...[['วันนี้', boot.today], ['พรุ่งนี้', addDays(boot.today, 1)], ['มะรืนนี้', addDays(boot.today, 2)]].map(([label, d]) =>
       h('button', { class: 'chip', type: 'button', onclick: () => { f.start = d; if (f.end && f.end < d) f.end = d; start.value = d; end.min = d; hint(hintEl); } }, label)));
     const multi = h('input', { type: 'checkbox', id: 'lv-multi', checked: f.multi, disabled: !!f.half, onchange: () => { f.multi = multi.checked; if (!f.multi) f.end = ''; render(); } });
@@ -119,9 +123,25 @@ export async function mount(root, ctx) {
 
     // trip / training / meeting details
     if (!isLeaveType(f.type)) {
-      const st = h('input', { type: 'time', value: f.st, 'aria-label': 'เวลาเริ่ม', onchange: () => { f.st = st.value; } });
-      const et = h('input', { type: 'time', value: f.et, 'aria-label': 'เวลาสิ้นสุด', onchange: () => { f.et = et.value; } });
-      wrap.append(h('div', { class: 'lv-field' }, h('label', null, 'เวลา (ถ้ามี)'), h('div', { class: 'lv-times' }, st, h('span', null, 'ถึง'), et)));
+      // 24-hour time (HH : MM) from two <select>s — a native <input type="time"> shows AM/PM on many phones and a page cannot override that
+      const timeHint = h('p', { class: 'lv-hint', role: 'status' });
+      const sameDay = () => !f.multi || !f.end || f.end === f.start;
+      const checkTimes = () => {
+        timeHint.className = 'lv-hint'; timeHint.textContent = '';
+        if (!f.st && !f.et) return;
+        if (!f.st || !f.et) { timeHint.textContent = 'เลือกให้ครบทั้งเวลาเริ่มและเวลาสิ้นสุด'; return; }
+        if (sameDay() && toMinutes(f.et) <= toMinutes(f.st)) { timeHint.className = 'lv-hint lv-bad'; timeHint.textContent = '⚠️ เวลาสิ้นสุดต้องหลังเวลาเริ่ม'; return; }
+        const mins = toMinutes(f.et) - toMinutes(f.st);
+        if (sameDay()) timeHint.textContent = `รวม ${Math.floor(mins / 60)} ชม.${mins % 60 ? ` ${mins % 60} นาที` : ''}`;
+      };
+      const stF = time24Field({ value: f.st, label: 'เวลาเริ่ม', onChange: (v) => { f.st = v; checkTimes(); } });
+      const etF = time24Field({ value: f.et, label: 'เวลาสิ้นสุด', onChange: (v) => { f.et = v; checkTimes(); } });
+      const presets = h('div', { class: 'lv-quick' }, ...TIME_PRESETS.map(([label, a, b]) =>
+        h('button', { class: 'chip', type: 'button', onclick: () => { f.st = a; f.et = b; stF.setValue(a); etF.setValue(b); checkTimes(); } }, label)),
+        h('button', { class: 'chip', type: 'button', onclick: () => { f.st = ''; f.et = ''; stF.clear(); etF.clear(); checkTimes(); } }, 'ล้างเวลา'));
+      wrap.append(h('div', { class: 'lv-field' }, h('label', null, 'เวลา (ถ้ามี) · 24 ชั่วโมง'), presets,
+        h('div', { class: 'lv-times' }, stF.el, h('span', null, 'ถึง'), etF.el), timeHint));
+      checkTimes();
       if (f.type === 'ไปราชการ') {
         const pv = h('input', { type: 'text', maxlength: 80, value: f.province, placeholder: 'เช่น เชียงใหม่', autocomplete: 'off', oninput: () => { f.province = pv.value; } });
         wrap.append(h('div', { class: 'lv-field' }, h('label', null, 'สถานที่ / จังหวัด'), pv));
@@ -154,6 +174,10 @@ export async function mount(root, ctx) {
     msg.className = 'lv-msg'; msg.textContent = '';
     if (!f.name) { msg.className = 'lv-msg lv-bad'; msg.textContent = 'เลือกชื่อก่อนบันทึก'; return; }
     if (f.multi && f.end && f.end < f.start) { msg.className = 'lv-msg lv-bad'; msg.textContent = 'วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่ม'; return; }
+    if (!isLeaveType(f.type)) {
+      if (!!f.st !== !!f.et) { msg.className = 'lv-msg lv-bad'; msg.textContent = 'เลือกเวลาให้ครบทั้งเวลาเริ่มและเวลาสิ้นสุด (หรือกด "ล้างเวลา")'; return; }
+      if (f.st && f.et && (!f.multi || !f.end || f.end === f.start) && toMinutes(f.et) <= toMinutes(f.st)) { msg.className = 'lv-msg lv-bad'; msg.textContent = 'เวลาสิ้นสุดต้องหลังเวลาเริ่ม'; return; }
+    }
     saving = true; btn.disabled = true; btn.textContent = 'กำลังบันทึก…';
     try {
       const r = await call(editId ? 'updateRecord' : 'saveData', [payload()]);

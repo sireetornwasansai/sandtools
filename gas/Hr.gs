@@ -25,7 +25,7 @@
  * The ops  mobileBoot · line*  at the end of HR_OPS are implemented in HrLine.gs (keep it in the same project).
  */
 
-var HR_VERSION = '1.1.1';
+var HR_VERSION = '1.2.0';
 var HR_T = { CONTROL: 'HR_Control', STAFF: 'Staff', HOLIDAY: 'HolidayOverrides', DLOG: 'DailyLog', PROJ: 'Projects', LUSERS: 'LineUsers', LSCHED: 'LineReportSchedule' };
 var HR_H = {
   CONTROL: ['Timestamp', 'Name', 'Department', 'Type', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'Note', 'FileURL', 'ID', 'Province', 'Mission', 'Owner'],
@@ -37,7 +37,8 @@ var HR_H = {
   LSCHED: ['Key', 'ชื่อรายงาน', 'ชั่วโมง', 'นาที', 'วัน (ว่าง=ทุกวัน)', 'เปิดใช้งาน', 'ผู้รับ (บทบาท)']                       // HrLine.gs — when each report is sent
 };
 var HR_MAX_LEAVE = 3;                 // at most 3 people on leave per day per group (more needs a reason in the note)
-var HR_MAX_FILE = 10 * 1024 * 1024;   // attachment limit (bytes)
+var HR_MAX_FILE = 10 * 1024 * 1024;   // attachment limit (bytes) per file
+var HR_MAX_FILES = 3;                 // files per record (links are kept one per line in the "ไฟล์แนบ" cell)
 var HR_MAX_SPAN_DAYS = 366;           // longest single record
 var HR_KEEP_DAYS = 1100;              // the calendar loads records that ended within the last ~3 years
 var HR_DEPARTMENTS = ['กลุ่มงานพัฒนาคุณภาพฯ', 'กลุ่มงานยุทธศาสตร์ฯ', 'กลุ่มงานโสตฯ', 'รวมทุกกลุ่มงาน'];
@@ -73,6 +74,7 @@ var HR_OPS = {
   getDashboard: { fn: function () { return hrDashboard(); } },
   getEvents: { fn: function (sc) { return hrEvents(sc); } },
   getMonthlySummary: { fn: function (sc, a) { return hrMonthlySummary(a[0], a[1]); } },
+  uploadFile: { fn: function (sc, a) { return hrOpUpload(sc, a); } },   // v1.2: one attachment per call, NOT under the write lock (a slow upload must not block everybody else's save)
   saveData: { fn: function (sc, a) { return hrSaveData(sc, a[0]); }, write: true },
   updateRecord: { fn: function (sc, a) { return hrUpdateRecord(sc, a[0]); }, write: true },
   deleteRecord: { fn: function (sc, a) { return hrDeleteRecord(sc, a[0]); }, write: true },
@@ -411,6 +413,9 @@ function hrSaveData(sc, f) {
   var sh = hrTab('CONTROL'), tz = hrTz(sh), holidays = hrHolidayMap(), o;
   try { o = hrCleanForm(f, holidays, false); } catch (e) { return hrBadFormResult(e); }
   var recs = hrRead(sh, 14).map(function (r) { return hrRec(r, tz); }), fileUrl = '';
+  var clientId = String(f.clientId || ''); if (!/^[A-Za-z0-9-]{8,60}$/.test(clientId)) clientId = '';
+  // a second save with the same clientId (double tap, or a retry after the phone lost the answer) is answered, not repeated
+  if (clientId && recs.some(function (x) { return x.id === clientId; })) return hrOk('บันทึกสำเร็จ ✓ (รายการนี้ถูกบันทึกไว้แล้ว)', { id: clientId, duplicate: true });
   var noteText = o.note;
   if (o.isLeave) {   // quota: at most HR_MAX_LEAVE people of the group on leave that day
     var onLeave = recs.filter(function (x) { return x.dept === o.department && HR_LEAVE_CATS.indexOf(x.type) >= 0 && x.start <= o.startDate && x.end >= o.startDate && hrIsWorkday(o.startDate, holidays); }).length;
@@ -427,8 +432,12 @@ function hrSaveData(sc, f) {
       if (ns < hrMin(x.et) && ne > hrMin(x.st)) overlap += x.name + ' (' + x.st + '-' + x.et + ') ';
     });
   }
-  if (f.fileBase64) { try { fileUrl = hrUpload(sc, f); } catch (e) { if (e && e.expected) return hrErr('อัปโหลดไฟล์ไม่สำเร็จ: ' + e.message); throw e; } }
-  var id = Utilities.getUuid();
+  var links;
+  try { links = hrAcceptFiles(sc, f.files, []); if (f.fileBase64) links.push(hrUpload(sc, f)); }   // fileBase64 = old page versions still cached in a browser
+  catch (e) { if (e && e.expected) return hrErr(e.message); throw e; }
+  if (links.length > HR_MAX_FILES) return hrErr('แนบไฟล์ได้สูงสุด ' + HR_MAX_FILES + ' ไฟล์ต่อรายการ');
+  fileUrl = links.join('\n');
+  var id = clientId || Utilities.getUuid();
   sh.appendRow([new Date(), cell(o.name, 100), o.department, o.type, o.startDate, o.endDate, o.startTime ? "'" + o.startTime : '', o.endTime ? "'" + o.endTime : '', cell(noteText, 520), fileUrl, id, cell(o.province, 80), cell(o.mission, 200), sc.email]);
   recs.push({ name: o.name, dept: o.department, type: o.type, start: o.startDate, end: o.endDate });
   var msg = 'บันทึกสำเร็จ ✓' + (overlap ? '\n⚠️ มีเวลาทับซ้อนกับ: ' + overlap.trim() : '');
@@ -455,8 +464,13 @@ function hrUpdateRecord(sc, f) {
   if (i < 0) return hrErr('ไม่พบรายการที่ต้องการแก้ไข');
   var cur = hrRec(rows[i], tz);
   if (!hrCanEdit(sc, cur)) return hrErr('แก้ไขได้เฉพาะรายการที่คุณบันทึกเองหรือผู้ดูแลระบบ');
-  var fileUrl = String(rows[i][9] || '');
-  if (f.fileBase64) { try { fileUrl = hrUpload(sc, f); } catch (e) { if (e && e.expected) return hrErr('อัปโหลดไฟล์ไม่สำเร็จ: ' + e.message); throw e; } }
+  var existing = hrFileList(rows[i][9]);
+  var keep = Array.isArray(f.keepFiles) ? existing.filter(function (u) { return f.keepFiles.indexOf(u) >= 0; }) : existing;   // keepFiles absent (old page) = keep everything
+  var links;
+  try { links = keep.concat(hrAcceptFiles(sc, f.files, existing)); if (f.fileBase64) links.push(hrUpload(sc, f)); }
+  catch (e) { if (e && e.expected) return hrErr(e.message); throw e; }
+  if (links.length > HR_MAX_FILES) return hrErr('แนบไฟล์ได้สูงสุด ' + HR_MAX_FILES + ' ไฟล์ต่อรายการ');
+  var fileUrl = links.join('\n');
   var row = i + 2;
   sh.getRange(row, 1, 1, 10).setValues([[new Date(), cell(o.name, 100), o.department, o.type, o.startDate, o.endDate, o.startTime ? "'" + o.startTime : '', o.endTime ? "'" + o.endTime : '', cell(o.note, 520), fileUrl]]);
   sh.getRange(row, 12, 1, 2).setValues([[cell(o.province, 80), cell(o.mission, 200)]]);
@@ -497,7 +511,8 @@ function hrFolder() {
   var it = DriveApp.getFoldersByName('HR_Attachments');
   return it.hasNext() ? it.next() : DriveApp.createFolder('HR_Attachments');
 }
-function hrUpload(sc, f) {
+/** Store one attachment in Drive (outside the sheet lock). Returns {url, id, name, size, shared}. */
+function hrStoreFile(sc, f) {
   if (typeof f.fileBase64 !== 'string' || !f.fileBase64) throw httpError('BAD_FILE', 'ไม่พบข้อมูลไฟล์');
   if (Math.ceil(f.fileBase64.length * 3 / 4) > HR_MAX_FILE + 4) throw httpError('BAD_FILE', 'ไฟล์ใหญ่เกิน ' + (HR_MAX_FILE / 1048576) + ' MB');
   var bytes = Utilities.base64Decode(f.fileBase64);
@@ -506,11 +521,44 @@ function hrUpload(sc, f) {
   if (!kind) throw httpError('BAD_FILE', 'รองรับเฉพาะไฟล์ PDF, JPG, PNG');
   var base = String(f.fileName || 'attachment').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/\.[A-Za-z0-9]{1,5}$/, '').replace(/^\.+/, '').slice(0, 100) || 'attachment';
   var file = hrFolder().createFile(Utilities.newBlob(bytes, kind.mime, Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyyMMdd-HHmmss') + '_' + base + '.' + kind.ext));
+  var shared = hrShare(file);
+  try { file.addViewer(sc.email); } catch (x) { /* the owner already has access, or not a Google account */ }
+  var id = file.getId();
+  try { CacheService.getScriptCache().put('hrup:' + id, sc.email, 21600); } catch (x2) { /* saveData also accepts links the record already has */ }   // proof that THIS person uploaded it (6 h)
+  return { url: file.getUrl(), id: id, name: file.getName(), size: bytes.length, shared: shared };
+}
+function hrUpload(sc, f) { return hrStoreFile(sc, f).url; }   // old single-file path (page versions still cached in browsers)
+/** Share as HR_FILE_SHARING says. A domain that forbids public links used to make setSharing throw → the whole save failed and an orphan file stayed in Drive; now it steps down: link → domain → private. */
+function hrShare(file) {
   var mode = prop('HR_FILE_SHARING') || 'link';
-  if (mode === 'link') file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  else if (mode === 'domain') { try { file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); } catch (x) { /* not a Workspace domain: stays private */ } }
-  try { file.addViewer(sc.email); } catch (x) { /* the owner already has access */ }
-  return file.getUrl();
+  if (mode === 'private') return 'private';
+  if (mode === 'link') { try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); return 'link'; } catch (x) { /* external sharing is blocked → try the domain */ } }
+  try { file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); return 'domain'; } catch (x2) { return 'private'; }
+}
+/** op uploadFile — args[0] = {fileName, fileMime, fileBase64}. The page calls it once per file, then saveData / updateRecord carry only the returned links. */
+function hrOpUpload(sc, a) {
+  rateLimit('hrup', intProp('HR_UPLOAD_PER_MIN', 60));
+  var f = a && a[0];
+  if (!f || typeof f !== 'object') return hrErr('ไม่พบข้อมูลไฟล์');
+  try { var r = hrStoreFile(sc, f); return hrOk('อัปโหลดแล้ว', { url: r.url, id: r.id, name: r.name, size: r.size, shared: r.shared }); }
+  catch (e) { if (e && e.expected) return hrErr('อัปโหลดไฟล์ไม่สำเร็จ: ' + e.message); throw e; }
+}
+/** The "ไฟล์แนบ" cell → list of links (one per line; rows written before v1.2 hold a single link). */
+function hrFileList(cellValue) { return String(cellValue == null ? '' : cellValue).split(/\s+/).filter(function (u) { return /^https?:\/\//i.test(u); }); }
+function hrFileId(u) { var m = /\/d\/([A-Za-z0-9_-]{10,})/.exec(u) || /[?&]id=([A-Za-z0-9_-]{10,})/.exec(u); return m ? m[1] : ''; }
+/** Links a record may carry: ones this person just uploaded (remembered by uploadFile) or ones the record already had. Anything else is refused, so a link cannot be made up. */
+function hrAcceptFiles(sc, urls, existing) {
+  var out = [], seen = {}, cache = CacheService.getScriptCache();
+  (Array.isArray(urls) ? urls : []).forEach(function (u) {
+    u = String(u || '').trim();
+    var id = /^https:\/\/drive\.google\.com\//.test(u) ? hrFileId(u) : '';
+    if (!id) throw httpError('BAD_FILE', 'ลิงก์ไฟล์แนบไม่ถูกต้อง — กรุณาแนบไฟล์ใหม่อีกครั้ง');
+    if (seen[id]) return;
+    var mine = false; try { mine = cache.get('hrup:' + id) === sc.email; } catch (x) { mine = false; }
+    if (!mine && existing.indexOf(u) < 0) throw httpError('BAD_FILE', 'ไฟล์แนบหมดอายุการยืนยัน — กรุณาแนบไฟล์ใหม่อีกครั้ง');
+    seen[id] = 1; out.push(u);
+  });
+  return out;
 }
 
 /* ---------------------------------- reports -------------------------------- */

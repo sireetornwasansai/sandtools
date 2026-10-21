@@ -1066,3 +1066,34 @@ tr:hover > td { background: color-mix(in srgb, var(--primary) 4%, transparent); 
 .btn-hol-cancel, .btn-refresh-recent, .btn-setup { background: var(--white); color: var(--text2); border: 1px solid var(--border2); border-radius: var(--radius); }
 .btn-hol-cancel:hover, .btn-refresh-recent:hover, .btn-setup:hover { border-color: var(--primary); color: var(--primary); }
 .btn-modal-del { border-radius: var(--radius); }
+
+/* ───────── v1.13 — 24-hour time fields, attachments, calendar tap hint ───────── */
+/* HH : MM from two <select>s (core/timefield.js). .form-input has appearance:none, so give the selects their own chevron */
+.tf24 { width: 100%; }
+.tf24 select.form-input {
+  padding: 9px 22px 9px 10px; min-height: 42px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b8178' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center; background-size: 10px 6px;
+}
+[data-theme="dark"] .tf24 select.form-input { color-scheme: dark; }
+#formPanel .time-row > div, #editModal .tf24 { min-width: 0; }
+@media (max-width: 640px) { .tf24 select.form-input { min-height: 46px; font-size: 16px; } }   /* 16px: iOS does not zoom when a select is tapped */
+
+/* attachments: list of chosen files (each can be removed) + upload progress line */
+.file-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.file-list:empty { display: none; }
+.file-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 10px; border: 1px solid var(--border2); border-radius: var(--radius); background: var(--white); min-width: 0; }
+.file-item-ico { flex: none; font-size: 16px; }
+.file-item-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+a.file-item-name { color: var(--primary); text-decoration: underline; }
+.file-item-x { flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--bg); color: var(--text2); font-size: 20px; line-height: 1; cursor: pointer; }
+.file-item-x:hover { background: var(--danger-bg, #fde8e4); color: var(--danger); }
+.upload-status { margin-top: 6px; font-size: 12.5px; color: var(--text2); }
+.upload-status:empty { display: none; }
+.file-upload { min-height: 64px; }
+.file-upload input[type="file"] { font-size: 0; }   /* the whole box is the tap target on phones */
+
+/* calendar: days can be tapped to start a record */
+.cal-tip { margin: 8px 2px 0; font-size: 12.5px; color: var(--text3); }
+#calendar .fc-daygrid-day, #calendar .fc-timegrid-col, #calendar .fc-timegrid-slot-lane { cursor: pointer; }
+#calendar .fc-daygrid-day:hover { background: var(--primary-bg); }

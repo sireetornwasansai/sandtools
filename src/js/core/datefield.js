@@ -2,12 +2,16 @@
 //
 // 1) ช่องเลือกวันที่: ช่อง <input type="date"> ของเบราว์เซอร์แสดงรูปแบบตามภาษาของเครื่อง (บางเครื่องเป็น เดือน/วัน/ปี) และเราบังคับไม่ได้
 //    ไฟล์นี้จึงเปลี่ยนทุกช่องให้เป็นช่องพิมพ์ "วว/ดด/ปปปป" (เติม / ให้เอง) + ไอคอนปฏิทินด้านขวา กดแล้วเปิดปฏิทินของเบราว์เซอร์เพื่อเลือก
+//    - v1.13: ปฏิทินวาดเอง (core/calendar.js) แทนการสั่ง showPicker() ของช่อง date ที่ซ่อนไว้ (ในแอป LINE / iOS บางรุ่นกดไม่ติด) · มือถือแตะช่องไหนก็เปิดปฏิทิน (แผ่นด้านล่างจอ)
+//    - ตั้ง el._dfMark = (iso) => 'ชื่อวันหยุด' | '' เพื่อให้ปฏิทินขีดแดงวันหยุดของช่องนั้น
 //    - โค้ดของหน้าอื่น ๆ ไม่ต้องแก้: .value ยังอ่าน/เขียนเป็น "yyyy-mm-dd" (ค.ศ.) เหมือนเดิม และยังมีเหตุการณ์ input / change
 //    - ทำงานกับช่องที่ถูกสร้างภายหลังอัตโนมัติ (MutationObserver) และกับ Shadow DOM ของหน้า HR (initDates(shadowRoot))
 // 2) ฟังก์ชันจัดรูปแบบสำหรับข้อความที่แสดง: fmtDate / fmtDateTime
 //
 // ปีที่แสดง: พ.ศ. (สอดคล้องกับทะเบียนหนังสือ/HR เดิม) — ถ้าต้องการให้แสดง ค.ศ. เปลี่ยน YEAR_BE เป็น false บรรทัดเดียว
 // การพิมพ์รับได้ทั้งสองแบบ: ปี ≥ 2400 ถือเป็น พ.ศ. นอกนั้นเป็น ค.ศ. (พิมพ์ 21/10/2026 หรือ 21/10/2569 ได้ค่าเดียวกัน)
+import { openCalendar } from './calendar.js';
+
 export const YEAR_BE = true;
 
 const pad = (n, l = 2) => String(n).padStart(l, '0');
@@ -71,8 +75,7 @@ export function maskDate(raw, deleting = false) {
 /* ------------------------------------------------ ช่องเลือกวันที่ ------------------------------------------------ */
 const CAL_ICON = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16.5' rx='2.5'/%3E%3Cpath d='M8 2.5v4M16 2.5v4M3 10h18'/%3E%3C/svg%3E\")";
 const CSS = `input.df-input{background-image:${CAL_ICON};background-repeat:no-repeat;background-position:right .65rem center;background-size:1.15rem;padding-right:2.4rem!important;font-variant-numeric:tabular-nums}
-input.df-input.df-bad{border-color:#dc2626!important;box-shadow:0 0 0 3px rgb(220 38 38/.18)!important}
-.df-native{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}`;
+input.df-input.df-bad{border-color:#dc2626!important;box-shadow:0 0 0 3px rgb(220 38 38/.18)!important}`;
 const ZONE = 40;                                                   // ความกว้าง (px) ด้านขวาของช่องที่ถือว่ากดไอคอนปฏิทิน
 const SEEN = new WeakSet();
 const ROOTS = new WeakSet();
@@ -133,26 +136,22 @@ export function enhanceDate(el) {
     if (e.key === 'F4' || (e.altKey && e.key === 'ArrowDown')) { e.preventDefault(); openPicker(); }
   });
 
-  // ปฏิทิน: ช่อง date ของเบราว์เซอร์ที่มองไม่เห็น วางตรงตำแหน่งช่อง แล้วสั่งเปิดปฏิทิน
-  let nat = null;
+  // ปฏิทิน: core/calendar.js — เดสก์ท็อป = ป๊อปอัปใต้ช่อง · มือถือ = แผ่นด้านล่างจอ
+  const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   function openPicker() {
     if (el.disabled || el.readOnly) return;
-    if (!nat) {
-      nat = document.createElement('input'); nat.type = 'date'; nat.tabIndex = -1; nat.className = 'df-native'; nat.setAttribute('aria-hidden', 'true');
-      (root === document ? document.body : root).append(nat);
-      nat.addEventListener('change', () => {
-        if (!nat.value) return;
-        good = isoToDisplay(nat.value); nativeSet.call(el, good); el.classList.remove('df-bad'); fire('input'); fire('change');
-      });
-    }
-    const r = el.getBoundingClientRect();
-    nat.style.left = `${Math.round(r.left)}px`; nat.style.top = `${Math.round(r.bottom - 1)}px`;
-    nat.min = el.getAttribute('min') || ''; nat.max = el.getAttribute('max') || ''; nat.value = el.value || '';
-    try { if (typeof nat.showPicker === 'function') nat.showPicker(); else { nat.focus(); nat.click(); } } catch { nat.focus(); nat.click(); }
+    commit();
+    openCalendar({
+      anchor: el, root, value: el.value, min: el.getAttribute('min') || '', max: el.getAttribute('max') || '',
+      marks: typeof el._dfMark === 'function' ? el._dfMark : undefined,
+      onPick: (iso) => { good = isoToDisplay(iso); nativeSet.call(el, good); el.classList.remove('df-bad'); fire('input'); fire('change'); }
+    });
   }
   const inZone = (e) => { const r = el.getBoundingClientRect(); return e.clientX >= r.right - ZONE; };
-  el.addEventListener('mousemove', (e) => { el.style.cursor = inZone(e) ? 'pointer' : ''; });
-  el.addEventListener('click', (e) => { if (inZone(e)) openPicker(); });
+  if (coarse) { el.setAttribute('inputmode', 'none'); el.setAttribute('aria-haspopup', 'dialog'); }   // phone: tap anywhere on the field → calendar, no on-screen keyboard
+  el.addEventListener('mousemove', (e) => { el.style.cursor = coarse || inZone(e) ? 'pointer' : ''; });
+  el.addEventListener('click', (e) => { if (coarse || inZone(e)) { e.preventDefault(); openPicker(); } });
+  el.addEventListener('keydown', (e) => { if (e.key === ' ' && coarse) { e.preventDefault(); openPicker(); } });
   // label ที่ชี้มาที่ช่องนี้ใช้ได้ตามปกติ (ช่องยังเป็น element เดิม มี id เดิม)
 }
 

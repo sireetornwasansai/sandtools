@@ -21,7 +21,10 @@
 .lv-seg-lg { margin-bottom: .6rem; }
 .lv-quick { display: flex; gap: .4rem; flex-wrap: wrap; } .lv-quick .chip { min-height: 38px; }
 .lv-check { display: flex !important; align-items: center; gap: .6rem; min-height: 44px; font-weight: 500 !important; } .lv-check input { width: 22px; height: 22px; min-height: 0; flex: none; }
-.lv-times { display: grid; grid-template-columns: 1fr auto 1fr; gap: .5rem; align-items: center; }
+.lv-times { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: .5rem; align-items: center; }
+.lv-times > span { color: var(--muted); font-size: .9rem; }
+.lv-times .tf24 select { min-height: 50px; font-size: 1.05rem; padding-inline: .25rem; }   /* 24-hour HH : MM (core/timefield.js) */
+@media (max-width: 360px) { .lv-times { grid-template-columns: 1fr; } .lv-times > span { text-align: center; } }
 .lv-hint { margin: -.35rem 0 .85rem; font-size: .88rem; color: var(--muted); min-height: 1.2em; }
 .lv-bad { color: var(--error); }
 .lv-msg { min-height: 0; margin: 0 0 .6rem; font-weight: 600; white-space: pre-line; } .lv-msg:empty { display: none; }

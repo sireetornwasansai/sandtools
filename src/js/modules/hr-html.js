@@ -119,6 +119,7 @@ export const HR_HTML = `
       <!-- CALENDAR -->
       <div class="panel active" id="calendarPanel">
         <div id="calendar"></div>
+        <p class="cal-tip">💡 แตะวันที่ในปฏิทินเพื่อเริ่มบันทึกรายการของวันนั้น · แตะรายการเพื่อดูรายละเอียดและไฟล์แนบ</p>
       </div>
 
       <!-- FORM -->
@@ -262,11 +263,13 @@ export const HR_HTML = `
             <div class="form-group">
               <label class="form-label">แนบไฟล์ (ถ้ามี)</label>
               <div class="file-upload" id="fileArea">
-                <input type="file" id="fFile" accept=".pdf,.jpg,.jpeg,.png" data-hr-change="onFileSelect(this)">
+                <input type="file" id="fFile" accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.heic,.heif" multiple data-hr-change="onFileSelect(this)" aria-label="แนบไฟล์">
                 <div class="file-upload-icon">📎</div>
-                <div class="file-upload-hint">PDF, JPG, PNG — คลิกเพื่อเลือกไฟล์</div>
+                <div class="file-upload-hint">แตะเพื่อเลือกไฟล์หรือถ่ายรูป · PDF / รูปภาพ · สูงสุด 3 ไฟล์ (รูปจะถูกย่อให้อัตโนมัติ)</div>
                 <div class="file-upload-name" id="fFileName"></div>
               </div>
+              <div class="file-list" id="fFileList"></div>
+              <div class="upload-status" id="fUploadStatus" role="status" aria-live="polite"></div>
             </div>
 
             <button class="btn-submit" id="submitBtn" data-hr-click="submitForm()">
@@ -724,13 +727,15 @@ export const HR_HTML = `
         <input class="form-input" id="editNote">
       </div>
       <div class="form-group">
-        <label class="form-label">แนบไฟล์ใหม่ (ถ้ามี)</label>
+        <label class="form-label">ไฟล์แนบ</label>
+        <div class="file-list" id="editFileList"></div>
         <div class="file-upload" id="editFileArea">
-          <input type="file" id="editFile" accept=".pdf,.jpg,.jpeg,.png" data-hr-change="onEditFileSelect(this)">
+          <input type="file" id="editFile" accept="application/pdf,image/*,.pdf,.jpg,.jpeg,.png,.heic,.heif" multiple data-hr-change="onEditFileSelect(this)" aria-label="แนบไฟล์เพิ่ม">
           <div class="file-upload-icon">📎</div>
-          <div class="file-upload-hint">PDF, JPG, PNG · คลิกเพื่อเลือกไฟล์ใหม่</div>
+          <div class="file-upload-hint">แตะเพื่อเพิ่มไฟล์ · PDF / รูปภาพ · รวมไม่เกิน 3 ไฟล์</div>
           <div class="file-upload-name" id="editFileName"></div>
         </div>
+        <div class="upload-status" id="editUploadStatus" role="status" aria-live="polite"></div>
       </div>
     </div>
     <div class="modal-foot">

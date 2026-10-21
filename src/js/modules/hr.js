@@ -14,10 +14,8 @@ import { createHrApp } from './hr-legacy.js';
  * Backend: gas/Hr.gs (action "hr").  The page is the original stand-alone app, rendered in a Shadow DOM root (css/hr.css) so it cannot clash with SAND's styles.
  */
 // the locale files need their library to be loaded first
-const loadLibs = () => Promise.all([
-  loadScript('js/vendor/hr/fullcalendar.global.min.js').then(() => loadScript('js/vendor/hr/fullcalendar-th.global.min.js')),
-  loadScript('js/vendor/hr/flatpickr.min.js').then(() => loadScript('js/vendor/hr/flatpickr-th.js'))
-]);
+// v1.13: flatpickr is no longer used — times are the 24-hour HH:MM selects of core/timefield.js, dates the calendar of core/calendar.js
+const loadLibs = () => loadScript('js/vendor/hr/fullcalendar.global.min.js').then(() => loadScript('js/vendor/hr/fullcalendar-th.global.min.js'));
 const errText = (e) => (e && e.message) || 'ทำรายการไม่สำเร็จ';
 
 /** `google.script.run` look-alike: .withSuccessHandler(f).withFailureHandler(g).<method>(...args) → backend action "hr", op = method name. */
@@ -75,7 +73,8 @@ export async function mount(root) {
   if (mainEl) mainEl.style.paddingInline = 'clamp(.5rem, 1.2vw, 1.25rem)';
 
   const call = async (op, args) => {
-    const v = await sessionCall('hr', op, { args }, op === 'saveData' ? 90000 : 45000);
+    // uploadFile carries ONE attachment (base64) on its own → give a slow phone connection time; saveData / updateRecord now carry only links
+    const v = await sessionCall('hr', op, { args }, op === 'uploadFile' ? 150000 : (op === 'saveData' || op === 'updateRecord') ? 90000 : 45000);
     if (CACHE_FIELD[op]) patchCache(CACHE_FIELD[op], v);
     else if (op === 'getAll' && v) { const c = cacheGet(CACHE_KEY, CACHE_MAX_AGE); if (c && c.d) cacheSet(CACHE_KEY, { ...c.d, dashboard: v.dashboard, events: v.events }); }
     return v;
@@ -147,7 +146,7 @@ export async function mount(root) {
   // hide the unstyled page until hr.css arrives (no flash of raw HTML); a timer makes sure it is never left hidden
   host.style.visibility = 'hidden';
   const reveal = () => { host.style.visibility = ''; };
-  shadow.innerHTML = `<link rel="stylesheet" href="css/hr.css"><link rel="stylesheet" href="css/flatpickr.min.css"><div class="hr-root">${HR_HTML}<div id="hrFpHost"></div></div>`;
+  shadow.innerHTML = `<link rel="stylesheet" href="css/hr.css"><div class="hr-root">${HR_HTML}</div>`;
   initDates(shadow);                                                       // the HR page lives in a shadow root: its date fields need the same วว/ดด/ปปปป treatment
   const cssLink = shadow.querySelector('link[href$="hr.css"]');
   if (cssLink) { cssLink.addEventListener('load', reveal); cssLink.addEventListener('error', reveal); }

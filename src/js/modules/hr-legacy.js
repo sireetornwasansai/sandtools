@@ -7,6 +7,8 @@
 //   • the page no longer runs "firstTimeSetup" on every load (admins use the ตั้งค่าระบบ button); escAttr is quote-safe
 /* eslint-disable */
 // @ts-nocheck
+import { upgradeTimeInput, toMinutes } from '../core/timefield.js';
+import { prepareAttachment, fmtSize, splitFiles, ATTACH } from '../core/files.js';
 export function createHrApp($r, google, env) {
 var __H = {};
 // ─────────────────────────────────────────────
@@ -95,12 +97,13 @@ function hrInit() {
   buildSwatches();
   buildProvinceList();
 
-  var timeConfig = {
-    enableTime: true, noCalendar: true, dateFormat: "H:i",
-    time_24hr: true, minuteIncrement: 5, allowInput: true
-  };
-  flatpickr($r.getElementById('fStart'), hrFp(timeConfig));
-  flatpickr($r.getElementById('fEnd'), hrFp(timeConfig));
+  // เวลา 24 ชม. (ชม. : นาที) — เดิมใช้ flatpickr ซึ่งบนมือถือสลับไปใช้ช่องเวลาของเครื่อง (AM/PM) และป๊อปอัปเพี้ยนใน Shadow DOM
+  upgradeTimeInput($r.getElementById('fStart'), { label: 'เวลาเริ่ม' });
+  upgradeTimeInput($r.getElementById('fEnd'), { label: 'เวลาสิ้นสุด' });
+  // ปฏิทินเลือกวันที่ขีดแดงวันหยุดราชการ
+  ['fDate', 'fEndDate', 'editStartDate', 'editEndDate', 'dateJump'].forEach(function(id) {
+    var el = $r.getElementById(id); if (el) el._dfMark = function(d) { return THAI_HOLIDAYS[d] || ''; };
+  });
 
   // โหลดวันหยุดจาก server ก่อน แล้วค่อยโหลดพนักงาน/ปฏิทิน
   // เพื่อให้ปฏิทินเห็นวันหยุดที่ถูกต้องตั้งแต่ครั้งแรกที่ render
@@ -450,6 +453,11 @@ function renderCalendar() {
       if (ep && ep.isHoliday) { showToast('🔴 ' + ep.holidayName, 'info'); return; }
       showEventModal(ep.recordId || info.event.id, info.event.title, ep);
     },
+    // แตะวันที่ว่างบนปฏิทิน → ไปหน้าบันทึกพร้อมวันที่นั้น
+    dateClick: function(info) {
+      var d = String(info.dateStr || '').slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) startFormOnDate(d);
+    },
     viewDidMount: function(info) { currentView = info.view.type; }
   });
   calendar.render();
@@ -660,29 +668,111 @@ function checkQuota() {
   } else { notice.classList.remove('show'); }
 }
 
-function onFileSelect(input) {
-  var area = $r.getElementById('fileArea'), nameEl = $r.getElementById('fFileName');
-  if (input.files && input.files[0]) {
-    var f = input.files[0];
-    var MAX_MB = 10;
-    if (f.size > MAX_MB * 1024 * 1024) {
-      showToast('ไฟล์ใหญ่เกิน ' + MAX_MB + ' MB (' + (f.size/1024/1024).toFixed(1) + ' MB)', 'error');
-      input.value = '';
-      area.classList.remove('has-file'); nameEl.textContent = '';
-      return;
-    }
-    area.classList.add('has-file'); nameEl.textContent = '✓ ' + f.name + ' (' + (f.size/1024).toFixed(0) + ' KB)';
-  } else { area.classList.remove('has-file'); nameEl.textContent = ''; }
+// ─────────────────────────────────────────────
+// ATTACHMENTS — หลายไฟล์ · ย่อรูปก่อนส่ง · อัปโหลดทีละไฟล์ แล้วจึงบันทึกรายการ
+// ─────────────────────────────────────────────
+// เดิม: ไฟล์ (base64 สูงสุด ~13 MB) ไปกับคำขอบันทึกครั้งเดียว → เน็ตมือถือหมดเวลา/หลุด และเซิร์ฟเวอร์ล็อกชีตค้างระหว่างอัปโหลด
+// ใหม่: ย่อรูป → ส่งทีละไฟล์ (op uploadFile ลองซ้ำเมื่อเน็ตสะดุด) → saveData / updateRecord ส่งเฉพาะลิงก์ (เล็กและเร็ว)
+//       clientId กันบันทึกซ้ำเมื่อกดซ้ำ/ลองใหม่หลังหมดเวลา · ไฟล์ที่อัปโหลดแล้วไม่ถูกส่งซ้ำเมื่อบันทึกไม่สำเร็จแล้วกดอีกครั้ง
+var pendingFiles = [];             // File ที่เลือกในฟอร์ม (ยังไม่อัปโหลด)
+var editPendingFiles = [];         // File ที่เพิ่มในหน้าต่างแก้ไข
+var editKeptFiles = [];            // ลิงก์ไฟล์เดิมของรายการที่ยังคงไว้
+var uploadedLinks = new WeakMap(); // File → ลิงก์ที่อัปโหลดแล้ว
+var saving = false, savingEdit = false;
+function newRid() {
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* fall through */ }
+  return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+var formRid = newRid();
+
+function gsr(method, args) {
+  return new Promise(function(resolve, reject) { google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[method].apply(null, args); });
+}
+function gsrRetry(method, args, tries) {
+  return gsr(method, args).catch(function(e) {
+    var code = e && e.code;
+    if (tries > 1 && (code === 'NETWORK' || code === 'BAD_RESPONSE' || code === 'TIMEOUT')) return gsrRetry(method, args, tries - 1);
+    throw e;
+  });
+}
+function friendlyError(e) {
+  var code = e && e.code, msg = (e && e.message) || String(e || '');
+  if (code === 'TIMEOUT' || code === 'NETWORK') return 'การเชื่อมต่อสะดุดหรือช้าเกินไป — กดบันทึกอีกครั้งได้เลย (ระบบกันรายการซ้ำให้ และไม่อัปโหลดไฟล์ที่ส่งแล้วซ้ำ)';
+  return 'เกิดข้อผิดพลาด: ' + (msg || 'ทำรายการไม่สำเร็จ');
+}
+function fileKey(f) { return f.name + '|' + f.size + '|' + f.lastModified; }
+function pickError(f) {
+  var name = f.name || 'ไฟล์';
+  var pdf = f.type === 'application/pdf' || /\.pdf$/i.test(name);
+  var img = /^image\//.test(f.type || '') || /\.(jpe?g|png|heic|heif|webp|gif|bmp)$/i.test(name);
+  if (!pdf && !img) return '"' + name + '" — แนบได้เฉพาะไฟล์ PDF และรูปภาพ';
+  if (pdf && f.size > ATTACH.maxBytes) return 'PDF "' + name + '" ใหญ่เกิน ' + (ATTACH.maxBytes / 1048576) + ' MB (' + fmtSize(f.size) + ')';
+  if (img && f.size > 40 * 1048576) return 'รูป "' + name + '" ใหญ่เกินไป (' + fmtSize(f.size) + ')';
+  return '';
+}
+// เพิ่มไฟล์ที่เพิ่งเลือกเข้ารายการ (ไม่ซ้ำ ไม่เกินจำนวนที่รับ) แล้วล้างช่องเลือกไฟล์ เพื่อให้เลือกไฟล์เดิมซ้ำได้หลังเอาออก
+function addPicked(list, input, room) {
+  var picked = input.files ? Array.prototype.slice.call(input.files) : [];
+  input.value = '';
+  var skipped = 0, firstErr = '';
+  picked.forEach(function(f) {
+    var err = pickError(f);
+    if (err) { if (!firstErr) firstErr = err; return; }
+    if (list.some(function(x) { return fileKey(x) === fileKey(f); })) return;
+    if (list.length >= room) { skipped++; return; }
+    list.push(f);
+  });
+  if (firstErr) showToast(firstErr, 'error');
+  if (skipped) showToast('แนบได้สูงสุด ' + ATTACH.maxFiles + ' ไฟล์ต่อรายการ — ข้าม ' + skipped + ' ไฟล์', 'warn');
+}
+function fileIcon(f) { return (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '')) ? '📄' : '🖼️'; }
+function renderFileList(el, kept, pending, removeKeptFn, removePendingFn) {
+  var html = '';
+  kept.forEach(function(u, i) {
+    html += '<div class="file-item"><span class="file-item-ico">📎</span><a class="file-item-name" href="' + esc(hrSafeUrl(u)) + '" target="_blank" rel="noopener">ไฟล์แนบเดิม ' + (i + 1) + '</a>' +
+      '<button type="button" class="file-item-x" data-hr-click="' + removeKeptFn + '(' + i + ')" aria-label="เอาไฟล์แนบเดิมออก">×</button></div>';
+  });
+  pending.forEach(function(f, i) {
+    html += '<div class="file-item"><span class="file-item-ico">' + fileIcon(f) + '</span><span class="file-item-name">' + esc(f.name) + ' · ' + fmtSize(f.size) + '</span>' +
+      '<button type="button" class="file-item-x" data-hr-click="' + removePendingFn + '(' + i + ')" aria-label="เอาไฟล์นี้ออก">×</button></div>';
+  });
+  el.innerHTML = html;
+}
+function refreshFormFiles() {
+  renderFileList($r.getElementById('fFileList'), [], pendingFiles, '', 'removePendingFile');
+  $r.getElementById('fileArea').classList.toggle('has-file', pendingFiles.length > 0);
+  $r.getElementById('fFileName').textContent = pendingFiles.length ? '✓ เลือกแล้ว ' + pendingFiles.length + '/' + ATTACH.maxFiles + ' ไฟล์ — แตะเพื่อเพิ่ม' : '';
+}
+function onFileSelect(input) { addPicked(pendingFiles, input, ATTACH.maxFiles); refreshFormFiles(); }
+function removePendingFile(i) { pendingFiles.splice(i, 1); refreshFormFiles(); }
+
+// ย่อ/อัปโหลดทีละไฟล์ → รายการลิงก์
+async function uploadFiles(files, statusEl) {
+  var links = [];
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    if (uploadedLinks.has(f)) { links.push(uploadedLinks.get(f)); continue; }
+    statusEl.textContent = '⏳ กำลังเตรียมไฟล์ ' + (i + 1) + '/' + files.length + ' …';
+    var p = await prepareAttachment(f);
+    statusEl.textContent = '⏳ กำลังอัปโหลดไฟล์ ' + (i + 1) + '/' + files.length + ' (' + fmtSize(p.size) + (p.note ? ' · ' + p.note : '') + ') — อย่าปิดหน้านี้';
+    var r = await gsrRetry('uploadFile', [{ fileName: p.name, fileMime: p.mime, fileBase64: p.base64 }], 2);
+    if (!r || r.status !== 'success' || !r.url) throw new Error((r && r.message) || 'อัปโหลดไฟล์ไม่สำเร็จ');
+    uploadedLinks.set(f, r.url); links.push(r.url);
+  }
+  statusEl.textContent = files.length ? '✓ อัปโหลดไฟล์แล้ว กำลังบันทึกรายการ…' : '';
+  return links;
 }
 
 // ─────────────────────────────────────────────
 // SUBMIT FORM
 // ─────────────────────────────────────────────
 async function submitForm() {
+  if (saving) return;
   var name  = selectedName || $r.getElementById('fName').value.trim();
   var dept  = $r.getElementById('fDept').value;
   var type  = getEffectiveType();
   var date  = $r.getElementById('fDate').value;
+  var endDate = $r.getElementById('fEndDate').value || date;
   var note  = $r.getElementById('fNote').value;
   var sTime = $r.getElementById('fStart').value;
   var eTime = $r.getElementById('fEnd').value;
@@ -690,47 +780,50 @@ async function submitForm() {
   var mission  = $r.getElementById('fMission').value.trim();
 
   if (!name || !dept || !type || !date) { showToast("กรุณากรอกข้อมูลให้ครบถ้วน (ชื่อ / กลุ่มงาน / ประเภท / วันที่)", "error"); return; }
+  if (endDate < date) { showToast("วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่ม", "error"); return; }
   if (!sTime) sTime = "08:00";
   if (!eTime) eTime = "16:00";
+  if (endDate === date && toMinutes(eTime) <= toMinutes(sTime)) { showToast("เวลาสิ้นสุดต้องหลังเวลาเริ่ม", "error"); return; }
 
-  var btn = $r.getElementById('submitBtn');
-  btn.classList.add('loading');
-
-  var base64 = "", fileName = "", fileMime = "";
-  var fileEl = $r.getElementById('fFile');
-  if (fileEl.files && fileEl.files[0]) {
-    var f = fileEl.files[0]; fileMime = f.type; fileName = f.name;
-    base64 = await new Promise(function(res, rej) {
-      var r = new FileReader(); r.onload = function(){ res(r.result.split(',')[1]); }; r.onerror = function(){ rej(new Error("อ่านไฟล์ไม่ได้")); }; r.readAsDataURL(f);
-    });
-  }
-
-  google.script.run
-    .withSuccessHandler(function(result) {
-      btn.classList.remove('loading'); btn.disabled = false;
-      if (result.status === 'success') {
-        showToast(result.message, result.overlap ? 'warn' : 'success');
-        if (result.workdayWarning) setTimeout(function(){ showToast(result.workdayWarning, 'warn'); }, 800);
-        if (result.overlap) {
-          var ov = $r.getElementById('overlapNotice');
-          $r.getElementById('overlapMsg').textContent = '⚠️ เวลาทับซ้อนกับ: ' + result.overlapDetail;
-          ov.style.display = 'flex';
-          setTimeout(function(){ ov.style.display = 'none'; }, 8000);
-        }
-        resetForm(); loadAll(); showPanel('calendar');
-      } else {
-        showToast(result.message, 'error');
-        if (result.overQuota) { $r.getElementById('quotaNotice').classList.add('show'); $r.getElementById('fNote').focus(); }
+  var btn = $r.getElementById('submitBtn'), statusEl = $r.getElementById('fUploadStatus');
+  saving = true; btn.disabled = true; btn.classList.add('loading');
+  try {
+    var links = await uploadFiles(pendingFiles, statusEl);
+    var result = await gsr('saveData', [{
+      name: name, department: dept, type: type, startDate: date, endDate: endDate,
+      startTime: sTime, endTime: eTime, note: note, province: province, mission: mission,
+      files: links, clientId: formRid
+    }]);
+    if (result.status === 'success') {
+      showToast(result.message, result.overlap ? 'warn' : 'success');
+      if (result.workdayWarning) setTimeout(function(){ showToast(result.workdayWarning, 'warn'); }, 800);
+      if (result.overlap) {
+        var ov = $r.getElementById('overlapNotice');
+        $r.getElementById('overlapMsg').textContent = '⚠️ เวลาทับซ้อนกับ: ' + result.overlapDetail;
+        ov.style.display = 'flex';
+        setTimeout(function(){ ov.style.display = 'none'; }, 8000);
       }
-    })
-    .withFailureHandler(function(err) { btn.classList.remove('loading'); btn.disabled = false; showToast("เกิดข้อผิดพลาด: " + (err.message||err), "error"); })
-    .saveData({
-      name: name, department: dept, type: type, startDate: date,
-      endDate: $r.getElementById('fEndDate').value || date,
-      startTime: sTime, endTime: eTime, note: note,
-      province: province, mission: mission,
-      fileBase64: base64, fileName: fileName, fileMime: fileMime
-    });
+      resetForm(); loadAll(); showPanel('calendar');
+    } else {
+      showToast(result.message, 'error');
+      if (result.overQuota) { $r.getElementById('quotaNotice').classList.add('show'); $r.getElementById('fNote').focus(); }
+    }
+  } catch (err) {
+    showToast(friendlyError(err), 'error');
+  } finally {
+    saving = false; btn.classList.remove('loading'); statusEl.textContent = ''; checkQuota();
+  }
+}
+
+// แตะวันที่บนปฏิทิน → หน้าบันทึกพร้อมวันที่นั้น
+function startFormOnDate(d) {
+  showPanel('form');
+  $r.getElementById('fDate').value = d;
+  $r.getElementById('fEndDate').value = d;
+  onDateChange();
+  showToast('📅 เลือกวันที่ ' + thaiDate(d) + ' แล้ว — กรอกรายละเอียดแล้วกดบันทึก', 'info');
+  var nm = $r.getElementById('fName');
+  if (nm && !nm.value) setTimeout(function() { try { nm.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }, 150);
 }
 
 function resetForm() {
@@ -743,8 +836,8 @@ function resetForm() {
   if (fpStart) fpStart.clear(); else $r.getElementById('fStart').value = '';
   if (fpEnd)   fpEnd.clear();   else $r.getElementById('fEnd').value = '';
   $r.getElementById('fFile').value = '';
-  $r.getElementById('fileArea').classList.remove('has-file');
-  $r.getElementById('fFileName').textContent = '';
+  pendingFiles = []; formRid = newRid(); refreshFormFiles();
+  $r.getElementById('fUploadStatus').textContent = '';
   $r.getElementById('quotaNotice').classList.remove('show');
   $r.getElementById('overlapNotice').style.display = 'none';
   $r.getElementById('holidayBlockNotice').style.display = 'none';
@@ -822,7 +915,7 @@ function renderStaffHistory(records) {
   records.sort(function(a,b){ return (b.startDate||'').localeCompare(a.startDate||''); });
   body.innerHTML = '<div class="hist-list">' + records.map(function(r) {
     var dateStr = thaiDate(r.startDate) + (r.endDate && r.endDate !== r.startDate ? ' – ' + thaiDate(r.endDate) : '');
-    var fileBtn = r.file ? '<a href="' + esc(hrSafeUrl(r.file)) + '" target="_blank" rel="noopener" class="hist-file-link">📎 ไฟล์แนบ</a>' : '';
+    var fileBtn = splitFiles(r.file).map(function(u, i, arr) { return '<a href="' + esc(hrSafeUrl(u)) + '" target="_blank" rel="noopener" class="hist-file-link">📎 ไฟล์แนบ' + (arr.length > 1 ? ' ' + (i + 1) : '') + '</a>'; }).join(' ');
     return '<div class="hist-item">' +
       '<div class="hist-item-top"><span class="type-tag">' + esc(r.type) + '</span><span class="hist-date">' + esc(dateStr) + '</span></div>' +
       (r.province ? '<div class="hist-note">📍 ' + esc(r.province) + '</div>' : '') +
@@ -1597,35 +1690,42 @@ function copyProjSummary() {
 // ─────────────────────────────────────────────
 var currentEditEp = null;
 
-// Flatpickr instances for edit modal — init once lazily
-var _editFpStart = null, _editFpEnd = null;
-function ensureEditFlatpickr() {
-  var tcfg = { enableTime:true, noCalendar:true, dateFormat:"H:i", time_24hr:true, minuteIncrement:5, allowInput:true };
-  if (!_editFpStart) _editFpStart = flatpickr($r.getElementById('editStartTime'), hrFp(tcfg));
-  if (!_editFpEnd)   _editFpEnd   = flatpickr($r.getElementById('editEndTime'), hrFp(tcfg));
+// ช่องเวลา 24 ชม. ของหน้าต่างแก้ไข — สร้างครั้งแรกที่เปิด
+var _editTimeReady = false;
+function ensureEditTime() {
+  if (_editTimeReady) return; _editTimeReady = true;
+  upgradeTimeInput($r.getElementById('editStartTime'), { label: 'เวลาเริ่ม' });
+  upgradeTimeInput($r.getElementById('editEndTime'), { label: 'เวลาสิ้นสุด' });
 }
+function refreshEditFiles() {
+  renderFileList($r.getElementById('editFileList'), editKeptFiles, editPendingFiles, 'removeEditKeptFile', 'removeEditPendingFile');
+  $r.getElementById('editFileArea').classList.toggle('has-file', editPendingFiles.length > 0);
+  $r.getElementById('editFileName').textContent = editPendingFiles.length ? '✓ เพิ่มใหม่ ' + editPendingFiles.length + ' ไฟล์' : '';
+}
+function onEditFileSelect(input) { addPicked(editPendingFiles, input, Math.max(0, ATTACH.maxFiles - editKeptFiles.length)); refreshEditFiles(); }
+function removeEditPendingFile(i) { editPendingFiles.splice(i, 1); refreshEditFiles(); }
+function removeEditKeptFile(i) { editKeptFiles.splice(i, 1); refreshEditFiles(); }
 
 function openEditModal(ep) {
   currentEditEp = ep;
   closeModal();
-  ensureEditFlatpickr();
+  ensureEditTime();
   $r.getElementById('editId').value        = ep.recordId || '';
   $r.getElementById('editName').value      = ep.name || '';
   $r.getElementById('editDept').value      = ep.department || '';
   $r.getElementById('editType').value      = ep.type || '';
   $r.getElementById('editStartDate').value = ep.startDate || '';
   $r.getElementById('editEndDate').value   = ep.endDate || ep.startDate || '';
-  // set Flatpickr values
-  if (_editFpStart) _editFpStart.setDate(ep.startTime || '', true); else $r.getElementById('editStartTime').value = ep.startTime || '';
-  if (_editFpEnd)   _editFpEnd.setDate(ep.endTime   || '', true); else $r.getElementById('editEndTime').value   = ep.endTime   || '';
+  $r.getElementById('editStartTime').value = ep.startTime || '';
+  $r.getElementById('editEndTime').value   = ep.endTime || '';
   $r.getElementById('editNote').value      = (ep.note||'').replace(/^⚠️ เกินโควต้า: /,'');
   $r.getElementById('editProvince').value  = ep.province || '';
   $r.getElementById('editMission').value   = ep.mission || '';
   $r.getElementById('editOutOfAreaGroup').style.display = OUT_OF_AREA_TYPES.indexOf(ep.type) >= 0 ? '' : 'none';
-  $r.getElementById('editFileUrl').value   = ep.file || '';
-  $r.getElementById('editFileName').textContent = ep.file ? '📎 มีไฟล์แนบอยู่แล้ว' : '';
-  $r.getElementById('editFileArea').classList.remove('has-file');
+  editKeptFiles = splitFiles(ep.file); editPendingFiles = [];
   $r.getElementById('editFile').value = '';
+  $r.getElementById('editUploadStatus').textContent = '';
+  refreshEditFiles();
   $r.getElementById('editModal').classList.add('open');
 }
 function closeEditModal() { $r.getElementById('editModal').classList.remove('open'); currentEditEp = null; }
@@ -1638,19 +1738,8 @@ function onEditTypeChange() {
     $r.getElementById('editMission').value = '';
   }
 }
-function onEditFileSelect(input) {
-  var nameEl = $r.getElementById('editFileName'), area = $r.getElementById('editFileArea');
-  if (input.files && input.files[0]) {
-    var f = input.files[0];
-    var MAX_MB = 10;
-    if (f.size > MAX_MB * 1024 * 1024) {
-      showToast('ไฟล์ใหญ่เกิน ' + MAX_MB + ' MB', 'error');
-      input.value = ''; area.classList.remove('has-file'); nameEl.textContent = ''; return;
-    }
-    area.classList.add('has-file'); nameEl.textContent = '✓ ' + f.name + ' (' + (f.size/1024).toFixed(0) + ' KB)';
-  } else { area.classList.remove('has-file'); nameEl.textContent = ''; }
-}
 async function submitEdit() {
+  if (savingEdit) return;
   var id = $r.getElementById('editId').value;
   var name = $r.getElementById('editName').value.trim();
   var dept = $r.getElementById('editDept').value;
@@ -1662,33 +1751,28 @@ async function submitEdit() {
   var note      = $r.getElementById('editNote').value;
   var province  = $r.getElementById('editProvince').value.trim();
   var mission   = $r.getElementById('editMission').value.trim();
-  var fileUrl   = $r.getElementById('editFileUrl').value;
 
   if (!id || !name || !type || !startDate) { showToast("กรอกข้อมูลไม่ครบ","error"); return; }
+  if (endDate < startDate) { showToast("วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่ม","error"); return; }
+  if (!!startTime !== !!endTime) { showToast("เลือกเวลาให้ครบทั้งเวลาเริ่มและเวลาสิ้นสุด","error"); return; }
+  if (startTime && endDate === startDate && toMinutes(endTime) <= toMinutes(startTime)) { showToast("เวลาสิ้นสุดต้องหลังเวลาเริ่ม","error"); return; }
 
-  var btn = $r.getElementById('editSaveBtn');
-  btn.disabled = true; btn.textContent = '⏳ กำลังบันทึก...';
-
-  var base64='', fileName='', fileMime='';
-  var fileEl = $r.getElementById('editFile');
-  if (fileEl.files && fileEl.files[0]) {
-    var f = fileEl.files[0]; fileMime = f.type; fileName = f.name;
-    base64 = await new Promise(function(res, rej) {
-      var r = new FileReader(); r.onload = function(){ res(r.result.split(',')[1]); }; r.onerror = function(){ rej(new Error("อ่านไฟล์ไม่ได้")); }; r.readAsDataURL(f);
-    });
+  var btn = $r.getElementById('editSaveBtn'), statusEl = $r.getElementById('editUploadStatus');
+  savingEdit = true; btn.disabled = true; btn.textContent = '⏳ กำลังบันทึก...';
+  try {
+    var links = await uploadFiles(editPendingFiles, statusEl);
+    var result = await gsr('updateRecord', [{ id: id, name: name, department: dept, type: type, startDate: startDate, endDate: endDate, startTime: startTime, endTime: endTime,
+      note: note, province: province, mission: mission, keepFiles: editKeptFiles.slice(), files: links }]);
+    if (result.status === 'success') {
+      showToast(result.message, 'success');
+      if (result.workdayWarning) setTimeout(function(){ showToast(result.workdayWarning, 'warn'); }, 600);
+      closeEditModal(); loadAll();
+    } else { showToast(result.message, 'error'); }
+  } catch (e) {
+    showToast(friendlyError(e), 'error');
+  } finally {
+    savingEdit = false; btn.disabled = false; btn.textContent = '💾 บันทึกการแก้ไข'; statusEl.textContent = '';
   }
-
-  google.script.run
-    .withSuccessHandler(function(result) {
-      btn.disabled = false; btn.textContent = '💾 บันทึกการแก้ไข';
-      if (result.status==='success') {
-        showToast(result.message,'success');
-        if (result.workdayWarning) setTimeout(function(){ showToast(result.workdayWarning,'warn'); }, 600);
-        closeEditModal(); loadAll();
-      } else { showToast(result.message,'error'); }
-    })
-    .withFailureHandler(function(e){ btn.disabled = false; btn.textContent = '💾 บันทึกการแก้ไข'; showToast("เกิดข้อผิดพลาด: "+(e.message||e),"error"); })
-    .updateRecord({ id, name, department: dept, type, startDate, endDate, startTime, endTime, note, province, mission, fileUrl, fileBase64: base64, fileName, fileMime });
 }
 
 // ─────────────────────────────────────────────
@@ -1720,10 +1804,12 @@ function showEventModal(id, title, ep) {
 
   var foot = $r.getElementById('evModalFoot');
   foot.innerHTML = '';
-  if (ep.file) {
-    var fb = document.createElement('button'); fb.className = 'btn-modal-file'; fb.textContent = '📎 เปิดไฟล์แนบ';
-    fb.onclick = function(){ hrOpenUrl(ep.file); }; foot.appendChild(fb);
-  }
+  var fileLinks = splitFiles(ep.file);
+  fileLinks.forEach(function(u, i) {
+    var fb = document.createElement('button'); fb.className = 'btn-modal-file'; fb.type = 'button';
+    fb.textContent = fileLinks.length > 1 ? '📎 ไฟล์แนบ ' + (i + 1) : '📎 เปิดไฟล์แนบ';
+    fb.onclick = function(){ hrOpenUrl(u); }; foot.appendChild(fb);
+  });
   if (currentEventId && ep.canEdit !== false) {
     var eb = document.createElement('button'); eb.className = 'btn-modal-edit'; eb.textContent = '✏️ แก้ไข';
     eb.onclick = function(){ openEditModal(ep); }; foot.appendChild(eb);
@@ -1831,12 +1917,11 @@ function escAttr(s) {
 function removeParent(el) { if (el && el.parentElement) el.parentElement.remove(); }
 function onOverlay(ev, el, fnName) { if (ev && ev.target === el && __H[fnName]) __H[fnName](); }
 function setProgressLabel(v) { var el = $r.getElementById('projProgressVal'); if (el) el.textContent = v + '%'; }
-function hrFp(cfg) { var o = {}; for (var k in cfg) o[k] = cfg[k]; o.appendTo = $r.getElementById('hrFpHost') || undefined; o.locale = (typeof flatpickr !== 'undefined' && flatpickr.l10ns && flatpickr.l10ns.th) || undefined; return o; }
 function hrSafeColor(c) { c = String(c == null ? '' : c).trim(); return /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#c4623d'; }
 function hrSafeUrl(u) { u = String(u == null ? '' : u).trim(); return /^https?:\/\//i.test(u) ? u : '#'; }
 function hrOpenUrl(u) { if (/^https?:\/\//i.test(String(u || ''))) window.open(u, '_blank', 'noopener,noreferrer'); }
 function printPage() { env.print($r.querySelector('.panel.active'), $r.getElementById('panelTitle') && $r.getElementById('panelTitle').textContent); }
 
-__H = { addStaff, bindProjectCombo, buildProvinceList, buildSwatches, changeStaffColor, changeStaffDept, changeView, checkQuota, closeAllCombos, closeAllMenus, closeDlogAddForm, closeEditModal, closeHistModal, closeHolAddForm, closeModal, closeProjAddForm, confirmDeleteDlog, confirmDeleteHoliday, confirmDeleteProj, confirmRestoreDefaults, copyDlogSummary, copyProjSummary, copyToClipboard, dayCell, deleteEventRecord, deleteStaff, downloadCSV, ensureEditFlatpickr, esc, escAttr, exportCSV, exportDlogCSV, exportProjCSV, filterDlogTable, filterReportTable, getAutoColor, getColorForStaff, getEffectiveType, getFilteredEvents, getHolidayEvents, getHolidayLabelEvents, getProjectStatus, goToDate, goToToday, hideLoading, hrInit, loadAll, loadDlogPanel, loadHolidayPanel, loadHolidays, loadProjPanel, loadReport, loadStaff, mRow, onDateChange, onDeptChange, onEditFileSelect, onEditTypeChange, onFileSelect, onModalOverlayClick, onNameInput, onOverlay, onTypeChange, openDlogEditForm, openEditModal, openHolEditForm, openProjEditForm, openRecentItem, openStaffHistory, printPage, removeParent, renderCalendar, renderDlogTable, renderHolidayTable, renderProjCurrentView, renderProjGrid, renderProjTimeline, renderRecentList, renderReportTable, renderStaffHistory, renderStaffTable, renderStreak, resetForm, restoreHoliday, runSetup, selectStaff, setDeptFilter, setHalfDay, setProgressLabel, showEventModal, showPanel, showToast, submitDlog, submitEdit, submitForm, submitHoliday, submitProject, syncHolidayMap, thaiDate, thaiDateFull, thaiDateShort, timeAgo, toggleDlogAddForm, toggleHolAddForm, toggleMenu, toggleProjAddForm, toggleProjView };
+__H = { addStaff, bindProjectCombo, buildProvinceList, buildSwatches, changeStaffColor, changeStaffDept, changeView, checkQuota, closeAllCombos, closeAllMenus, closeDlogAddForm, closeEditModal, closeHistModal, closeHolAddForm, closeModal, closeProjAddForm, confirmDeleteDlog, confirmDeleteHoliday, confirmDeleteProj, confirmRestoreDefaults, copyDlogSummary, copyProjSummary, copyToClipboard, dayCell, deleteEventRecord, deleteStaff, downloadCSV, ensureEditTime, esc, escAttr, exportCSV, exportDlogCSV, exportProjCSV, filterDlogTable, filterReportTable, getAutoColor, getColorForStaff, getEffectiveType, getFilteredEvents, getHolidayEvents, getHolidayLabelEvents, getProjectStatus, goToDate, goToToday, hideLoading, hrInit, loadAll, loadDlogPanel, loadHolidayPanel, loadHolidays, loadProjPanel, loadReport, loadStaff, mRow, onDateChange, onDeptChange, onEditFileSelect, onEditTypeChange, onFileSelect, onModalOverlayClick, onNameInput, onOverlay, onTypeChange, openDlogEditForm, openEditModal, openHolEditForm, openProjEditForm, openRecentItem, openStaffHistory, printPage, removeEditKeptFile, removeEditPendingFile, removeParent, removePendingFile, startFormOnDate, renderCalendar, renderDlogTable, renderHolidayTable, renderProjCurrentView, renderProjGrid, renderProjTimeline, renderRecentList, renderReportTable, renderStaffHistory, renderStaffTable, renderStreak, resetForm, restoreHoliday, runSetup, selectStaff, setDeptFilter, setHalfDay, setProgressLabel, showEventModal, showPanel, showToast, submitDlog, submitEdit, submitForm, submitHoliday, submitProject, syncHolidayMap, thaiDate, thaiDateFull, thaiDateShort, timeAgo, toggleDlogAddForm, toggleHolAddForm, toggleMenu, toggleProjAddForm, toggleProjView };
 return { init: hrInit, handlers: __H, hydrate: hrHydrate };
 }
