@@ -25,8 +25,9 @@ test('keywords: typed text and rich-menu words are understood (spaces / word ord
   const e = lineEnv(); const p = (t) => e.run('hrlParseText', t);
   assert.equal(p('สัปดาห์นี้ใครลา'), 'thisweek'); assert.equal(p('สัปดาห์หน้า ใครลา'), 'nextweek'); assert.equal(p('อาทิตย์หน้าใครลา'), 'nextweek');
   assert.equal(p('วันนี้ใครลา'), 'today'); assert.equal(p('สรุปลาเดือนนี้'), 'month'); assert.equal(p('รหัสกลุ่ม'), 'groupid'); assert.equal(p('help'), 'help');
+  assert.equal(p('ใครลาวันไหน'), 'byday'); assert.equal(p('ใคร ไปราชการ วันไหนบ้าง'), 'byday'); assert.equal(p('ลาวันไหน'), 'byday');
   assert.equal(p('สวัสดี'), ''); assert.equal(p(''), '');
-  assert.equal(e.run('hrlParsePostback', 'action=leave_next_week'), 'nextweek'); assert.equal(e.run('hrlParsePostback', 'action=evil'), '');
+  assert.equal(e.run('hrlParsePostback', 'action=leave_next_week'), 'nextweek'); assert.equal(e.run('hrlParsePostback', 'action=evil'), ''); assert.equal(e.run('hrlParsePostback', 'action=leave_by_day'), 'byday');
 });
 
 test('Friday job: next week report to roles + groups; never prints the note of a leave; skips switched-off / unfollowed / no-role users', () => {
@@ -69,7 +70,7 @@ test('webhook: wrong secret refused; unknown friend registered but gets nothing;
   hook(ev({ source: { type: 'user', userId: 'Unew' }, text: 'สัปดาห์นี้ใครลา' }));
   let reply = e.pushes().find((f) => f.url.endsWith('/reply')); assert.match(textOf(reply), /ยังไม่ได้รับสิทธิ์/); assert.ok(e.sheets.LineUsers.some((r) => r[0] === 'Unew'));
   e.clear(); hook(ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'สัปดาห์หน้าใครลา' }));
-  reply = e.pushes().find((f) => f.url.endsWith('/reply')); assert.match(textOf(reply), /สัปดาห์หน้า 2–6 พ\.ย\./); assert.ok(reply.body.messages.at(-1).quickReply.items.length === 3);
+  reply = e.pushes().find((f) => f.url.endsWith('/reply')); assert.match(textOf(reply), /สัปดาห์หน้า 2–6 พ\.ย\./); assert.ok(reply.body.messages.at(-1).quickReply.items.length === 4);
   e.clear(); const dup = ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'วันนี้ใครลา' }); hook(dup, dup); assert.equal(e.pushes().filter((f) => f.url.endsWith('/reply')).length, 1);
   e.clear(); hook(ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'สรุปลาเดือนนี้' })); assert.match(textOf(e.pushes()[0]), /เฉพาะแอดมินและหัวหน้า/);
   e.clear(); hook(ev({ source: { type: 'user', userId: 'Uboss' }, text: 'สรุปลาเดือนนี้' })); assert.match(textOf(e.pushes()[0]), /สรุปวันลาประจำเดือน/);
@@ -122,4 +123,20 @@ test('phone page: mobileBoot gives my records (only mine), staff, holidays and b
   assert.equal(b.mine.length, 5); assert.ok(b.mine.every((m) => m.canEdit)); assert.equal(b.nextWeek.items.length, 3);
   assert.equal(J(e.call('mobileBoot', [], 'other@x.go.th')).mine.length, 0);
   const id = b.mine.find((m) => m.type === 'ลาป่วย').id; assert.equal(e.call('updateRecord', [{ ...rec({ type: 'ลาป่วยครึ่งวัน', note: '(เช้า) ' }), id }], 'user@x.go.th').status, 'success');
+});
+
+test('rich-menu "ใครลาวันไหน": leave AND official duty listed day by day (today → end of next week), no leave note, working days only', () => {
+  const e = seeded(); e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'ใครลาวันไหน' })] });
+  const t = textOf(e.pushes().find((f) => f.url.endsWith('/reply')));
+  assert.match(t, /ใครลา \/ ไปราชการ วันไหน/); assert.match(t, /🗓 อ\. 3 พ\.ย\.[\s\S]*🌴 สมชาย ใจดี \(โสตฯ\) — ลาป่วย/);
+  assert.match(t, /🗓 พ\. 4 พ\.ย\.[\s\S]*🚗 สมหญิง รักงาน[\s\S]*ไปราชการ เชียงใหม่[\s\S]*\(ถึง 5 พ\.ย\.\)/);
+  assert.match(t, /🗓 พฤ\. 5 พ\.ย\.[\s\S]*🚗 สมหญิง/); assert.match(t, /🗓 ศ\. 6 พ\.ย\.[\s\S]*🎓 สมหญิง รักงาน[\s\S]*— อบรม HA[\s\S]*09:00–12:00/);
+  assert.ok(t.indexOf('3 พ.ย.') < t.indexOf('4 พ.ย.') && t.indexOf('4 พ.ย.') < t.indexOf('6 พ.ย.'));
+  assert.doesNotMatch(t, /ไข้หวัด/); assert.doesNotMatch(t, /28 ต\.ค\./);                     // the note of a leave is private · days already past are not listed
+  e.clear(); e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'ใครลาวันไหน' })] }); e.clear();
+  e.store.HR_LINE_QUERY_SCOPE = 'leave'; e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Uboss' }, text: 'ใครลาวันไหน' })] });
+  const only = textOf(e.pushes().find((f) => f.url.endsWith('/reply'))); assert.match(only, /🌴/); assert.doesNotMatch(only, /🚗|🎓/);
+  e.clear(); e.store.HR_LINE_QUERY_SCOPE = ''; e.store.HR_LINE_WHO_DAYS = '1';                // fixed window: today only
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Uadmin' }, text: 'ใครลาวันไหน' })] });
+  assert.match(textOf(e.pushes().find((f) => f.url.endsWith('/reply'))), /ยังไม่มีผู้บันทึก/);
 });

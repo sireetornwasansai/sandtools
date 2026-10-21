@@ -1,4 +1,4 @@
-// Vercel Edge Function: POST /api/line — the LINE Messaging API webhook for the HR notifications (rich-menu "สัปดาห์นี้ใครลา" / "สัปดาห์หน้าใครลา").
+// Vercel Edge Function: POST /api/line — the LINE Messaging API webhook for the HR notifications (rich-menu "ใครลาวันไหน" / "สัปดาห์นี้ใครลา" / "สัปดาห์หน้าใครลา").
 //
 // Why a relay instead of pointing LINE straight at Apps Script: a Google Apps Script web app cannot read the X-Line-Signature header, so it could not
 // tell a real LINE call from a forged one. Here the signature (HMAC-SHA256 of the raw body with the channel secret) is checked first.

@@ -67,7 +67,7 @@ export async function mount(root) {
         h('li', null, 'Apps Script ▸ Project Settings ▸ Script properties: ใส่ ', h('code', null, 'LINE_CHANNEL_ACCESS_TOKEN'), ' (และ ', h('code', null, 'EDGE_SECRET'), ' ถ้ายังไม่มี)'),
         h('li', null, 'Vercel ▸ Environment Variables: ', h('code', null, 'SAND_LINE_CHANNEL_SECRET'), ' (Channel secret) · ', h('code', null, 'SAND_GAS_URL'), ' · ', h('code', null, 'SAND_EDGE_SECRET'), ' แล้ว Redeploy'),
         h('li', null, 'LINE Developers ▸ Messaging API: วาง Webhook URL ด้านบน ▸ Verify ▸ เปิด Use webhook · ปิด Auto-reply ใน LINE OA Manager'),
-        h('li', null, 'LINE OA Manager ▸ ริชเมนู: ปุ่มชนิด “ข้อความ” ตั้งข้อความเป็น ', h('code', null, 'สัปดาห์นี้ใครลา'), ' และ ', h('code', null, 'สัปดาห์หน้าใครลา'), ' · ปุ่มลงลาใช้ชนิด “ลิงก์” = ', h('code', null, `${location.origin}/?openExternalBrowser=1#/leave`)),
+        h('li', null, 'LINE OA Manager ▸ ริชเมนู: ปุ่มชนิด “ข้อความ” ตั้งข้อความเป็น ', h('code', null, 'ใครลาวันไหน'), ' (ลา + ไปราชการ แยกรายวัน) · เพิ่มได้: ', h('code', null, 'สัปดาห์นี้ใครลา'), ' และ ', h('code', null, 'สัปดาห์หน้าใครลา'), ' · ปุ่มลงลาใช้ชนิด “ลิงก์” = ', h('code', null, `${location.origin}/?openExternalBrowser=1#/leave`)),
         h('li', null, 'เพิ่มบอทเป็นเพื่อน แล้วกำหนด “บทบาท” ให้ทุกคนในรายชื่อด้านล่าง — คนที่ไม่มีบทบาทจะไม่ได้รับรายงานและถามอะไรไม่ได้'))));
   }
 

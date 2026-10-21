@@ -4,7 +4,7 @@
  * What it does
  *   • Friday (time editable)       → report of NEXT week: who recorded leave / ไปราชการ / อบรม / ประชุม      (job "weekly")
  *   • last working day of a month  → leave days of every person, grouped by กลุ่มงาน                          (job "monthend")
- *   • Rich-menu / typed keywords   → "สัปดาห์นี้ใครลา", "สัปดาห์หน้าใครลา", "วันนี้ใครลา", "สรุปลาเดือนนี้"   (webhook → reply, free of quota)
+ *   • Rich-menu / typed keywords   → "ใครลาวันไหน" (ลา + ไปราชการ แยกรายวัน), "สัปดาห์นี้ใครลา", "สัปดาห์หน้าใครลา", "วันนี้ใครลา", "สรุปลาเดือนนี้"   (webhook → reply, free of quota)
  *   • mobileBoot                   → one small answer for the phone page /leave (me, staff, holidays, who is away this/next week, my records)
  *
  * It reads the same tabs as Hr.gs (HR_Control · Staff · HolidayOverrides) and adds two tabs: LineUsers · LineReportSchedule.
@@ -42,7 +42,7 @@ var HRL_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.',
 var HRL_MONTH_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 var HRL_DOW = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
 var HRL_GROUPS = [{ k: 'leave', t: '🌴 ลา' }, { k: 'trip', t: '🚗 ไปราชการ' }, { k: 'train', t: '🎓 อบรม' }, { k: 'meet', t: '👥 ประชุม' }, { k: 'other', t: '📌 อื่นๆ' }];
-var HRL_QUICK = [['สัปดาห์นี้', 'สัปดาห์นี้ใครลา'], ['สัปดาห์หน้า', 'สัปดาห์หน้าใครลา'], ['วันนี้', 'วันนี้ใครลา']];
+var HRL_QUICK = [['ใครลาวันไหน', 'ใครลาวันไหน'], ['สัปดาห์นี้', 'สัปดาห์นี้ใครลา'], ['สัปดาห์หน้า', 'สัปดาห์หน้าใครลา'], ['วันนี้', 'วันนี้ใครลา']];
 
 /* ------------------------------- LINE API (token, push, reply) ------------------------------ */
 function hrlProps() { return PropertiesService.getScriptProperties(); }
@@ -232,6 +232,48 @@ function hrlRangeText(data, title, label) {
   if (data.over.length) { L.push('', '⚠️ ผู้ลาครบโควต้า (' + HR_MAX_LEAVE + ' คน/กลุ่มงาน/วัน)'); data.over.forEach(function (o) { L.push('• ' + hrlDW(o.date) + ' — ' + (o.deptShort || 'ทุกกลุ่มงาน') + ' ' + o.n + ' คน'); }); }
   return L.join('\n') + hrlFooter();
 }
+/**
+ * "ใครลาวันไหน" (rich-menu button) — leave AND official duty (ไปราชการ / อบรม / ประชุม) listed DAY BY DAY.
+ * Window: today → Sunday of NEXT week (so it always covers "rest of this week + next week"); Script property HR_LINE_WHO_DAYS (1–60) = a fixed number of days from today instead.
+ * Only working days are listed (a leave that touches only weekends / holidays is skipped, like the weekly report). The note of a LEAVE is never shown (privacy).
+ */
+var HRL_ICON = { leave: '🌴', trip: '🚗', train: '🎓', meet: '👥', other: '📌' };
+function hrlWhoWindow(today) {
+  var n = Number(prop('HR_LINE_WHO_DAYS'));
+  return { from: today, to: isFinite(n) && n >= 1 && n <= 60 ? hrAddDays(today, Math.floor(n) - 1) : hrAddDays(hrlMonday(today), 13) };
+}
+function hrlByDayLine(it, day) {
+  var who = it.name + (it.deptShort ? ' (' + it.deptShort + ')' : ''), what;
+  if (it.group === 'leave') what = hrlTypeLabel(it);
+  else if (it.group === 'trip') what = 'ไปราชการ' + (it.province ? ' ' + it.province : '') + (it.mission || it.note ? ' · ' + String(it.mission || it.note).slice(0, 60) : '');
+  else { var d2 = String(it.mission || it.note || '').slice(0, 60); what = d2 && d2.indexOf(it.type) === 0 ? d2 : it.type + (d2 ? ' · ' + d2 : ''); }
+  var tail = (it.st && it.et ? ' ' + it.st + '–' + it.et : '') + (it.end > day ? ' (ถึง ' + hrlD(it.end) + ')' : '');
+  return HRL_ICON[it.group] + ' ' + who + ' — ' + what + tail;
+}
+function hrlByDayText(pre, today, only) {
+  var w = hrlWhoWindow(today), data = hrlRangeData(pre, w.from, w.to, { only: only }), L = ['📅 ใครลา / ไปราชการ วันไหน', hrlRange(w.from, w.to) + ' ' + hrlBE(w.to)], shown = 0, g = 0, d, names = {};
+  var order = {}; HRL_GROUPS.forEach(function (gr, i) { order[gr.k] = i; });
+  var days = [];
+  for (d = w.from; d <= w.to && g++ < 62; d = hrAddDays(d, 1)) {
+    var day = d, rows = data.items.filter(function (it) {
+      if (it.start > day || it.end < day) return false;
+      return hrIsWorkday(day, pre.holidays) || (it.group !== 'leave' && it.start === it.end);
+    });
+    if (!rows.length) continue;
+    rows.sort(function (a, b) { return order[a.group] - order[b.group] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0); });
+    rows.forEach(function (it) { names[it.name] = 1; shown++; });
+    days.push({ day: day, rows: rows });
+  }
+  if (!days.length) L.push('', '✅ ยังไม่มีผู้บันทึกลา ไปราชการ อบรม หรือประชุมในช่วงนี้');
+  else L.push('มี ' + Object.keys(names).length + ' คน · ' + data.items.length + ' รายการ');
+  if (data.holidays.length) { L.push('', '🎌 วันหยุดราชการ'); data.holidays.forEach(function (h) { L.push('• ' + hrlDW(h.date) + ' — ' + h.name); }); }
+  days.forEach(function (x) {
+    L.push('', '🗓 ' + hrlDW(x.day) + (x.day === today ? ' (วันนี้)' : '') + ' — ' + x.rows.length + ' คน');
+    x.rows.forEach(function (it) { L.push(hrlByDayLine(it, x.day)); });
+  });
+  if (data.over.length) { L.push('', '⚠️ ผู้ลาครบโควต้า (' + HR_MAX_LEAVE + ' คน/กลุ่มงาน/วัน)'); data.over.forEach(function (o) { L.push('• ' + hrlDW(o.date) + ' — ' + (o.deptShort || 'ทุกกลุ่มงาน') + ' ' + o.n + ' คน'); }); }
+  return L.join('\n') + hrlFooter();
+}
 function hrlQueryOnly() { return prop('HR_LINE_QUERY_SCOPE') === 'leave' ? 'leave' : ''; }
 function hrlWeekTextFor(pre, monday, title, opts) {
   var data = hrlWeekRange(pre, monday, opts), fri = hrAddDays(monday, 4);
@@ -372,12 +414,13 @@ function hrlSeen(id) {
   if (cache.get(key)) return true;
   cache.put(key, '1', 600); return false;
 }
-/** Text typed (or sent by a rich-menu button) → 'thisweek' | 'nextweek' | 'today' | 'month' | 'groupid' | 'help' | ''. */
+/** Text typed (or sent by a rich-menu button) → 'byday' | 'thisweek' | 'nextweek' | 'today' | 'month' | 'groupid' | 'help' | ''. */
 function hrlParseText(text) {
   var t = String(text == null ? '' : text).replace(/\s+/g, '').toLowerCase();
   if (!t) return '';
   if (/^(รหัสกลุ่ม|ไอดีกลุ่ม|groupid)$/.test(t)) return 'groupid';
   if (/^(เมนู|คำสั่ง|ช่วยเหลือ|help|วิธีใช้)$/.test(t)) return 'help';
+  if (/วัน(ไหน|ใด)/.test(t) && /(ลา|ราชการ|ใคร|อบรม)/.test(t)) return 'byday';    // rich-menu: "ใครลาวันไหน" (also "ใครไปราชการวันไหน")
   var week = /(สัปดาห์|อาทิตย์|week)/.test(t);
   if (week && /(หน้า|ถัดไป|next)/.test(t)) return 'nextweek';
   if (week && /(นี้|this)/.test(t)) return 'thisweek';
@@ -387,13 +430,14 @@ function hrlParseText(text) {
 }
 function hrlParsePostback(data) {
   var m = /(?:^|&)action=([a-z_]+)/.exec(String(data || ''));
-  return !m ? '' : ({ leave_this_week: 'thisweek', leave_next_week: 'nextweek', leave_today: 'today', leave_month: 'month' }[m[1]] || '');
+  return !m ? '' : ({ leave_this_week: 'thisweek', leave_next_week: 'nextweek', leave_today: 'today', leave_month: 'month', leave_by_day: 'byday', who_when: 'byday' }[m[1]] || '');
 }
 function hrlHelpText() {
-  return 'พิมพ์หรือกดเมนูได้เลย:\n• สัปดาห์นี้ใครลา\n• สัปดาห์หน้าใครลา\n• วันนี้ใครลา\n• สรุปลาเดือนนี้ (เฉพาะแอดมิน/หัวหน้า)';
+  return 'พิมพ์หรือกดเมนูได้เลย:\n• ใครลาวันไหน (ลา/ไปราชการ แยกรายวัน)\n• สัปดาห์นี้ใครลา\n• สัปดาห์หน้าใครลา\n• วันนี้ใครลา\n• สรุปลาเดือนนี้ (เฉพาะแอดมิน/หัวหน้า)';
 }
 function hrlAnswer(cmd, role, inGroup) {
   var pre = hrBundle(), today = hrToday(), only = hrlQueryOnly();
+  if (cmd === 'byday') return hrlByDayText(pre, today, only);
   if (cmd === 'thisweek') { var mon = hrlMonday(today); return hrlWeekTextFor(pre, mon, 'สัปดาห์นี้', { only: only }); }
   if (cmd === 'nextweek') return hrlWeekTextFor(pre, hrAddDays(hrlMonday(today), 7), 'สัปดาห์หน้า', { only: only });
   if (cmd === 'today') return hrlRangeText(hrlRangeData(pre, today, today, { only: only }), 'วันนี้', hrlDW(today) + ' ' + hrlBE(today));
