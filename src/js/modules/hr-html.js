@@ -623,7 +623,7 @@ export const HR_HTML = `
 </div>
 
 <!-- EVENT MODAL -->
-<div class="modal-overlay" id="evModal" role="dialog" aria-modal="true" aria-labelledby="evModalTitle" data-hr-click="onModalOverlayClick(event)">
+<div class="modal-overlay" id="evModal" role="dialog" aria-modal="true" aria-labelledby="evModalTitle">
   <div class="modal">
     <div class="modal-head">
       <div class="modal-title" id="evModalTitle">รายละเอียด</div>
@@ -635,7 +635,7 @@ export const HR_HTML = `
 </div>
 
 <!-- EDIT RECORD MODAL -->
-<div class="modal-overlay" id="editModal" role="dialog" aria-modal="true" data-hr-click="onOverlay(event,this,'closeEditModal')">
+<div class="modal-overlay" id="editModal" role="dialog" aria-modal="true">
   <div class="modal" style="width:500px">
     <div class="modal-head">
       <div class="modal-title">✏️ แก้ไขรายการ</div>
@@ -746,7 +746,7 @@ export const HR_HTML = `
 </div>
 
 <!-- STAFF HISTORY MODAL -->
-<div class="modal-overlay" id="histModal" role="dialog" aria-modal="true" aria-labelledby="histModalTitle" data-hr-click="onOverlay(event,this,'closeHistModal')">
+<div class="modal-overlay" id="histModal" role="dialog" aria-modal="true" aria-labelledby="histModalTitle">
   <div class="modal" style="width:480px">
     <div class="modal-head">
       <div class="modal-title" id="histModalTitle">🕘 ประวัติการบันทึก</div>

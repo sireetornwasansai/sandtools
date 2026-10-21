@@ -137,7 +137,8 @@ export function enhanceDate(el) {
   });
 
   // ปฏิทิน: core/calendar.js — เดสก์ท็อป = ป๊อปอัปใต้ช่อง · มือถือ = แผ่นด้านล่างจอ
-  const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  // phone, or a field inside a Shadow DOM page (HR): the whole field opens the calendar — on a desktop the small icon at the right edge was easy to miss ("กดปฏิทินไม่ได้")
+  const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || root !== document || el.hasAttribute('data-df-open');
   function openPicker() {
     if (el.disabled || el.readOnly) return;
     commit();

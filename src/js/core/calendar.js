@@ -170,7 +170,7 @@ export function openCalendar(o) {
     back.remove(); pop.remove();
     if (o.onClose) { try { o.onClose(); } catch { /* ignore */ } }
   }
-  const onScroll = (e) => { if (!sheet && !pop.contains(/** @type {Node} */ (e.target))) close(); };   // a floating popup must not drift away from its field
+  const onScroll = (e) => { if (!sheet && !pop.contains(/** @type {Node} */ (e.target))) place(); };   // a floating popup follows its field (closing here made it vanish whenever a phone / modal scrolled on its own)
   const onKey = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
     const t = /** @type {HTMLElement} */ (e.target);
