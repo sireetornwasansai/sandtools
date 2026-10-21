@@ -979,7 +979,7 @@ function renderHolidayTable(list) {
           '<div style="display:flex;align-items:center;gap:8px;">' +
             '<div style="width:8px;height:8px;border-radius:50%;background:' + (item.isDeleted?'#c7bfb3':item.isCustom?'#7a8a6f':'#963823') + ';flex-shrink:0"></div>' +
             '<div class="hol-date-info">' +
-              '<span style="font-size:15px;font-weight:700;">' + dateNum + ' ' + monthStr + '</span>' +
+              '<span style="font-size:15px;font-weight:700;">' + hrDmy(d) + '</span>' +
               '<span class="hol-date-dayname">' + dayName + (isPast && !isToday ? ' · ผ่านแล้ว' : '') + '</span>' +
             '</div>' +
           '</div>' +
@@ -1250,9 +1250,8 @@ function thaiDateFull(dateStr) {
   if (!dateStr) return '';
   try {
     var thaiDays   = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
-    var thaiMonths = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
     var d = new Date(dateStr);
-    return 'วัน' + thaiDays[d.getDay()] + ' ' + d.getDate() + ' ' + thaiMonths[d.getMonth()] + ' ' + (d.getFullYear()+543);
+    return 'วัน' + thaiDays[d.getDay()] + ' ' + hrDmy(d);
   } catch(e){ return dateStr; }
 }
 
@@ -1457,12 +1456,11 @@ function renderProjTimeline(list) {
   var rangeEnd   = new Date(maxTime); rangeEnd.setDate(rangeEnd.getDate() + 3);
   var totalMs = rangeEnd.getTime() - rangeStart.getTime();
 
-  var thaiMonths = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
   var tickCount = 6;
   var ticksHtml = '';
   for (var t = 0; t <= tickCount; t++) {
     var tDate = new Date(rangeStart.getTime() + (totalMs * t / tickCount));
-    ticksHtml += '<div class="timeline-tick">' + tDate.getDate() + ' ' + thaiMonths[tDate.getMonth()] + '</div>';
+    ticksHtml += '<div class="timeline-tick">' + hrDmy(tDate) + '</div>';
   }
 
   var rowsHtml = withDates.map(function(p) {
@@ -1499,9 +1497,8 @@ function renderProjTimeline(list) {
 function thaiDateShort(dateStr) {
   if (!dateStr) return '';
   try {
-    var thaiMonths = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
     var d = new Date(dateStr);
-    return d.getDate() + ' ' + thaiMonths[d.getMonth()] + ' ' + (d.getFullYear()+543);
+    return hrDmy(d);
   } catch(e){ return dateStr; }
 }
 
@@ -1800,12 +1797,13 @@ function getAutoColor(name) {
   for (var i = 0; i < name.length; i++) idx += name.charCodeAt(i);
   return PALETTE[idx % PALETTE.length];
 }
+/** วว/ดด/ปปปป (พ.ศ.) — the one date format of the whole site */
+function hrDmy(d) { return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + (d.getFullYear() + 543); }
 function thaiDate(dateStr) {
   if (!dateStr) return '';
   try {
-    var months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
     var d = new Date(dateStr);
-    return d.getDate() + ' ' + months[d.getMonth()] + ' ' + (d.getFullYear()+543);
+    return hrDmy(d);
   } catch(e){ return dateStr; }
 }
 function timeAgo(ms) {

@@ -1,6 +1,7 @@
 // Shared chart + formatting helpers for the statistics pages (links, projects).
 // Markup uses the .lnk-* classes from css/links.css — pages that use these helpers must load that stylesheet (loadCss('links')).
 import { h } from './dom.js';
+import { fmtDate, fmtDateTime } from './datefield.js';
 
 export const fmt = (n) => Number(n || 0).toLocaleString('th-TH');
 export const DEVICE = { mobile: 'มือถือ', desktop: 'คอมพิวเตอร์', tablet: 'แท็บเล็ต', bot: 'บอท', other: 'ไม่ทราบ' };
@@ -8,7 +9,7 @@ const REGION = (() => { try { return new Intl.DisplayNames(['th'], { type: 'regi
 export const countryName = (c) => (c ? (REGION && REGION.of(c)) || c : 'ไม่ทราบ');
 export const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 export const bkk = (s) => (s ? new Date(`${String(s).replace(' ', 'T')}+07:00`) : null);
-export const when = (ts) => (ts ? new Date(ts).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '-');
+export const when = (ts) => (ts ? fmtDateTime(ts) : '-');                       // 21/10/2569 10:05
 export const ago = (ts) => {
   if (!ts) return 'ยังไม่มีคนเข้า';
   const m = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
@@ -27,7 +28,7 @@ export function hBars(title, list, labelFn) {
     ? h('ul', null, list.map((x) => { const pct = Math.round((x.n / total) * 100); return h('li', null, h('span', { class: 'lnk-hb-name', title: labelFn(x.name) }, labelFn(x.name)), h('span', { class: 'lnk-hb-track' }, h('i', { style: `width:${Math.max(2, pct)}%` })), h('span', { class: 'lnk-hb-n' }, `${fmt(x.n)} · ${pct}%`)); }))
     : h('p', { class: 'muted' }, 'ยังไม่มีข้อมูล'));
 }
-export const dayLabel = (d) => { const [y, m, dd] = d.split('-').map(Number); return new Date(y, m - 1, dd).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }); };
+export const dayLabel = (d) => { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${m[2]}/${m[1]}` : ''; };   // วัน/เดือน (แกนกราฟ; ปีอยู่ในคำอธิบายเมื่อชี้)
 
 
 /** Two series per point (e.g. page views + visitors) drawn side by side. points: [{a, b, label}] */
@@ -172,7 +173,7 @@ export function areaChart(points, series, { height = 250, label = 'กราฟ�
       active = i; const p = points[i]; const x = sc.x(i);
       cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.setAttribute('visibility', 'visible');
       st.forEach((s, k) => { if (s.on) { dots[k].setAttribute('cx', x); dots[k].setAttribute('cy', sc.y(p[s.key] || 0)); dots[k].setAttribute('visibility', 'visible'); } else dots[k].setAttribute('visibility', 'hidden'); });
-      tip.replaceChildren(h('b', null, new Date(`${p.d}T00:00:00+07:00`).toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' })),
+      tip.replaceChildren(h('b', null, `${new Date(`${p.d}T00:00:00+07:00`).toLocaleDateString('th-TH', { weekday: 'short' })} ${fmtDate(p.d)}`),
         ...st.filter((s) => s.on).map((s) => h('span', { class: `tp ${s.cls}` }, h('i'), s.label, h('strong', null, fmt(p[s.key] || 0)))));
       tip.hidden = false;
       const tw = tip.offsetWidth || 150;

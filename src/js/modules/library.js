@@ -7,6 +7,7 @@ import { toast } from '../core/toast.js';
 import { TOOLS } from '../core/routes.js';
 import { addLayer, modal, askText, confirmBox, closeAllLayers } from '../core/layers.js';
 import { copyText } from '../core/download.js';
+import { fmtDateTime } from '../core/datefield.js';
 
 /* ------------------------------ small helpers ------------------------------ */
 
@@ -38,7 +39,7 @@ function parseName(name) {
   const m = /^\d{2}-\d{6}_(input|output)_(.+)$/s.exec(name || '');
   return m ? { title: m[2], role: m[1] } : { title: name || '', role: '' };
 }
-const when = (ts) => (ts ? new Date(ts).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '-');
+const when = (ts) => (ts ? fmtDateTime(ts) : '-');
 const ago = (ts) => {
   const m = Math.round((Date.now() - new Date(ts).getTime()) / 60000);
   return m < 1 ? 'เมื่อสักครู่' : m < 60 ? `${m} นาทีที่แล้ว` : m < 1440 ? `${Math.round(m / 60)} ชั่วโมงที่แล้ว` : `${Math.round(m / 1440)} วันที่แล้ว`;

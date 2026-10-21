@@ -21,16 +21,20 @@
  *
  * One-time setup: run  setupHr()  from the editor (creates/styles the tabs, adds the new Owner columns), then Deploy a NEW version of the web app.
  * Tabs: HR_Control · Staff · HolidayOverrides · DailyLog · Projects   (same names and column order as the old system; Owner is added at the end)
+ *       LineUsers · LineReportSchedule   (added in 1.1.1 — LINE notifications, see HrLine.gs)
+ * The ops  mobileBoot · line*  at the end of HR_OPS are implemented in HrLine.gs (keep it in the same project).
  */
 
-var HR_VERSION = '1.0.0';
-var HR_T = { CONTROL: 'HR_Control', STAFF: 'Staff', HOLIDAY: 'HolidayOverrides', DLOG: 'DailyLog', PROJ: 'Projects' };
+var HR_VERSION = '1.1.1';
+var HR_T = { CONTROL: 'HR_Control', STAFF: 'Staff', HOLIDAY: 'HolidayOverrides', DLOG: 'DailyLog', PROJ: 'Projects', LUSERS: 'LineUsers', LSCHED: 'LineReportSchedule' };
 var HR_H = {
   CONTROL: ['Timestamp', 'Name', 'Department', 'Type', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'Note', 'FileURL', 'ID', 'Province', 'Mission', 'Owner'],
   STAFF: ['Name', 'Department', 'Color'],
   HOLIDAY: ['Date', 'Name', 'Status', 'Timestamp'],
   DLOG: ['Timestamp', 'Date', 'Project', 'Detail', 'Hours', 'ID', 'Owner'],
-  PROJ: ['Timestamp', 'Name', 'URL', 'Status', 'NextAction', 'Notes', 'ID', 'StartDate', 'TargetDate', 'Progress', 'Owner']
+  PROJ: ['Timestamp', 'Name', 'URL', 'Status', 'NextAction', 'Notes', 'ID', 'StartDate', 'TargetDate', 'Progress', 'Owner'],
+  LUSERS: ['UserId', 'DisplayName', 'ลงทะเบียนเมื่อ', 'สถานะ', 'ข้อความล่าสุดเมื่อ', 'บทบาท', 'เปิดรับข้อความ'],               // HrLine.gs — friends of the LINE OA
+  LSCHED: ['Key', 'ชื่อรายงาน', 'ชั่วโมง', 'นาที', 'วัน (ว่าง=ทุกวัน)', 'เปิดใช้งาน', 'ผู้รับ (บทบาท)']                       // HrLine.gs — when each report is sent
 };
 var HR_MAX_LEAVE = 3;                 // at most 3 people on leave per day per group (more needs a reason in the note)
 var HR_MAX_FILE = 10 * 1024 * 1024;   // attachment limit (bytes)
@@ -63,6 +67,7 @@ var HR_HOLIDAYS = {
 var HR_OPS = {
   boot: { fn: function (sc) { return hrBoot(sc); } },
   getAll: { fn: function (sc) { return hrAll(sc); } },
+  ping: { fn: function () { return { ok: true, version: HR_VERSION, time: new Date().toISOString() }; } },   // no sheet access — tells the page whether the HR code is deployed at all
   getHolidayMap: { fn: function () { return hrHolidayMap(); } },
   getStaffList: { fn: function () { return hrStaffList(); } },
   getDashboard: { fn: function () { return hrDashboard(); } },
@@ -90,7 +95,16 @@ var HR_OPS = {
   getProjectList: { fn: function (sc) { return hrProjList(sc); }, dev: true },
   addProject: { fn: function (sc, a) { return hrProjSave(sc, a[0], false); }, write: true, dev: true },
   updateProject: { fn: function (sc, a) { return hrProjSave(sc, a[0], true); }, write: true, dev: true },
-  deleteProject: { fn: function (sc, a) { return hrProjDelete(sc, a[0]); }, write: true, dev: true }
+  deleteProject: { fn: function (sc, a) { return hrProjDelete(sc, a[0]); }, write: true, dev: true },
+  // ---- HrLine.gs: the phone page (any signed-in user) and the LINE admin page (HR admins only)
+  mobileBoot: { fn: function (sc) { return hrlMobileBoot(sc); } },
+  lineStatus: { fn: function () { return hrlOpStatus(); }, admin: true },
+  lineUsers: { fn: function () { return hrlOpUsers(); }, admin: true },
+  lineSetUser: { fn: function (sc, a) { return hrlOpSetUser(a[0], a[1], a[2]); }, write: true, admin: true },
+  lineSwitch: { fn: function (sc, a) { return hrlOpSwitch(a[0]); }, write: true, admin: true },
+  lineSaveSchedule: { fn: function (sc, a) { return hrlOpSaveSchedule(a[0]); }, write: true, admin: true },
+  linePreview: { fn: function (sc, a) { return hrlOpPreview(a[0], a[1], a[2]); }, admin: true },
+  lineSend: { fn: function (sc, a) { return hrlOpSendNow(sc, a[0], a[1], a[2]); }, admin: true }   // not under the write lock: it waits for LINE
 };
 
 function hr(b) {
@@ -139,10 +153,13 @@ function hrTab(key) {
     sh = ss.getSheetByName(name) || ss.insertSheet(name);
     if (sh.getLastRow() === 0) { sh.appendRow(headers); sh.setFrozenRows(1); }
   }
-  hrEnsureCols(sh, headers);
+  if (!hrColsChecked(key)) { hrEnsureCols(sh, headers); hrColsMark(key); }   // 2 extra Sheets calls per tab per request, so it is done once per 6 h
   REQ.hrSheets[key] = sh;
   return sh;
 }
+function hrColsChecked(key) { try { return CacheService.getScriptCache().get('hrcols:' + HR_VERSION + ':' + key) === '1'; } catch (x) { return false; } }
+function hrColsMark(key) { try { CacheService.getScriptCache().put('hrcols:' + HR_VERSION + ':' + key, '1', 21600); } catch (x) { /* ignore */ } }
+function hrColsReset() { try { CacheService.getScriptCache().removeAll(Object.keys(HR_T).map(function (k) { return 'hrcols:' + HR_VERSION + ':' + k; })); } catch (x) { /* ignore */ } }
 /** Old sheets miss the newest columns (Owner …): add the header cells (never overwrites a header that is already there). */
 function hrEnsureCols(sh, headers) {
   if (sh.getMaxColumns() < headers.length) sh.insertColumnsAfter(sh.getMaxColumns(), headers.length - sh.getMaxColumns());
@@ -307,10 +324,16 @@ function hrRec(r, tz) {
 function hrCanEdit(sc, rec) { return sc.admin || sc.editAll || (!!rec.owner && rec.owner === sc.email); }
 
 function hrColorMap() { var m = {}; hrStaffList().forEach(function (s) { if (s.color) m[s.name] = s.color; }); return m; }
-function hrEvents(sc) {
-  var sh = hrTab('CONTROL'), tz = hrTz(sh), rows = hrRead(sh, 14), colors = hrColorMap(), events = [], cutoff = hrAddDays(hrToday(), -HR_KEEP_DAYS);
-  rows.forEach(function (r) {
-    var x = hrRec(r, tz);
+/** One pass over the three sheets that boot / getAll need (the old code read CONTROL twice, STAFF twice and HOLIDAY twice per page open). */
+function hrBundle() {
+  var sh = hrTab('CONTROL'), tz = hrTz(sh), staff = hrStaffList(), colors = {};
+  staff.forEach(function (s) { if (s.color) colors[s.name] = s.color; });
+  return { recs: hrRead(sh, 14).map(function (r) { return hrRec(r, tz); }), staff: staff, colors: colors, holidays: hrHolidayMap() };
+}
+function hrEvents(sc, pre) {
+  pre = pre || hrBundle();
+  var colors = pre.colors, events = [], cutoff = hrAddDays(hrToday(), -HR_KEEP_DAYS);
+  pre.recs.forEach(function (x) {
     if (!x.name || !x.start || x.end < cutoff) return;
     var half = x.type.indexOf('ครึ่งวัน') >= 0, fcStart, fcEnd;
     if (x.st && x.et) { fcStart = x.start + 'T' + x.st + ':00'; fcEnd = x.end + 'T' + x.et + ':00'; }
@@ -338,8 +361,9 @@ function hrLeaveLoad(recs, holidays, from) {
   });
   return load;
 }
-function hrDashboard() {
-  var sh = hrTab('CONTROL'), tz = hrTz(sh), recs = hrRead(sh, 14).map(function (r) { return hrRec(r, tz); }), holidays = hrHolidayMap(), today = hrToday();
+function hrDashboard(pre) {
+  pre = pre || hrBundle();
+  var recs = pre.recs, holidays = pre.holidays, today = hrToday();
   var counts = { total: 0, meetingAll: 0, leaveAll: 0 }; HR_LEAVE_TYPES.forEach(function (t) { counts[t] = 0; });
   var workday = hrIsWorkday(today, holidays);
   recs.forEach(function (x) {
@@ -355,11 +379,11 @@ function hrDashboard() {
   Object.keys(load).forEach(function (k) { if (load[k] >= HR_MAX_LEAVE) over[k.split('|')[0]] = 1; });
   return { counts: counts, total: counts.total, overLimitDates: Object.keys(over).sort(), maxLeave: HR_MAX_LEAVE, departments: HR_DEPARTMENTS, leaveTypes: HR_LEAVE_TYPES };
 }
-function hrAll(sc) { return { dashboard: hrDashboard(), events: hrEvents(sc) }; }
+function hrAll(sc, pre) { pre = pre || hrBundle(); return { dashboard: hrDashboard(pre), events: hrEvents(sc, pre) }; }
 function hrBoot(sc) {
-  var all = hrAll(sc);
+  var pre = hrBundle(), all = hrAll(sc, pre);
   return { me: { email: sc.email, admin: sc.admin, dev: sc.dev, editAll: sc.editAll }, config: { maxLeave: HR_MAX_LEAVE, departments: HR_DEPARTMENTS, leaveTypes: HR_LEAVE_TYPES, projectStatuses: HR_PROJECT_STATUSES },
-    staff: hrStaffList(), holidays: hrHolidayMap(), dashboard: all.dashboard, events: all.events, version: HR_VERSION };
+    staff: pre.staff, holidays: pre.holidays, dashboard: all.dashboard, events: all.events, version: HR_VERSION };
 }
 
 /** Validate + normalise the form of saveData / updateRecord. Throws httpError for anything the page could never send. */
@@ -600,13 +624,15 @@ function hrProjDelete(sc, id) {
 /* ----------------------------------- setup --------------------------------- */
 /** Creates / repairs the five tabs, styles the headers, adds drop-down validation for Type and Department. Safe to run again. */
 function setupHr() {
-  var widths = { CONTROL: [150, 160, 170, 130, 100, 100, 80, 80, 260, 260, 260, 120, 220, 200], STAFF: [200, 180, 90], HOLIDAY: [100, 260, 90, 150], DLOG: [150, 100, 180, 380, 70, 260, 200], PROJ: [150, 200, 240, 110, 240, 260, 260, 100, 100, 80, 200] };
-  Object.keys(HR_T).forEach(function (k) { var sh = hrTab(k); styleTab(sh, HR_H[k], widths[k], k === 'HOLIDAY' ? 4 : (k === 'STAFF' ? 0 : 1)); });
+  hrColsReset();
+  var widths = { CONTROL: [150, 160, 170, 130, 100, 100, 80, 80, 260, 260, 260, 120, 220, 200], STAFF: [200, 180, 90], HOLIDAY: [100, 260, 90, 150], DLOG: [150, 100, 180, 380, 70, 260, 200], PROJ: [150, 200, 240, 110, 240, 260, 260, 100, 100, 80, 200],
+    LUSERS: [300, 180, 150, 90, 150, 100, 110], LSCHED: [100, 330, 70, 60, 150, 100, 220] };
+  Object.keys(HR_T).forEach(function (k) { var sh = hrTab(k); styleTab(sh, HR_H[k], widths[k], k === 'HOLIDAY' ? 4 : (k === 'STAFF' || k === 'LUSERS' || k === 'LSCHED' ? 0 : 1)); });
   var c = hrTab('CONTROL');
   c.getRange('E2:F').setNumberFormat('yyyy-mm-dd');
   c.getRange('D2:D').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(HR_LEAVE_TYPES).setAllowInvalid(false).build());
   c.getRange('C2:C').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(HR_DEPARTMENTS).setAllowInvalid(false).build());
   var ss = hrSs();
-  console.log('HR พร้อมใช้งาน — สเปรดชีต: ' + (ss ? ss.getName() + ' (HR_SHEET_ID)' : 'LOG_SHEET_ID') + ' | แท็บ: ' + Object.keys(HR_T).map(function (k) { return HR_T[k]; }).join(', '));
+  console.log('HR พร้อมใช้งาน (ต่อด้วย hrLineSetup() เพื่อเปิดแจ้งเตือน LINE) — สเปรดชีต: ' + (ss ? ss.getName() + ' (HR_SHEET_ID)' : 'LOG_SHEET_ID') + ' | แท็บ: ' + Object.keys(HR_T).map(function (k) { return HR_T[k]; }).join(', '));
 }
 function hrSetupNow() { setupHr(); return { status: 'success', message: 'ตั้งค่าระบบเรียบร้อย' }; }

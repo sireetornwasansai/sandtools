@@ -12,6 +12,7 @@ export const DEFAULTS = { open: 360, close: 1200, walk: 10, dwell: 30 };
 
 const pad = (n) => String(n).padStart(2, '0');
 export const hhmm = (m) => { const t = Math.max(0, Math.round(m)); return `${pad(Math.floor(t / 60) % 24)}:${pad(t % 60)}`; };
+import { fmtDate } from '../core/datefield.js';
 export const fmt = (n) => Number(n || 0).toLocaleString('th-TH');
 export const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return String(u || ''); } };
 
@@ -397,7 +398,7 @@ export function normalizeReplay(d) {
   return { mode: d.mode === 'peak' ? 'peak' : 'today', day: String(d.day), today: String(d.today || ''), byDay, busiest: busiestDay(byDay), scale, sites };
 }
 
-export const dayLabel = (d) => { try { return new Date(`${d}T12:00:00+07:00`).toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch { return d; } };
+export const dayLabel = (d) => { try { const x = new Date(`${d}T12:00:00+07:00`); return `${x.toLocaleDateString('th-TH', { weekday: 'long' })} ${fmtDate(String(d))}`; } catch { return d; } };   // วันอังคาร 13/10/2569
 export const addDays = (d, n) => new Date(new Date(`${d}T12:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
 
 /** One walking person per VISIT (f=0 new, f=1 returning); pages of the same visit (f=2) only add to counters. Deterministic. */

@@ -6,13 +6,13 @@ import { notice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { modal, confirmBox } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
+import { fmtDate } from '../core/datefield.js';
 
 /** หนังสือรับเข้า (ธุรการ): the drafts collected silently from Telegram. Clerks check them and press "รับหนังสือ" to get a running เลขรับ. */
 
 const STATUS = { pending: 'รอตรวจ', accepted: 'รับแล้ว', ignored: 'ไม่นำเข้า' };
 const SOURCE = { tg: 'Telegram', tgx: 'Telegram (นำเข้า)', manual: 'เพิ่มเอง' };
-const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-const thDate = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${Number(m[1]) + 543}` : ''; };
+const thDate = (iso) => fmtDate(iso);                           // วว/ดด/ปปปป (พ.ศ.)
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 
 async function call(op, params = {}, timeout = 30000) {

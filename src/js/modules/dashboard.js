@@ -1,4 +1,5 @@
 import { h, svgIcon } from '../core/dom.js';
+import { fmtDate } from '../core/datefield.js';
 import { ICONS } from '../core/icons.js';
 import { TOOLS } from '../core/routes.js';
 import { privacyNotice, notice } from '../core/notices.js';
@@ -48,7 +49,7 @@ export async function mount(root) {
   await Promise.all([loadCss('dashboard'), loadCss('site3d'), ...(logged ? [loadCss('links'), loadCss('projects')] : [])]);
 
   /* ---------------------------------- hero + tools (no network) ---------------------------------- */
-  const today = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const today = `${new Date().toLocaleDateString('th-TH', { weekday: 'long' })} ${fmtDate(new Date())}`;
   const hero = h('section', { class: 'dsh-hero' },
     h('div', null, h('p', { class: 'dsh-eyebrow' }, today), h('h1', null, greeting(sess && sess.user)),
       h('p', { class: 'dsh-sub' }, logged ? 'ดูว่าวันนี้ใครเข้าเว็บไซต์และระบบของหน่วยงานบ้าง — ไม่เก็บ IP และไม่ใช้คุกกี้' : 'เครื่องมือดิจิทัลสำหรับงานสำนักงาน และผังสถิติเว็บไซต์ของหน่วยงานแบบ 3 มิติ')),

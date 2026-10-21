@@ -1,4 +1,5 @@
 import { h } from '../core/dom.js';
+import { initDates } from '../core/datefield.js';
 import { loadScript } from '../core/dom.js';
 import { getSession } from '../core/auth.js';
 import { sessionCall, cacheGet, cacheSet } from '../core/ops.js';
@@ -147,6 +148,7 @@ export async function mount(root) {
   host.style.visibility = 'hidden';
   const reveal = () => { host.style.visibility = ''; };
   shadow.innerHTML = `<link rel="stylesheet" href="css/hr.css"><link rel="stylesheet" href="css/flatpickr.min.css"><div class="hr-root">${HR_HTML}<div id="hrFpHost"></div></div>`;
+  initDates(shadow);                                                       // the HR page lives in a shadow root: its date fields need the same วว/ดด/ปปปป treatment
   const cssLink = shadow.querySelector('link[href$="hr.css"]');
   if (cssLink) { cssLink.addEventListener('load', reveal); cssLink.addEventListener('error', reveal); }
   const revealTimer = setTimeout(reveal, 1500);

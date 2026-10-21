@@ -13,7 +13,6 @@ import { loadCss } from '../core/css.js';
  * Deep links (for the LINE rich menu):  #/leave  ·  #/leave?tab=who  ·  #/leave?tab=who&week=next  ·  #/leave?tab=mine
  */
 
-const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const DOW = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
 const GROUPS = [['leave', '🌴 ลา'], ['trip', '🚗 ไปราชการ'], ['train', '🎓 อบรม'], ['meet', '👥 ประชุม'], ['other', '📌 อื่นๆ']];
 const LEAVE_BASE = ['ลากิจ', 'ลาป่วย', 'ลาพักผ่อน'];            // these three have a half-day variant
@@ -26,7 +25,8 @@ const parse = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); 
 const iso = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 const addDays = (s, n) => { const d = parse(s); if (!d) return s; d.setUTCDate(d.getUTCDate() + n); return iso(d); };
 const dow = (s) => { const d = parse(s); return d ? d.getUTCDay() : 0; };
-const dm = (s) => { const d = parse(s); return d ? `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}` : ''; };
+const dm = (s) => { const d = parse(s); return d ? `${pad2(d.getUTCDate())}/${pad2(d.getUTCMonth() + 1)}/${d.getUTCFullYear() + 543}` : ''; };   // วว/ดด/ปปปป (พ.ศ.)
+const pad2 = (n) => String(n).padStart(2, '0');
 const dowDm = (s) => `${DOW[dow(s)]} ${dm(s)}`;
 const range = (a, b) => (!b || a === b ? dm(a) : `${dm(a)} – ${dm(b)}`);
 const short = (d) => String(d || '').replace(/^กลุ่มงาน/, '');
@@ -185,7 +185,7 @@ export async function mount(root, ctx) {
     const mon = d.from; const fri = addDays(mon, 4);
     box.append(h('div', { class: 'lv-seg lv-seg-lg', role: 'group', 'aria-label': 'ช่วงสัปดาห์' },
       ...[['thisWeek', 'สัปดาห์นี้'], ['nextWeek', 'สัปดาห์หน้า']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(week === k), onclick: () => { week = k; render(); } }, label))),
-      h('p', { class: 'lv-range' }, `${range(mon, fri)} ${Number(fri.slice(0, 4)) + 543}`, h('span', null, d.items.length ? ` · ${d.items.length} รายการ · ${d.people} คน` : '')));
+      h('p', { class: 'lv-range' }, range(mon, fri), h('span', null, d.items.length ? ` · ${d.items.length} รายการ · ${d.people} คน` : '')));
     if (d.holidays.length) box.append(h('div', { class: 'lv-hol' }, '🎌 ', d.holidays.map((x) => `${dowDm(x.date)} ${x.name}`).join(' · ')));
     if (!d.items.length) box.append(h('div', { class: 'empty' }, h('p', null, '✅ ยังไม่มีผู้บันทึกลา ไปราชการ อบรม หรือประชุมในช่วงนี้')));
     GROUPS.forEach(([k, title]) => {

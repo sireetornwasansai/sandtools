@@ -92,7 +92,7 @@ Environment Variables (Settings ▸ Environment Variables) แล้ว **Redepl
 
 | อาการ | สาเหตุ / วิธีแก้ |
 |---|---|
-| Verify ใน LINE Developers ไม่ผ่าน (401) | `SAND_LINE_CHANNEL_SECRET` ผิด หรือยังไม่ Redeploy หลังใส่ตัวแปร |
+| Verify ใน LINE Developers ไม่ผ่าน (401) | `SAND_LINE_CHANNEL_SECRET` ผิด หรือยังไม่ Redeploy หลังใส่/แก้ตัวแปร (Vercel ใช้ค่าใหม่กับ deployment ใหม่เท่านั้น) · วิธีหาสาเหตุ: เปิด `https://โดเมนของคุณ/api/line` ในเบราว์เซอร์ (GET) จะเห็น `secretSet` / `secretLooksValid` (Channel secret ของ LINE ต้องยาว 32 ตัว a-f 0-9 พอดี — ถ้าเป็น false แสดงว่าวางค่าผิดตัว เช่น Channel access token) · header `x-sand-reason` ของคำตอบ 401: `no-secret` ตัวแปรว่าง/ยังไม่ deploy · `bad-secret` ค่าไม่ใช่ Channel secret · `bad-signature` ค่าผิดช่อง/มีช่องว่างปน |
 | กดริชเมนูแล้วเงียบ | ยังไม่ได้ deploy Apps Script เวอร์ชันใหม่ · `EDGE_SECRET` ไม่ตรงกับ `SAND_EDGE_SECRET` · คนนั้นยังไม่มีบทบาท |
 | มีข้อความตอบซ้อน 2 ข้อความ | ยังไม่ได้ปิดข้อความตอบกลับอัตโนมัติใน OA Manager |
 | รายงานศุกร์ไม่มา | หน้า #/hr-line ▸ ตัวตั้งเวลา = 0 → กดบันทึกตารางเวลา (สร้างตัวตั้งเวลาใหม่) · ไม่มีผู้รับตามบทบาท · โควต้าเดือนนี้หมด |

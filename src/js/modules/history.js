@@ -1,4 +1,5 @@
 import { h, formatBytes, svgIcon, debounce } from '../core/dom.js';
+import { fmtDateTime } from '../core/datefield.js';
 import { ICONS } from '../core/icons.js';
 import { getSession } from '../core/auth.js';
 import { gasCall } from '../core/api.js';
@@ -7,7 +8,7 @@ import { TOOLS, navigate } from '../core/routes.js';
 
 const TOOL = { qr: 'QR Code', converter: 'แปลงไฟล์', compress: 'ย่อไฟล์', prompt: 'Prompt', skill: 'skill.md', pdf: 'เครื่องมือ PDF', library: 'คลังข้อมูล', links: 'ลิงก์ย่อ', projects: 'โครงการ', inbox: 'หนังสือรับเข้า', saraban: 'สารบรรณ', hr: 'บันทึกการปฏิบัติงาน' };
 const valid = (ts) => ts && !Number.isNaN(new Date(ts).getTime());
-const when = (ts) => (valid(ts) ? new Date(ts).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '-');
+const when = (ts) => (valid(ts) ? fmtDateTime(ts) : '-');
 const ago = (ts) => { if (!valid(ts)) return '-'; const m = Math.round((Date.now() - new Date(ts).getTime()) / 60000); return m < 1 ? 'เมื่อสักครู่' : m < 60 ? `${m} นาทีที่แล้ว` : m < 1440 ? `${Math.round(m / 60)} ชั่วโมงที่แล้ว` : `${Math.round(m / 1440)} วันที่แล้ว`; };
 
 export async function mount(root) {

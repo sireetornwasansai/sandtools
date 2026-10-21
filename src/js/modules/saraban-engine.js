@@ -13,7 +13,7 @@ export const MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', '�
 export const MONTH_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
 export const thaiDigitsToArabic = (s) => String(s == null ? '' : s).replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50));
-export function thaiDate(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${Number(m[1]) + 543}` : ''; }
+export function thaiDate(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? `${m[3]}/${m[2]}/${Number(m[1]) + 543}` : ''; }   // วว/ดด/ปปปป (พ.ศ.) — the long official form is thaiDateLong
 export function thaiDateTime(stamp) { const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(stamp || ''); return m ? `${thaiDate(m[1])} ${m[2]}.${m[3]} น.` : thaiDate(stamp); }
 export function isoFrom(y, mo, d) {
   y = Number(y); mo = Number(mo); d = Number(d); if (y > 2400) y -= 543;

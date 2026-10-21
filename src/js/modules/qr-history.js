@@ -8,6 +8,7 @@ import { copyText, downloadBlob, safeFileName } from '../core/download.js';
 import { modal, confirmBox, closeAllLayers } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
 import { fmt, ago, bkk } from '../core/charts.js';
+import { fmtDate } from '../core/datefield.js';
 import { QR_CATS, QR_TYPES, KIND_LABEL, isQrKind, catLabel, typeLabel, linksCall, shortUrl, savedPayload, savedDesign, cachedLinksList, fetchLinksList, renderSavedCanvas, fetchQrImage } from '../core/qrsaved.js';
 import { attachOldQr, qrThumb, showSavedQr } from '../core/qrold.js';
 import { buildMatrix, toSvg } from './qr-engine.js';
@@ -15,7 +16,7 @@ import { buildMatrix, toSvg } from './qr-engine.js';
 /** QR history: every QR the user saved (static copies and tracked QR), with what it is for, its category and — for tracked QR — how many people scanned it. */
 
 const PAGE = 48;
-const dateOf = (s) => { const d = bkk(s); return d ? d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : '-'; };
+const dateOf = (s) => { const d = bkk(s); return d ? fmtDate(d) : '-'; };
 
 const renderCanvas = renderSavedCanvas;
 

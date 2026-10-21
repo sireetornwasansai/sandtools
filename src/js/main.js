@@ -11,6 +11,7 @@ import { backendConfigured, warmBackend } from './core/api.js';
 import { loginRequired, getSession, revalidateInBackground, preloadLogin, renderLogin, currentUser, signOut } from './core/auth.js';
 import { setPendingFile, routeForFile } from './core/handoff.js';
 import { toast } from './core/toast.js';
+import { initDates } from './core/datefield.js';
 
 const app = document.getElementById('app');
 let main;
@@ -140,6 +141,7 @@ function installGlobalHandlers() {
 
 async function boot() {
   initTheme();
+  initDates(document);                            // every date field = วว/ดด/ปปปป (see core/datefield.js)
   warmBackend();                                  // wake the Apps Script container while the page loads (cold start is the slowest part)
   if (loginRequired()) {
     if (getSession()) revalidateInBackground();   // open the app straight away from the stored session; verify later without blocking

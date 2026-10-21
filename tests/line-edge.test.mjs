@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const src = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'api', 'line.js');
 const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'line-edge-')), 'line.mjs');
 fs.copyFileSync(src, tmp);                                   // the repo has no "type":"module" for api/, so import a .mjs copy
-const { verifySignature, slim } = await import(pathToFileURL(tmp).href);
+const { verifySignature, slim, refusal } = await import(pathToFileURL(tmp).href);
 
 const sign = (secret, body) => crypto.createHmac('sha256', secret).update(body).digest('base64');
 
@@ -47,4 +47,15 @@ test('slim: long text is cut, control characters are removed, at most 20 events,
   const out = slim({ events: Array.from({ length: 50 }, (_, i) => ev(i)) });
   assert.equal(out.length, 20); assert.ok(out[0].text.length <= 200); assert.ok(!out[0].text.includes('\u0000'));
   assert.deepEqual(slim(null), []); assert.deepEqual(slim({ events: 'nope' }), []); assert.deepEqual(slim({ events: [null, 5, 'x'] }), []);
+});
+
+
+test('refusal: tells the admin WHY a call is refused (header x-sand-reason) without leaking anything', async () => {
+  const good = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';                          // a channel secret is 32 hex characters
+  const body = Buffer.from('{"events":[]}');                                // what the Verify button sends
+  assert.equal(await refusal('', body, sign(good, body)), 'no-secret');
+  assert.equal(await refusal('eyJhbGciOi-this-is-an-access-token-not-a-secret', body, 'x'), 'bad-secret');
+  assert.equal(await refusal(good, body, ''), 'no-signature');
+  assert.equal(await refusal(good, body, sign('ffffffffffffffffffffffffffffffff', body)), 'bad-signature');
+  assert.equal(await refusal(good, body, sign(good, body)), '');
 });

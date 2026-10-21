@@ -40,7 +40,7 @@ test('does not invent: empty / unrelated text finds nothing, "within N days" is 
 test('dates: Thai words, abbreviations, numeric, invalid; labels', () => {
   assert.equal(parseThaiDate('๑๒ ก.ย. ๒๕๖๙'), '2026-09-12'); assert.equal(parseThaiDate('05/03/2569'), '2026-03-05');
   assert.equal(parseThaiDate('31 กุมภาพันธ์ 2569'), ''); assert.equal(parseThaiDate('ไม่มีวันที่'), '');
-  assert.equal(thaiDate('2026-10-09'), '9 ต.ค. 2569'); assert.equal(thaiDateTime('2026-10-15 10:05:33'), '15 ต.ค. 2569 10.05 น.');
+  assert.equal(thaiDate('2026-10-09'), '09/10/2569'); assert.equal(thaiDateTime('2026-10-15 10:05:33'), '15/10/2569 10.05 น.');
   assert.equal(addDays('2026-10-31', 1), '2026-11-01');
   assert.match(dueLabel('2026-10-10', '2026-10-15'), /เลยกำหนด 5 วัน/); assert.match(dueLabel('2026-10-15', '2026-10-15'), /ครบกำหนดวันนี้/);
 });
@@ -65,7 +65,7 @@ test('v1.8.0 print sheets: register (A4 landscape, escaped, void struck) and rec
   assert.match(g, /ทะเบียนหนังสือรับ ประจำปี พ.ศ. 2569/); assert.match(g, /A4 landscape/); assert.match(g, /สสจ\.&lt;x&gt;/); assert.match(g, /\(ด่วนมาก\)/); assert.match(g, /class="void"/); assert.ok(!g.includes('<x>'));
   assert.match(buildRegisterHtml({ org: 'o', kind: 'out', year: 2569, rows: [] }), /ทะเบียนหนังสือส่ง[\s\S]*ไม่มีรายการ/);
   const r = buildReceiptHtml({ org: 'รพ.สันทราย', doc: { reg: '5/2569', at: '2026-10-14 09:30:00' } });
-  assert.match(r, /เลขรับ 5\/2569/); assert.match(r, /14 ต\.ค\. 2569/); assert.match(r, /เวลา 09\.30 น\./);
+  assert.match(r, /เลขรับ 5\/2569/); assert.match(r, /14\/10\/2569/); assert.match(r, /เวลา 09\.30 น\./);
 });
 
 test('v1.10 parseLetter: letter numbers with "ว." / "พิเศษ" and a sender from the letterhead', () => {
