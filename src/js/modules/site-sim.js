@@ -695,9 +695,18 @@ export function mountSiteFloor(host, opts = {}) {
     out.push({ d: 12.4, f: () => {   // name board on the floor-4 roof
       const tx = gx; const zb = 4 * FL; box(tx, 5.3, 3.3, 0.16, 0.95, pal.brand, zb); const [ssx, ssy] = P(tx - 1.65, 5.381, Z(zb)); const u = tw / 2;
       ctx.save(); ctx.translate(ssx, ssy); ctx.transform(1, 0.5, 0, 1, 0, 0);
-      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0.45 * u, -0.48 * u, 0.3 * u, 0, 7); ctx.fill(); ctx.fillStyle = '#dc2626'; ctx.fillRect(0.45 * u - 0.07 * u, -0.48 * u - 0.19 * u, 0.14 * u, 0.38 * u); ctx.fillRect(0.45 * u - 0.19 * u, -0.48 * u - 0.07 * u, 0.38 * u, 0.14 * u);
-      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; const cxs = 2.0 * u; const l2 = 'กลุ่มงานพัฒนาคุณภาพและระบบบริการ';
-      ctx.font = `700 ${0.27 * u}px ${font}`; ctx.fillText('โรงพยาบาลสันทราย', cxs, -0.64 * u); let fs = 0.17 * u; ctx.font = `600 ${fs}px ${font}`; const mw = ctx.measureText(l2).width; if (mw > 2.5 * u) { fs *= (2.5 * u) / mw; ctx.font = `600 ${fs}px ${font}`; } ctx.fillText(l2, cxs, -0.3 * u);
+      // board 3.3 × 0.95: a thin white frame, the cross-in-a-disc on the left, and the two lines fitted to FILL the rest of the board (same width, centred as one block)
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1, 0.025 * u); ctx.strokeRect(0.06 * u, -0.89 * u, 3.18 * u, 0.83 * u);
+      const lcx = 0.55 * u; const lcy = -0.475 * u; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(lcx, lcy, 0.34 * u, 0, 7); ctx.fill(); ctx.fillStyle = '#dc2626'; ctx.fillRect(lcx - 0.075 * u, lcy - 0.22 * u, 0.15 * u, 0.44 * u); ctx.fillRect(lcx - 0.22 * u, lcy - 0.075 * u, 0.44 * u, 0.15 * u);
+      const t1 = 'โรงพยาบาลสันทราย'; const l2a = 'กลุ่มงานพัฒนาคุณภาพ'; const l2b = 'และระบบบริการ'; const bx0 = 1.0 * u; const bw = 2.14 * u; const bcx = bx0 + bw / 2;
+      const fit = (txt, wt, cap, wgt) => { ctx.font = `${wgt} 100px ${font}`; const m = ctx.measureText(txt).width || 1; return Math.min(cap, (100 * wt) / m); };
+      let f1 = fit(t1, bw, 0.46 * u, 700); let f2 = Math.min(fit(l2a, bw, 0.3 * u, 600), fit(l2b, bw, 0.3 * u, 600));
+      const maxH = 0.74 * u; const rawH = f1 * 1.2 + f2 * 2.5; if (rawH > maxH) { const k = maxH / rawH; f1 *= k; f2 *= k; }   // title + two subtitle lines fill the board's height
+      const blockH = f1 * 1.2 + f2 * 2.5; const top = lcy - blockH / 2;
+      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `700 ${f1}px ${font}`; ctx.fillText(t1, bcx, top + f1 * 0.6);
+      ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(bx0, top + f1 * 1.2, bw, Math.max(1, 0.018 * u));
+      ctx.fillStyle = '#e7fffb'; ctx.font = `600 ${f2}px ${font}`; ctx.fillText(l2a, bcx, top + f1 * 1.2 + f2 * 0.75); ctx.fillText(l2b, bcx, top + f1 * 1.2 + f2 * 1.9);
       ctx.restore();
     } });
     out.push({ d: 12.5, f: () => {   // solar panels on the roof of the front wing (floor 3)
@@ -907,8 +916,17 @@ export function mountSiteFloor(host, opts = {}) {
     const free = (shape, self) => !statics.some((o) => shapesHit(shape, o)) && !cars.some((o) => o !== self && o.q && shapesHit(shape, rectOf(o.q, o.d))) && !A.walkers.some((w) => w !== self && !w.z && w.p && shapesHit(shape, walkerShape(w, w.p)));
     for (const c of cars) { let s = ((c.off % c.pa.len) + c.pa.len) % c.pa.len; for (let k = 0; k < 120; k++) { const q = pathAt(c.pa, s); if (free(rectOf(q, c.d, 0.2), c)) { c.s = s; c.q = q; break; } s = (s + 0.4) % c.pa.len; } if (!c.q) { c.s = 0; c.q = pathAt(c.pa, 0); } }
     for (const w of A.walkers) { const len = w.q.len; const u = ((w.off % (2 * len)) + 2 * len) % (2 * len); w.s = u < len ? u : 2 * len - u; w.dir = u < len ? 1 : -1; w.p = pathAt(w.q, w.s); if (!w.z) for (let k = 0; k < 80 && !free(walkerShape(w, w.p), w); k++) { w.s = (w.s + 0.15) % len; w.p = pathAt(w.q, w.s); } }
+    for (const w of A.walkers) {   // the stretch of the path a person can really walk: stops short of a parked car, a bike rack or someone standing there — nobody walks "into" it and stays on the spot
+      const len = w.q.len; w.lo = w.lo0 || 0; w.hi = len; if (w.s < w.lo) { w.s = w.lo; w.p = pathAt(w.q, w.s); } if (w.z) continue;   // the arms start at the junction: they turn back short of it so three paths never pile up on one spot
+      const ok = (u) => [w.laneOn ? 0.1 : 0, w.laneOn ? -0.1 : 0].every((lat) => { const sh = walkerShape(w, lanePos({ lat }, pathAt(w.q, u))); return !statics.some((o) => shapesHit(sh, o)); });   // both sides of the lane
+      let a = w.s; let b = w.s; if (!ok(w.s)) { let f = -1; for (let u = 0; u <= len; u += 0.05) if (ok(u)) { f = u; break; } if (f < 0) { w.hide = true; continue; } a = b = f; w.s = f; w.p = pathAt(w.q, f); }
+      while (a - 0.05 >= 0 && ok(a - 0.05)) a -= 0.05; while (b + 0.05 <= len && ok(b + 0.05)) b += 0.05;
+      w.lo = Math.max(a, w.lo0 || 0); w.hi = b; if (w.hi - w.lo < 0.6) w.hide = true;
+    }
     S.free = free; return S;
   }
+  /** People on a footpath keep to their own side (a little left of the centre-line, per person) so two who meet pass side by side instead of through each other. */
+  function lanePos(w, p) { const off = w.lat || 0; return off ? { x: p.x - Math.sin(p.ang) * off, y: p.y + Math.cos(p.ang) * off, ang: p.ang } : p; }
   function trafficAdvance(S, C, dt) {
     const { cars, walkers, statics } = S; S.sig = (S.sig || 0) + dt;
     const hitsCar = (shape, self) => cars.some((o) => o !== self && shapesHit(shape, rectOf(o.q, o.d)));
@@ -929,12 +947,20 @@ export function mountSiteFloor(host, opts = {}) {
       else { c.vel = 0; c.hardT = (c.hardT || 0) + dt; if (c.hardT > 2) c.prio = c.base - 1000; if (c.hardT > 3 && c.s > 0.6) { const bs = c.s - 0.7 * dt; const bq = pathAt(c.pa, bs); const bsh = rectOf(bq, c.d); if (!hitsCar(bsh, c) && !hitsWalker(bsh, null) && !hitsStatic(bsh)) { c.s = bs; c.q = bq; } } }   // squeezed against another car: back up a little and let it pass
       if (c.s >= c.pa.len) { c.ghost = true; c.ended = (c.ended || 0) + 1; c.gt = 0; c.q = { x: -50, y: -50, ang: 0 }; } else if (c.wait > 20 || c.hardT > 12) { c.ghost = true; c.gt = 0; c.q = { x: -50, y: -50, ang: 0 }; }
     }
-    for (const w of walkers) {   // people walk to and fro; on the ground they never step into a car or an obstacle
-      const len = w.q.len; let ns = w.s + w.dir * w.sp * dt; let dir = w.dir; if (ns >= len) { ns = len; dir = -1; } else if (ns <= 0) { ns = 0; dir = 1; }
-      const np = pathAt(w.q, ns);
-      if (w.z) { w.s = ns; w.dir = dir; w.p = np; continue; }
-      const shape = walkerShape(w, np);
-      if (!hitsCar({ ...shape, r: shape.r + 0.1 }, null) && !hitsStatic(shape)) { w.s = ns; w.dir = dir; w.p = np; w.stuck = 0; } else { w.stuck = (w.stuck || 0) + dt; if (w.stuck > 3 && !hitsStatic(walkerShape(w, w.p))) { w.dir = -w.dir; w.stuck = 0; } }
+    walkers.forEach((w, wi) => { w.idx = wi; });
+    for (const w of walkers) {   // people walk to and fro; on the ground they never step into a car or an obstacle, and never through each other
+      const len = w.q.len; if (w.hide) continue;
+      const lo = w.lo || 0; const hi = w.hi === undefined ? len : w.hi; let ns = w.s + w.dir * w.sp * dt; let dir = w.dir; if (ns >= hi) { ns = hi; dir = -1; } else if (ns <= lo) { ns = lo; dir = 1; }
+      if (w.laneOn) { const tgt = (dir > 0 ? 1 : -1) * (w.g ? 0.1 : 0.14); const cur = w.lat === undefined ? tgt : w.lat; w.lat = cur + (tgt - cur) * Math.min(1, dt * 3); }   // keep to your own side: left-hand walking, as on the roads
+      const np = lanePos(w, pathAt(w.q, ns));
+      const d0 = (o) => Math.hypot(o.p.x - w.p.x, o.p.y - w.p.y); const d1 = (o) => Math.hypot(o.p.x - np.x, o.p.y - np.y);
+      const near = walkers.find((o) => o !== w && o.p && (o.z || 0) === (w.z || 0) && !!o.g === !!w.g && !o.hide && d1(o) < 0.16 && d1(o) < d0(o) - 1e-4);   // someone I am walking into (same level only)
+      let hold = false; let turn = false;
+      if (near) { if (near.dir === w.dir && (near.s - ns) * w.dir > 0) { w.sp = Math.max(0.2, Math.min(w.sp, near.sp * 0.95)); hold = true; } else { hold = true; turn = true; } }
+      if (!hold && !w.z) { const shape = walkerShape(w, np); if (hitsCar({ ...shape, r: shape.r + 0.1 }, null) || hitsStatic(shape)) { hold = true; turn = true; } }
+      if (!hold) { w.s = ns; w.dir = dir; w.p = np; w.stuck = 0; w.halt = false; continue; }
+      w.halt = true;   // standing: no walking cycle while held up — never "walk" on the spot
+      if (turn) { w.stuck = (w.stuck || 0) + dt; if (w.stuck > 1) { w.dir = -w.dir; w.stuck = 0; if (!w.z && hitsStatic(walkerShape(w, w.p))) { const ss = Math.max(lo, Math.min(hi, w.s + w.dir * 0.4)); const q = lanePos(w, pathAt(w.q, ss)); if (!hitsStatic(walkerShape(w, q))) { w.s = ss; w.p = q; } } } }
     }
   }
   function trafficStep(now, emsLive) {
@@ -1094,14 +1120,16 @@ export function mountSiteFloor(host, opts = {}) {
     items.push({ d: x0 + w + y + 0.05, f: () => {
       box(x0 + w / 2, y, w, 0.24, WH, WALL); box(x0 + w / 2, y, w + 0.08, 0.28, 0.05, Cc('#cfcabd'), WH);
       const fy = y + 0.122; faceY(x0, x0 + w, fy, 0, WH, WALL);
-      wallY(x0, fy + 0.004, WH, (u) => {
-        ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.moveTo(0, 0.36 * u); ctx.lineTo(0.55 * u, 0.04 * u); ctx.lineTo(w * u, 0.04 * u); ctx.lineTo(w * u, 0.1 * u); ctx.lineTo(0.6 * u, 0.1 * u); ctx.lineTo(0, 0.43 * u); ctx.fill();   // black swoosh across the top
-        ctx.beginPath(); ctx.moveTo(0, 0.9 * u); ctx.lineTo(0.42 * u, 0.74 * u); ctx.lineTo(w * u, 0.74 * u); ctx.lineTo(w * u, 0.79 * u); ctx.lineTo(0.46 * u, 0.79 * u); ctx.lineTo(0, 0.96 * u); ctx.fill();   // thin line below
-        const ex = 0.95 * u; const ey = 0.47 * u; const r = 0.27 * u; ctx.fillStyle = '#14532d'; ctx.beginPath(); ctx.arc(ex, ey, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, 0.022 * u); ctx.beginPath(); ctx.arc(ex, ey, r * 0.88, 0, 7); ctx.stroke();
-        ctx.lineWidth = Math.max(1, 0.03 * u); ctx.beginPath(); ctx.moveTo(ex, ey - r * 0.62); ctx.lineTo(ex, ey + r * 0.62); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ex - r * 0.5, ey - r * 0.38); ctx.quadraticCurveTo(ex, ey - r * 0.7, ex + r * 0.5, ey - r * 0.38); ctx.stroke();   // staff + wings of the ministry emblem
+      wallY(x0, fy + 0.004, WH, (u) => {   // name wall: the Thai name across the full width, the emblem + English name on the row below — the board is filled, nothing is left empty
+        ctx.fillStyle = '#111827'; ctx.fillRect(0, 0.04 * u, w * u, 0.05 * u); ctx.fillRect(0, 0.96 * u, w * u, 0.05 * u);
+        const fitW = (txt, wt, cap, wgt) => { ctx.font = `${wgt} 100px ${font}`; const m = ctx.measureText(txt).width || 1; return Math.min(cap, (100 * wt) / m); };
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const f1 = fitW('โรงพยาบาลสันทราย', (w - 0.2) * u, 0.46 * u, 800); ctx.fillStyle = '#111827'; ctx.font = `800 ${f1}px ${font}`; ctx.fillText('โรงพยาบาลสันทราย', (w / 2) * u, 0.3 * u);
+        ctx.fillStyle = '#14532d'; ctx.fillRect(0.1 * u, 0.53 * u, (w - 0.2) * u, 0.025 * u);
+        const ex = 0.36 * u; const ey = 0.77 * u; const r = 0.19 * u; ctx.fillStyle = '#14532d'; ctx.beginPath(); ctx.arc(ex, ey, r, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, 0.018 * u); ctx.beginPath(); ctx.arc(ex, ey, r * 0.86, 0, 7); ctx.stroke();
+        ctx.lineWidth = Math.max(1, 0.024 * u); ctx.beginPath(); ctx.moveTo(ex, ey - r * 0.62); ctx.lineTo(ex, ey + r * 0.62); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ex - r * 0.5, ey - r * 0.38); ctx.quadraticCurveTo(ex, ey - r * 0.7, ex + r * 0.5, ey - r * 0.38); ctx.stroke();   // staff + wings of the ministry emblem
         ctx.beginPath(); for (let k = 0; k <= 12; k++) { const t2 = k / 12; const px = ex + Math.sin(t2 * Math.PI * 3) * r * 0.22; const py = ey - r * 0.5 + t2 * r * 1.0; k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.stroke();   // snake
-        ctx.fillStyle = '#111827'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; let f = 0.25 * u; ctx.font = `700 ${f}px ${font}`; const t1 = 'โรงพยาบาลสันทราย'; const mx = (w - 1.55) * u; const m1 = ctx.measureText(t1).width; if (m1 > mx) { f *= mx / m1; ctx.font = `700 ${f}px ${font}`; } ctx.fillText(t1, 2.55 * u, 0.38 * u);
-        f = 0.2 * u; ctx.font = `700 ${f}px ${font}`; ctx.fillText('Sansai Hospital', 2.55 * u, 0.62 * u);
+        const sx0 = 0.68 * u; const sw2 = (w - 0.1) * u - sx0; const f2 = fitW('SANSAI HOSPITAL', sw2, 0.3 * u, 800); ctx.fillStyle = '#14532d'; ctx.font = `800 ${f2}px ${font}`; ctx.fillText('SANSAI HOSPITAL', sx0 + sw2 / 2, 0.77 * u);
       });
     } });
     items.push({ d: x0 + w + y + 0.4, f: () => { box(x0 + w / 2, y + 0.38, w + 0.1, 0.34, 0.16, Cc('#b9855f')); box(x0 + w / 2, y + 0.38, w - 0.06, 0.26, 0.1, Cc('#2f8f4e'), 0.16); for (const k of [0.6, 1.9, 3.2]) box(x0 + k, y + 0.28, 0.1, 0.08, 0.06, '#fde68a', 0.1); } });   // planter with hedge + ground spotlights
@@ -1214,8 +1242,8 @@ export function mountSiteFloor(host, opts = {}) {
   // ---------- simulated life: doctors, nurses, patients (some in wheelchairs / with a drip), visitors, children and site workers walking the footpaths — atmosphere only, not data ----------
   const SKINS = ['#f1c9a5', '#e0ac82', '#c68e64', '#8d5a3b'];
   const VIS_COLS = ['#f97316', '#6366f1', '#ec4899', '#84cc16', '#0ea5e9', '#a855f7', '#f59e0b', '#ef4444'];
-  function ambFig(x, y, kind, now, seed, sc = 0.95, zl = 0) {
-    const [sx, sy] = P(x, y, zl ? Z(zl) : 0); const s = tw * 0.075 * sc * (kind === 'kid' ? 0.72 : 1); const bob = reduced || kind === 'wheel' || kind === 'stand' ? 0 : Math.abs(Math.sin(now / 170 + seed * 3)) * s * 0.16; const by = sy - bob; const skin = SKINS[seed % SKINS.length];
+  function ambFig(x, y, kind, now, seed, sc = 0.95, zl = 0, still = false) {
+    const [sx, sy] = P(x, y, zl ? Z(zl) : 0); const s = tw * 0.075 * sc * (kind === 'kid' ? 0.72 : 1); const bob = reduced || still || kind === 'wheel' || kind === 'stand' ? 0 : Math.abs(Math.sin(now / 170 + seed * 3)) * s * 0.16; const by = sy - bob; const skin = SKINS[seed % SKINS.length];
     ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.2, s * 0.55, 0, 0, 7); ctx.fill();
     const body = (col, ol) => { ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, by - s * 3.3, s * 1.7, s * 3.3, s * 0.7); ctx.fill(); if (ol) { ctx.strokeStyle = ol; ctx.lineWidth = Math.max(1, s * 0.16); ctx.stroke(); } };
     const head = (hy) => { ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(sx, hy, s * 0.85, 0, 7); ctx.fill(); };
@@ -1230,12 +1258,12 @@ export function mountSiteFloor(host, opts = {}) {
       ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = Math.max(1, s * 0.14); ctx.beginPath(); ctx.moveTo(sx + s * 1.5, sy); ctx.lineTo(sx + s * 1.5, by - s * 5); ctx.moveTo(sx + s * 1.1, by - s * 5); ctx.lineTo(sx + s * 1.9, by - s * 5); ctx.stroke();
       ctx.fillStyle = '#e0f2fe'; ctx.beginPath(); ctx.roundRect(sx + s * 1.25, by - s * 4.8, s * 0.5, s * 0.9, s * 0.2); ctx.fill(); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(1, s * 0.1); ctx.stroke();
     }
-    drawFigure(DG, { sx, sy, s, now, walk: kind !== 'stand', seed, kind, col: VIS_COLS[seed % VIS_COLS.length] });   // head · torso · arms · legs, outfit by kind (site-deco.js)
+    drawFigure(DG, { sx, sy, s, now, walk: !still && kind !== 'stand', seed, kind, col: VIS_COLS[seed % VIS_COLS.length] });   // head · torso · arms · legs, outfit by kind (site-deco.js)
   }
   let AMB = null; let AMBfor = null;
   function buildAmbient(L) {
     const P0 = L.paths; if (!P0) return { walkers: [], stand: [] }; const pa = {}; for (const k of Object.keys(P0)) pa[k] = roundPath(P0[k], 0.25);
-    const W = []; const add = (path, kinds, base = 0) => kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, z: path.indexOf('deck') === 0 ? 1.0 : 0, g: /^g[A-D]$/.test(path), fade: (L.fades || {})[path] || null, kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); });
+    const W = []; const add = (path, kinds0, base = 0) => { const kinds = kinds0.slice(0, Math.max(1, Math.floor(pa[path].len / 0.85))); kinds.forEach((kind, i) => { const q = pa[path]; W.push({ q, z: path.indexOf('deck') === 0 ? 1.0 : 0, g: /^g[A-D]$/.test(path), nm: path, lo0: /^(deck|g)[BCD]$/.test(path) ? 0.45 : 0, laneOn: /^(deck|g[A-D]$|toEr|lotE|bikeW|in[AB])/.test(path), fade: (L.fades || {})[path] || null, kind, seed: W.length * 7 + i + base, off: (i + 0.35) * (q.len / kinds.length) * 2 * (0.6 + 0.4 * hash01(W.length + i)), sp: (kind === 'wheel' ? 0.34 : kind === 'worker' ? 0.42 : kind === 'kid' ? 0.62 : 0.5) + 0.16 * hash01(W.length * 3 + i) }); }); };
     add('toEr', ['wheel', 'patient', 'visitor']);
     add('lotE', ['visitor', 'nurse']); add('bikeW', ['visitor', 'nurse']);
     add('deckA', ['visitor', 'doctor', 'nurse', 'wheel', 'visitor']); add('deckB', ['nurse', 'visitor', 'wheel']); add('deckC', ['doctor', 'visitor', 'patient', 'nurse']); add('deckD', ['nurse', 'visitor', 'doctor']);   // upper storey of the connecting walkway
@@ -1243,13 +1271,13 @@ export function mountSiteFloor(host, opts = {}) {
     add('inA', ['visitor', 'nurse', 'visitor']); add('inB', ['visitor', 'doctor', 'visitor', 'wheel']);   // people walk from the car park into ตึกแสงเดือน (they fade out at its door) add('s5', ['worker']);
     add('s1', ['worker', 'worker']); add('s2', ['worker']); add('s3', ['worker']); add('s4', ['worker', 'worker']);
     const dy = L.site ? L.site.dy : 0; const dx0 = L.site ? L.site.dx : 0; const ed = L.bld.er.door[0]; const stand = [[ed + 0.85, 3.1, 'nurse', 1], [ed + 1.15, 3.3, 'patient', 2], [21.6, 8.3, 'visitor', 4], [22.6, 8.3, 'doctor', 5], [18.4, 8.3, 'wheel', 6], [5.0, 4.8, 'visitor', 13], [5.8, 5.6, 'nurse', 14], [4.6, 6.6, 'kid', 7], [5.4, 7.4, 'visitor', 8], [4.4, 8.0, 'wheel', 17], [3.2 + dx0 + 0.2, 3.6 + dy - 0.7, 'worker', 9], [4.0 + dx0, 3.55 + dy - 0.8, 'worker', 10], [22.0, 2.6, 'doctor', 15]];
-    if (L.corr) { const c = L.corr; stand.push([c.ax - 0.12, 2.4, 'visitor', 21, 0], [c.ax - 0.12, 2.85, 'patient', 22, 0], [c.ax - 0.12, 3.3, 'wheel', 23, 0], [c.ax - 0.12, 3.75, 'visitor', 24, 0], [c.ax - 0.42, 3.0, 'nurse', 25, 1.0], [c.ax + 0.42, 2.4, 'visitor', 26, 1.0]); }   // a queue on the ground storey, two people standing on the deck
+    if (L.corr) { const c = L.corr; stand.push([c.ax - 0.3, 2.4, 'visitor', 21, 0], [c.ax - 0.3, 2.85, 'patient', 22, 0], [c.ax - 0.3, 3.3, 'wheel', 23, 0], [c.ax - 0.3, 3.75, 'visitor', 24, 0], [c.ax - 0.42, 3.0, 'nurse', 25, 1.0], [c.ax + 0.42, 2.4, 'visitor', 26, 1.0]); }   // a queue on the ground storey, two people standing on the deck
     return { walkers: W, stand };
   }
   function ambientItems(items, now) {
     const L = HL; if (AMBfor !== L) { AMB = buildAmbient(L); AMBfor = L; }
-    trafficStep(now); for (const w of AMB.walkers) { const len = w.q.len; const sx = w.s; const q = w.p; let fa = 1; if (w.fade) { if (w.fade[0]) fa = Math.min(fa, sx / 0.6); if (w.fade[1]) fa = Math.min(fa, (len - sx) / 0.6); } fa = Math.max(0, Math.min(1, fa)); if (fa <= 0.02) continue; items.push({ d: q.x + q.y + (w.z ? 1.4 : w.g ? 2.3 : 0.01), f: () => { ctx.globalAlpha = fa; ambFig(q.x, q.y, w.kind, now, w.seed, w.kind === 'worker' ? 0.9 : 0.95, w.z); ctx.globalAlpha = 1; } }); }
-    for (const [x, y, kind, seed, zl = 0] of AMB.stand) items.push({ d: x + y + 0.01 + (zl ? 1.4 : seed >= 21 && seed <= 24 ? 2.3 : 0), f: () => ambFig(x, y, kind === 'wheel' ? 'wheel' : kind, now, seed, 0.95, zl) });
+    trafficStep(now); for (const w of AMB.walkers) { const len = w.q.len; const sx = w.s; const q = w.p; let fa = 1; if (w.fade) { if (w.fade[0]) fa = Math.min(fa, sx / 0.6); if (w.fade[1]) fa = Math.min(fa, (len - sx) / 0.6); } fa = Math.max(0, Math.min(1, fa)); if (fa <= 0.02 || w.hide) continue; items.push({ d: q.x + q.y + (w.z ? 1.4 : w.g ? -0.9 : 0.01), f: () => { ctx.globalAlpha = fa; ambFig(q.x, q.y, w.kind, now, w.seed, w.kind === 'worker' ? 0.9 : 0.95, w.z, !!w.halt); ctx.globalAlpha = 1; } }); }
+    for (const [x, y, kind, seed, zl = 0] of AMB.stand) items.push({ d: x + y + 0.01 + (zl ? 1.4 : seed >= 21 && seed <= 24 ? -0.9 : 0), f: () => ambFig(x, y, kind === 'wheel' ? 'wheel' : kind, now, seed, 0.95, zl, true) });   // standing people: no walking cycle, no bobbing
   }
   function campusScene(items, labels, F, now, kit) {
     const L = HL; const f0 = L.road.front[0]; const e0 = L.road.east[0]; const gx = L.gate[0]; campusGround();

@@ -684,7 +684,7 @@ export function campusLayout() {
   const yj2 = (towers[1].y0 + towers[1].y1) / 2;
   const corr = { ax: 18.0, hw: 0.7, yS: main.y0 + 0.3, yE: yj2 - 0.7, yj: 1.2, yj2, xL: er.x1, xR: towers[0].x0, xR2: towers[1].x0, z: 0.9 };
   const sp = (a) => a.map(([x, y]) => [x + DX, y + DY]);
-  const gz = 0.3; const hwA = 0.25;   // the people on the ground storey walk on the side that can be seen under the deck
+  const gz = 0.28; const hwA = 0.25;   // the people on the ground storey walk on the side that can be seen under the deck
   const t2 = towers[1].y1 - 0.05; const cx2 = (towers[1].x0 + towers[1].x1) / 2;
   const paths = {
     deckA: [[corr.xL + 0.3, corr.yj], [corr.ax, corr.yj], [corr.ax, corr.yS - 0.15]], deckB: [[corr.ax, corr.yj], [corr.xR - 0.25, corr.yj]], deckC: [[corr.ax, corr.yj], [corr.ax, corr.yj2]], deckD: [[corr.ax, corr.yj2], [corr.xR2 - 0.25, corr.yj2]],
