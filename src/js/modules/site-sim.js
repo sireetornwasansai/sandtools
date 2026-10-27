@@ -21,6 +21,7 @@ import { THEMES, themeOf, MAX_SITES, PALETTE, IDLE_COL, DEFAULTS, hhmm, fmt, hos
   MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY,
   VIEW_KEY, VIEWS, VIEW_IDS, DEPT, HOSP, HOSP_GROUPS, HG, groupOf, HOSP_BLDS, BLD, bldOf, campusLayout, interiorLayout, deptWorld, deptLayout, deptStand, headStand, hospStand, hospRoute, hospDoor, ROLES, ROLE_IDS, roleOf, roleText, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext } from './site-engine.js';
 import { drawRoom, roomColor } from './site-rooms.js';
+import { HOSPITAL_NAME, drawNumber, drawPlate, drawFigure } from './site-deco.js';
 
 const G = 12; const CORR = 6; const ENT = [0.6, CORR]; const EXIT = [11.4, CORR]; const CAP = 16;
 const RANGES = [[7, '7 วัน'], [30, '30 วัน'], [90, '90 วัน']]; const RANGE_KEY = 'sand:home3d:days';
@@ -458,18 +459,19 @@ export function mountSiteFloor(host, opts = {}) {
     poly([P(x0, y1, a), P(x1, y1, a), P(x1, y1, b), P(x0, y1, b)], shade(col, 0.82)); poly([P(x1, y0, a), P(x1, y1, a), P(x1, y1, b), P(x1, y0, b)], shade(col, 0.66));
     poly([P(x0, y0, b), P(x1, y0, b), P(x1, y1, b), P(x0, y1, b)], shade(col, 1.08));
   }
-  function person(x, y, col, back = false, now = 0, sc = 1, role = '') {
-    const [sx, sy] = P(x, y); const s = tw * 0.075 * sc;
+  /** Drawing kit for site-deco.js: getters, because the camera, scale and theme change between frames. */
+  const DG = { get ctx() { return ctx; }, get pal() { return pal; }, get font() { return font; }, get tw() { return tw; }, get camZ() { return cam.z; }, get width() { return cv.width / dpr; }, get reduced() { return reduced; }, get clampX() { return !ins && cam.z < 1.05; } };
+  /** A visitor: head, torso, two arms, two legs (they swing while walking). The outfit follows the role (admin purple blazer · head orange + clipboard · officer cyan + ID card · committee green + papers · researcher white coat + test tube · user casual + phone);
+   *  no role = a shirt in the colour of the room. `id` keeps one person looking the same on every frame; `kind` = 'nurse' for the vaccine room. */
+  function person(x, y, col, back = false, now = 0, sc = 1, role = '', id = 0, walk = false, kind = '') {
+    const [sx, sy] = P(x, y); const s = tw * 0.075 * sc * 1.25;
     if (back) {   // came back the same day: gold halo on the floor, dark outline on the body, gold ring round the head
       const k = reduced ? 1 : 0.9 + 0.1 * Math.sin(now / 280 + x * 3);
       ctx.fillStyle = 'rgba(245,158,11,.30)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 2.1 * k, s * 0.98 * k, 0, 0, 7); ctx.fill();
       ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.4, s * 0.32); ctx.beginPath(); ctx.ellipse(sx, sy, s * 2.1 * k, s * 0.98 * k, 0, 0, 7); ctx.stroke();
-    } else { ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.2, s * 0.55, 0, 0, 7); ctx.fill(); }
-    ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, sy - s * 3.3, s * 1.7, s * 3.3, s * 0.7); ctx.fill();
-    if (back) { ctx.strokeStyle = pal.ink; ctx.lineWidth = Math.max(1.5, s * 0.4); ctx.stroke(); }
-    ctx.fillStyle = '#f1c9a5'; ctx.beginPath(); ctx.arc(sx, sy - s * 4, s * 0.85, 0, 7); ctx.fill();
-    if (back) { ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.5, s * 0.42); ctx.stroke(); }
-    if (role && ROLES[role]) { ctx.fillStyle = ROLES[role].col; ctx.beginPath(); ctx.arc(sx, sy - s * 5.6, s * 0.75, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, s * 0.25); ctx.stroke(); }   // coloured dot over the head = role (admin purple, head orange, officer cyan, committee green, researcher pink, general user grey)
+    } else { ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.25, s * 0.55, 0, 0, 7); ctx.fill(); }
+    const known = role && ROLES[role] ? role : '';
+    drawFigure(DG, { sx, sy, s, now, walk, seed: id, role: known, kind, col, back, dot: known ? ROLES[known].col : '' });   // coloured dot over the head = role (legend)
   }
   function pill(text, x, y, color, sc = 1) {
     const kz = Math.pow(cam.z, -0.6) * sc;   // labels grow only a little when the camera zooms in
@@ -550,7 +552,7 @@ export function mountSiteFloor(host, opts = {}) {
       box(cx - 0.62, cy - 0.5, 0.5, 0.5, 1.15, '#e0f2fe'); faceY(cx - 0.86, cx - 0.38, cy - 0.248, 0.6, 0.64, '#93c5fd'); faceY(cx - 0.55, cx - 0.5, cy - 0.248, 0.7, 0.95, '#64748b'); faceY(cx - 0.55, cx - 0.5, cy - 0.248, 0.2, 0.45, '#64748b');
       box(cx + 0.1, cy + 0.15, 1.0, 0.5, 0.28, '#0d9488'); box(cx - 0.28, cy + 0.15, 0.25, 0.4, 0.06, '#f8fafc', 0.28);
       box(cx + 0.65, cy - 0.45, 0.35, 0.3, 0.4, '#cbd5e1'); for (const d of [0, 1, 2]) { box(cx + 0.55 + d * 0.1, cy - 0.45, 0.07, 0.07, 0.13, '#38bdf8', 0.4); box(cx + 0.55 + d * 0.1, cy - 0.45, 0.07, 0.07, 0.03, '#ef4444', 0.53); }
-      person(cx + 0.5, cy + 0.55, '#ffffff');
+      person(cx + 0.5, cy + 0.55, '#ffffff', false, now, 1, '', 3, false, 'nurse');
     } else if (th === 'dental') {   // ห้องทันตกรรม: dental chair, lamp, instrument tray
       box(cx, cy + 0.1, 0.5, 0.5, 0.12, '#475569'); box(cx - 0.1, cy + 0.1, 0.7, 0.45, 0.18, '#0ea5e9', 0.12); box(cx - 0.55, cy + 0.1, 0.25, 0.45, 0.55, '#0ea5e9', 0.12);
       box(cx + 0.5, cy - 0.35, 0.06, 0.06, 0.95, '#94a3b8'); box(cx + 0.3, cy - 0.35, 0.42, 0.14, 0.08, '#f8fafc', 0.95); box(cx + 0.55, cy + 0.55, 0.35, 0.3, 0.4, '#e2e8f0'); box(cx + 0.55, cy + 0.55, 0.2, 0.08, 0.03, '#94a3b8', 0.4);
@@ -558,6 +560,15 @@ export function mountSiteFloor(host, opts = {}) {
       box(cx - 0.35, cy + 0.1, 1.1, 0.55, 0.3, '#14b8a6'); box(cx - 0.7, cy + 0.1, 0.3, 0.5, 0.08, '#f8fafc', 0.3);
       for (const [x, y] of [[0.05, -0.55], [0.95, -0.55], [0.05, -0.15], [0.95, -0.15]]) box(cx + x, cy + y, 0.05, 0.05, 0.5, '#94a3b8'); box(cx + 0.5, cy - 0.55, 1.0, 0.05, 0.05, '#64748b', 0.5); box(cx + 0.5, cy - 0.15, 1.0, 0.05, 0.05, '#64748b', 0.5);
       disc(cx + 0.45, cy + 0.65, 0.22, tw * 0.1, col);
+    } else if (th === 'eval') {   // ห้องติดตามประเมินผลงาน / ยื่น อวช.: progress wall (4 stages, ticks) → submission tray with folders → review desk + monitor → podium with trophy + a reviewer
+      box(cx, cy - 0.85, 1.8, 0.06, 0.9, '#f8fafc', 0.4);
+      [[1.16, 0.95, col], [1.0, 0.72, '#16a34a'], [0.84, 0.48, '#f59e0b'], [0.68, 0.25, '#8b5cf6']].forEach(([z, len, c]) => { faceY(cx - 0.8, cx - 0.8 + len, cy - 0.819, z, z + 0.07, c); faceY(cx - 0.8 + len + 0.04, cx - 0.8 + len + 0.12, cy - 0.819, z - 0.005, z + 0.075, '#94a3b8'); });
+      faceY(cx + 0.45, cx + 0.62, cy - 0.819, 0.7, 1.17, '#16a34a'); faceY(cx + 0.66, cx + 0.8, cy - 0.819, 0.7, 0.9, '#16a34a');   // big tick: approved
+      box(cx - 0.62, cy + 0.2, 0.5, 0.42, 0.24, pal.desk); box(cx - 0.62, cy + 0.2, 0.42, 0.32, 0.05, '#60a5fa', 0.24); box(cx - 0.62, cy + 0.2, 0.4, 0.3, 0.05, '#fbbf24', 0.29); box(cx - 0.62, cy + 0.2, 0.38, 0.28, 0.05, col, 0.34);   // folders being submitted
+      box(cx - 0.05, cy + 0.2, 0.62, 0.42, 0.3, pal.desk); box(cx - 0.05, cy + 0.08, 0.4, 0.06, 0.34, lit ? shade(col, 1 + (blink ? 0.1 : 0)) : pal.screen, 0.3); box(cx - 0.05, cy + 0.2, 0.3, 0.16, 0.02, '#e2e8f0', 0.3);
+      box(cx + 0.62, cy + 0.12, 0.24, 0.3, 0.2, '#cbd5e1'); box(cx + 0.84, cy + 0.12, 0.2, 0.3, 0.32, '#e2e8f0'); box(cx + 0.4, cy + 0.12, 0.2, 0.3, 0.12, '#94a3b8');   // podium 2 · 1 · 3
+      box(cx + 0.84, cy + 0.12, 0.05, 0.05, 0.14, '#f59e0b', 0.32); disc(cx + 0.84, cy + 0.12, 0.54, tw * 0.07, '#fbbf24'); disc(cx + 0.84, cy + 0.12, 0.54, tw * 0.036, '#fde68a');
+      person(cx - 0.05, cy + 0.62, '#ffffff', false, now, 0.95, 'head', 5, false);
     } else if (th === 'plan') {   // ห้องแผนงาน: Gantt wall board + planning table
       box(cx, cy - 0.8, 1.7, 0.06, 0.9, '#f8fafc', 0.4); faceY(cx - 0.75, cx - 0.1, cy - 0.769, 1.12, 1.2, col); faceY(cx - 0.4, cx + 0.3, cy - 0.769, 0.97, 1.05, '#f59e0b'); faceY(cx - 0.1, cx + 0.65, cy - 0.769, 0.82, 0.9, '#16a34a'); faceY(cx + 0.2, cx + 0.7, cy - 0.769, 0.67, 0.75, '#8b5cf6');
       box(cx, cy + 0.15, 1.3, 0.55, 0.3, pal.desk); box(cx - 0.2, cy + 0.15, 0.45, 0.3, 0.03, '#334155', 0.3); box(cx + 0.35, cy + 0.1, 0.12, 0.12, 0.02, '#fde047', 0.3); box(cx + 0.5, cy + 0.25, 0.12, 0.12, 0.02, '#fb7185', 0.3);
@@ -624,6 +635,14 @@ export function mountSiteFloor(host, opts = {}) {
     { const pos = along([stand, ...route.slice().reverse(), ext], (tt - s0.end) / Math.max(1, j.exit - s0.end)); return { pos, state: 'walk', zone: z, rank: 0, a: fade(pos) }; }
   }
   const lineOf = (i, F) => { const s = sites[i]; const st = stateOf(s); return st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]; };
+  let NUM = []; let PLT = [];   // floating numbers and base plates of this frame (drawn after the models, before nothing else)
+  /** The 3D number of one station: where it floats (screen), where its shadow falls, what it says. */
+  function numFor(key, i, s, st, col, wx, wy, zTop, sc = 1) {
+    const ok = st === 'ok'; const [x, y] = P(wx, wy, Z(zTop)); const [fx, fy] = P(wx, wy, 0);
+    return { key: `${view}|${key}`, x, y, fx, fy, value: ok ? F0.cum[i] * pfNow() : null, approx: !(dayOn() && R.rep.scale === 1), text: STATE_TXT[st], unit: 'ครั้ง', online: ok ? s.realtime || 0 : 0, col: ok ? col : STATE_COL[st], sc, phase: i * 1.3 };
+  }
+  let F0 = { cum: [] };
+  function drawFloaters(now) { for (const p of PLT) drawPlate(DG, p); for (const n of NUM) drawNumber(DG, n, now); }
   const busyAt = (i, F) => F.at[i].length > 0 || (F.rm[i] || []).some((a2) => a2.length > 0);
   const dotAt = (x, y, z, c, blink, now, i) => { const [bx, by] = P(x, y, Z(z)); ctx.fillStyle = c; ctx.globalAlpha = blink ? 0.55 + (reduced ? 0.45 : 0.45 * Math.sin(now / 350 + i)) : 1; ctx.beginPath(); ctx.arc(bx, by, Math.max(3, tw * 0.05), 0, 7); ctx.fill(); ctx.globalAlpha = 1; };
 
@@ -638,9 +657,8 @@ export function mountSiteFloor(host, opts = {}) {
       const a2 = P(hall.cx, d.mouth[1]); const b2 = P(hall.cx, d.top ? hd.y1 : hd.y0); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); ctx.restore();
       items.push({ d: hc[0] + hc[1], f: () => { ctx.globalAlpha = st === 'paused' || st === 'idle' ? 0.6 : 1; scaled(0.82, hc[0], hc[1], () => prop(themes[i], hc[0], hc[1], col, lit && (s.realtime > 0 || s.key === topKey), st, now, i)); ctx.globalAlpha = 1; dotAt(hc[0], hc[1], 1.25, STATE_COL[st], lit || st === 'silent', now, i); } });
       hits.push({ i, d: hc[0] + hc[1], ...bbox([...rectPts(hd.x0, hd.y0, hd.x1, hd.y1), P(hd.x0, hd.y0, Z(1.2)), P(hd.x1, hd.y0, Z(1.2))]) });
-      const [lx, ly] = d.top ? P(hall.cx, hd.y0, Z(1.15)) : P(hall.cx, hd.y1, 0); const off = d.top ? -tw * 0.2 : tw * 0.22;
-      labels.push({ x: lx, y: ly + off, text: `${THEMES[themes[i]].icon} ${short(s.name, 20)}`, col: !lit && st === 'silent' ? STATE_COL.silent : null, sc: 1 });
-      labels.push({ x: lx, y: ly + off + hh + 3, text: lineOf(i, F), col: lit ? (busyAt(i, F) ? col : null) : STATE_COL[st], sc: 1 });
+      { const [px, py] = P(hc[0], hc[1] + 0.62, 0); PLT.push({ x: px, y: py, name: `${THEMES[themes[i]].icon} ${short(s.name, 22)}`, sub: HOSPITAL_NAME, col: !lit && st === 'silent' ? STATE_COL.silent : col, hov, dim: st === 'paused' || st === 'idle', sc: 1 }); }
+      NUM.push(numFor(s.key, i, s, st, col, hc[0], hc[1], 1.95));
       const wg = W.map[s.key]; const mxw = wg ? Math.max(1, ...wg.units.map((u) => u.pv)) : 1;
       d.rooms.forEach((r) => {
         const u = wg && wg.units[r.p]; if (!u) return; const rc = roomColor(u.kind); const hot = F.rm[i][r.p].length > 0; const hv = !!hoverT && hoverT.i === i && hoverT.p === r.p; const k = Math.max(0.34, Math.min(0.62, r.w / 2.7));
@@ -1212,15 +1230,7 @@ export function mountSiteFloor(host, opts = {}) {
       ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = Math.max(1, s * 0.14); ctx.beginPath(); ctx.moveTo(sx + s * 1.5, sy); ctx.lineTo(sx + s * 1.5, by - s * 5); ctx.moveTo(sx + s * 1.1, by - s * 5); ctx.lineTo(sx + s * 1.9, by - s * 5); ctx.stroke();
       ctx.fillStyle = '#e0f2fe'; ctx.beginPath(); ctx.roundRect(sx + s * 1.25, by - s * 4.8, s * 0.5, s * 0.9, s * 0.2); ctx.fill(); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(1, s * 0.1); ctx.stroke();
     }
-    if (kind === 'doctor') { body('#f8fafc', '#cbd5e1'); ctx.strokeStyle = '#334155'; ctx.lineWidth = Math.max(1, s * 0.15); ctx.beginPath(); ctx.arc(sx, by - s * 2.6, s * 0.5, 0.1, Math.PI - 0.1); ctx.stroke(); }
-    else if (kind === 'nurse') body('#14b8a6', '#0f766e');
-    else if (kind === 'patient') { body('#bfdbfe', '#93c5fd'); ctx.fillStyle = '#93c5fd'; ctx.fillRect(sx - s * 0.85, by - s * 1.6, s * 1.7, s * 0.28); }
-    else if (kind === 'worker') { body('#6b7280'); ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, by - s * 3.3, s * 1.7, s * 2.2, s * 0.6); ctx.fill(); ctx.fillStyle = '#e5e7eb'; ctx.fillRect(sx - s * 0.85, by - s * 2.3, s * 1.7, s * 0.2); }
-    else body(VIS_COLS[seed % VIS_COLS.length]);
-    head(by - s * 4); if (kind === 'worker') { ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(sx, by - s * 4.05, s * 0.95, Math.PI, 0); ctx.fill(); ctx.fillRect(sx - s * 1.1, by - s * 4.05, s * 2.2, s * 0.18); }
-    else if (kind === 'nurse') { hair(by - s * 4); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(sx - s * 0.6, by - s * 4.95, s * 1.2, s * 0.5, s * 0.15); ctx.fill(); }
-    else hair(by - s * 4);
-    if (kind === 'visitor' && seed % 3 === 0) { ctx.fillStyle = '#7c3aed'; ctx.beginPath(); ctx.roundRect(sx + s * 0.9, by - s * 1.9, s * 0.8, s * 0.9, s * 0.2); ctx.fill(); }
+    drawFigure(DG, { sx, sy, s, now, walk: kind !== 'stand', seed, kind, col: VIS_COLS[seed % VIS_COLS.length] });   // head · torso · arms · legs, outfit by kind (site-deco.js)
   }
   let AMB = null; let AMBfor = null;
   function buildAmbient(L) {
@@ -1296,8 +1306,8 @@ export function mountSiteFloor(host, opts = {}) {
       ctx.globalAlpha = 0.9; poly(r.front ? rectPts(r.door[0] - 0.3, r.y0 - 0.02, r.door[0] + 0.3, r.y0 + 0.14) : rectPts(r.door[0] - 0.3, r.y1 - 0.14, r.door[0] + 0.3, r.y1 + 0.02), col); ctx.globalAlpha = 1;
       items.push({ d: r.c[0] + r.c[1] + 0.02, f: () => { ctx.globalAlpha = st === 'paused' || st === 'idle' ? 0.6 : 1; scaled(k, r.px, r.c[1], () => prop(themes[i], r.px, r.c[1], col, lit && (s.realtime > 0 || s.key === topKey), st, now, i)); ctx.globalAlpha = 1; dotAt(r.px, r.c[1], 0.9 * k + 0.6, STATE_COL[st], lit || st === 'silent', now, i); } });
       hits.push({ i, d: r.c[0] + r.c[1], ...bbox([...rectPts(r.x0, r.y0, r.x1, r.y1), P(r.x0, r.y0, Z(1.1)), P(r.x1, r.y0, Z(1.1))]) });
-      const [lx, ly] = r.front ? P(r.c[0], r.y1, 0) : P(r.c[0], r.y0, Z(1.25)); const cnt = st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())}` : STATE_TXT[st];
-      labels.push({ x: lx, y: r.front ? ly + tw * 0.2 : ly - tw * 0.2, text: `${THEMES[themes[i]].icon} ${short(s.name, 12)} · ${cnt}`, col: !lit ? STATE_COL[st] : busyAt(i, F) ? col : null, sc: 0.9 });
+      { const [px, py] = P(r.c[0], r.y1 - 0.3, 0); PLT.push({ x: px, y: py, name: `${THEMES[themes[i]].icon} ${short(s.name, 18)}`, sub: HOSPITAL_NAME, col: !lit ? STATE_COL[st] : col, hov, dim: st === 'paused' || st === 'idle', sc: 0.92, maxW: tw * 2.45 }); }
+      NUM.push(numFor(s.key, i, s, st, col, r.px, r.c[1], 0.5 + 1.4 * k, 0.95));
     });
     if (!er) HOSP_GROUPS.forEach((g, gi) => { const wg = L.wings[gi]; if (!wg || !wg.count) return; const [bx, by] = P((wg.x0 + wg.x1) / 2, L.sy, 0); labels.push({ x: bx, y: by, text: `${g.icon} ปีก${g.name} · ${wg.count} ระบบ`, col: g.col, sc: 1.05 }); });   // wing names stand on the walking street between the two rows — the only band with no room label
     if (!L.count) { const [bx, by] = P(gx, (yb0 + yf1) / 2, 0); labels.push({ x: bx, y: by, text: 'ยังไม่มีระบบในอาคารนี้', col: B.col, sc: 1 }); }
@@ -1317,7 +1327,7 @@ export function mountSiteFloor(host, opts = {}) {
   }
 
   function drawPlan(now) {
-    const F = planState(t); const items = []; const labels = []; hits = []; whits = []; bhits = []; xhit = null;
+    const F = planState(t); F0 = F; NUM = []; PLT = []; const items = []; const labels = []; hits = []; whits = []; bhits = []; xhit = null;
     const kit = { ctx, P, Z, get tw() { return tw; }, pal, reduced, box, faceX, faceY, disc, poly, shade };
     hospitalBase(now); if (!hospOn()) { gatePad('in', now); gatePad('out', now); }
     if (deptOn()) deptScene(items, labels, F, now, kit); else if (hospOut()) campusScene(items, labels, F, now, kit); else if (hospIn()) interiorScene(items, labels, F, now, kit);
@@ -1326,10 +1336,11 @@ export function mountSiteFloor(host, opts = {}) {
     for (const j of jr) {
       if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
       const r = planPlace(j, t, F); if (!r) continue; here += 1; if (r.hid || (r.state !== 'walk' && r.rank >= 6)) continue;
-      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => { ctx.globalAlpha = r.a == null ? 1 : r.a; person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc, j.role); ctx.globalAlpha = 1; } });
+      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => { ctx.globalAlpha = r.a == null ? 1 : r.a; person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc, j.role, j.id, r.state === 'walk'); ctx.globalAlpha = 1; } });
     }
     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
     labels.forEach((q) => pill(q.text, q.x, q.y, q.col, q.sc));
+    drawFloaters(now);
     if (!hospOn()) { gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`); }
     hud(F, here);
   }
@@ -1366,14 +1377,14 @@ export function mountSiteFloor(host, opts = {}) {
       const top = ins.top;
       return ins.units.map((u) => ({ key: u.key, col: roomColor(u.kind), pv: u.pv, lit: u.pv > 0, live: u.pv > 0 && (u.realtime > 0 || u.key === top), alpha: u.pv ? 1 : 0.6, icon: kindMeta(u.kind).icon, name: u.name, top: u.key === top && u.pv > 0,
         dot: u.realtime > 0 ? STATE_COL.ok : null, dotBlink: true, dotZ: 1.55, lineCol: (F, i) => (F.work[i].length ? roomColor(u.kind) : null),
-        line: (F, i) => `≈${fmt(F.cum[i] * ins.pf)} ครั้ง${u.realtime ? ` · ออนไลน์ ${fmt(u.realtime)}` : ''}`,
+        line: (F, i) => `≈${fmt(F.cum[i] * ins.pf)} ครั้ง${u.realtime ? ` · ออนไลน์ ${fmt(u.realtime)}` : ''}`, val: (F, i) => F.cum[i] * ins.pf, rt: u.realtime || 0,
         prop: (g, cx, cy, col, live, now) => drawRoom(g, u.kind, cx, cy, col, live, now) }));
     }
     const topKey = sm.top && sm.top.pv > 0 ? sm.top.key : '';
     return sites.map((s, i) => { const st = stateOf(s); const lit = st === 'ok';
       return { key: s.key, col: colOf(i), pv: s.pv, lit, live: lit && (s.realtime > 0 || s.key === topKey), alpha: st === 'paused' || st === 'idle' ? 0.6 : 1, icon: THEMES[themes[i]].icon, name: s.name, top: s.key === topKey,
         dot: STATE_COL[st], dotBlink: lit || st === 'silent', dotZ: themes[i] === 'ems' || themes[i] === 'visit' ? 1.35 : 1.7,
-        lineCol: (F) => (st === 'ok' ? (F.work[i].length ? colOf(i) : null) : STATE_COL[st]), line: (F) => (st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]),
+        lineCol: (F) => (st === 'ok' ? (F.work[i].length ? colOf(i) : null) : STATE_COL[st]), line: (F) => (st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]), val: (F) => F.cum[i] * pfNow(), rt: s.realtime || 0,
         prop: (g, cx, cy, col, live, now) => prop(themes[i], cx, cy, col, live, st, now, i) }; });
   }
 
@@ -1422,15 +1433,17 @@ export function mountSiteFloor(host, opts = {}) {
       if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
       const r = place(j, t, F); if (!r) continue; here += 1;
       if (r.state === 'work' && r.rank >= CAP) continue;
-      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK, !!j.back, now) });
+      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK, !!j.back, now, 1, '', j.id, r.state === 'walk') });
     }
     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
+    NUM = []; PLT = [];
     Zs.forEach((z, i) => {
-      const l = L[i]; const [lx, ly] = l.top ? P(l.c[0], l.c[1] - l.hy, Hz) : P(l.c[0], l.c[1] + l.hy, 0); const sc = ins && L.length > 6 ? 0.82 : 1; const kz = Math.pow(cam.z, -0.6) * sc;
-      const off = (l.top ? -tw * 0.22 : tw * 0.24) * kz; const hh = Math.max(16, tw * 0.27 * kz);
-      pill(`${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : 20)}`, lx, ly + off, !ins && z.dot === STATE_COL.silent ? STATE_COL.silent : null, sc);
-      pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
+      const l = L[i]; const sc = ins && L.length > 6 ? 0.82 : 1; const [cx2, cy2] = l.c; const rs = ins ? ins.site.name : '';
+      const [px, py] = P(cx2, cy2 + l.hy - 0.34, 0); PLT.push({ x: px, y: py, name: `${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : 20)}`, sub: ins ? `${short(rs, 14)} · ${HOSPITAL_NAME}` : HOSPITAL_NAME, col: z.pv ? z.col : STATE_COL.idle, hov: hover === i || focus === i, dim: !z.pv, sc, maxW: tw * Math.max(2.2, l.hx * 2 + 0.6) });
+      const [nx, ny] = P(cx2, cy2, Z(1.95)); const [fx, fy] = P(cx2, cy2, 0);
+      NUM.push({ key: `ins|${z.key}`, x: nx, y: ny, fx, fy, value: z.val(F, i), approx: true, unit: 'ครั้ง', online: z.rt || 0, col: z.pv ? z.col : STATE_COL.idle, sc, phase: i * 1.3 });
     });
+    drawFloaters(now);
     lanes.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.8));
     if (!hospOn()) { gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`); }
     hud(F, here);

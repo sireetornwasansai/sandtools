@@ -24,7 +24,7 @@ async function mountFloorSafe(host, opts) {
     console.error('[site-sim] load failed', e);
     let tried = false; try { tried = sessionStorage.getItem('sand-heal') === '1'; } catch { /* ignore */ }
     if (!tried) { try { sessionStorage.setItem('sand-heal', '1'); } catch { /* ignore */ } await healCaches(); location.reload(); return () => {}; }
-    host.append(notice('warn', 'โหลดผัง 3 มิติไม่สำเร็จ', `ไฟล์บนเซิร์ฟเวอร์ยังเป็นคนละเวอร์ชัน — อัปโหลด site-engine.js, site-sim.js, site-rooms.js และ site3d.css ให้ครบชุดเดียวกัน แล้วกด Ctrl+Shift+R (${String(e && e.message || e).slice(0, 140)})`));
+    host.append(notice('warn', 'โหลดผัง 3 มิติไม่สำเร็จ', `ไฟล์บนเซิร์ฟเวอร์ยังเป็นคนละเวอร์ชัน — อัปโหลด site-engine.js, site-sim.js, site-rooms.js, site-deco.js และ site3d.css ให้ครบชุดเดียวกัน แล้วกด Ctrl+Shift+R (${String(e && e.message || e).slice(0, 140)})`));
     return () => {};
   }
   try { sessionStorage.removeItem('sand-heal'); } catch { /* ignore */ }

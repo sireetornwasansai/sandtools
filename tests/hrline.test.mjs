@@ -9,7 +9,7 @@ const textOf = (call) => call.body.messages.map((m) => m.text).join('\n');
 const ev = (o) => ({ id: 'e' + Math.random().toString(16).slice(2), type: 'message', replyToken: 'rt', source: { type: 'user', userId: 'U1' }, text: '', ...o });
 
 function seeded() {
-  const e = lineEnv({ HR_LINE_GROUP_IDS: 'Cgroup1' });
+  const e = lineEnv({ HR_LINE_GROUP_IDS: 'Cgroup1', HR_LINE_AUTO_ADMIN: 'false' });   // manual roles = the strict mode most tests describe
   e.call('addStaff', ['สมชาย ใจดี', 'กลุ่มงานโสตฯ', '#c4623d'], 'admin@x.go.th'); e.call('addStaff', ['สมหญิง รักงาน', 'กลุ่มงานยุทธศาสตร์ฯ', '#7a8a6f'], 'admin@x.go.th');
   e.call('addStaff', ['สมปอง ไม่ลา', 'กลุ่มงานยุทธศาสตร์ฯ', '#6f8299'], 'admin@x.go.th');
   e.call('saveData', [rec({ type: 'ลาป่วย', note: 'ไข้หวัดใหญ่ ไปโรงพยาบาล' })], 'user@x.go.th');                                                        // next week, Tue
@@ -139,4 +139,77 @@ test('rich-menu "ใครลาวันไหน": leave AND official duty lis
   e.clear(); e.store.HR_LINE_QUERY_SCOPE = ''; e.store.HR_LINE_WHO_DAYS = '1';                // fixed window: today only
   e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Uadmin' }, text: 'ใครลาวันไหน' })] });
   assert.match(textOf(e.pushes().find((f) => f.url.endsWith('/reply'))), /ยังไม่มีผู้บันทึก/);
+});
+
+/* ---------------------------------- "ใครลาวันไหน" (rich-menu button 3) ---------------------------------- */
+test('day words: dates typed in Thai / numbers are understood (today = Fri 30 Oct 2026)', () => {
+  const e = lineEnv(); const p = (t) => e.run('hrlParseText', t);
+  assert.equal(p('ใครลาวันไหน'), 'byday'); assert.equal(p('ใครลา วันไหน บ้าง'), 'byday'); assert.equal(p('เลือกวัน'), 'dayask'); assert.equal(p('เลือกวันที่'), 'dayask');
+  assert.equal(p('ใครลา 5 พ.ย.'), 'day:2026-11-05'); assert.equal(p('ใครลา 5พย'), 'day:2026-11-05'); assert.equal(p('ใครลาวันที่ 5 พฤศจิกายน 2569'), 'day:2026-11-05');
+  assert.equal(p('ใครลา ๕ พ.ย.'), 'day:2026-11-05', 'Thai digits'); assert.equal(p('ใครลา 5/11'), 'day:2026-11-05'); assert.equal(p('ใครลา 5/11/69'), 'day:2026-11-05'); assert.equal(p('ใครลา 5/11/2026'), 'day:2026-11-05');
+  assert.equal(p('ใครลา 2026-11-05'), 'day:2026-11-05'); assert.equal(p('ใครลา 2569-11-05'), 'day:2026-11-05');
+  assert.equal(p('ใครลาพรุ่งนี้'), 'day:2026-10-31'); assert.equal(p('ใครลามะรืนนี้'), 'day:2026-11-01'); assert.equal(p('ใครลาเมื่อวาน'), 'day:2026-10-29');
+  assert.equal(p('ใครลาวันพุธ'), 'day:2026-11-04', 'next Wednesday'); assert.equal(p('ใครลาวันศุกร์'), 'day:2026-10-30', 'today is Friday'); assert.equal(p('ใครลาวันศุกร์หน้า'), 'day:2026-11-06', 'Friday of next week, not today'); assert.equal(p('ใครลาวันพุธสัปดาห์หน้า'), 'day:2026-11-04'); assert.equal(p('ใครลาวันอาทิตย์'), 'day:2026-11-01');
+  assert.equal(p('ใครลา 3 ม.ค.'), 'day:2027-01-03', 'no year and long past → next year'); assert.equal(p('ใครลาวันที่ 5'), 'day:2026-10-05');
+  assert.equal(p('ใครลา 31/2'), '', 'impossible date'); assert.equal(p('ใครลา 99 พ.ย.'), ''); assert.equal(p('5 พ.ย.'), '', 'a bare date is not a question');
+  // the old words are untouched
+  assert.equal(p('สัปดาห์นี้ใครลา'), 'thisweek'); assert.equal(p('สัปดาห์หน้า ใครลา'), 'nextweek'); assert.equal(p('อาทิตย์หน้าใครลา'), 'nextweek'); assert.equal(p('วันนี้ใครลา'), 'today'); assert.equal(p('สรุปลาเดือนนี้'), 'month');
+  assert.equal(e.run('hrlParsePostback', 'action=leave_day&date=2026-11-05'), 'day:2026-11-05'); assert.equal(e.run('hrlParsePostback', 'action=leave_day&date=2026-13-45'), '');
+  assert.equal(e.run('hrlParsePostback', 'action=leave_pick', '2026-11-05'), 'day:2026-11-05'); assert.equal(e.run('hrlParsePostback', 'action=leave_pick', 'x'), ''); assert.equal(e.run('hrlParsePostback', 'action=leave_dayask'), 'dayask');
+});
+
+test('"เลือกวัน" / "ใครลาวันไหน": date picker + shortcut days; picking a day answers that day with ◀ ▶ buttons', () => {
+  const e = seeded();
+  e.call('saveData', [rec({ type: 'ลากิจ', startDate: '2026-11-05', endDate: '2026-11-05' })], 'user@x.go.th'); e.clear();
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'เลือกวัน' })] });
+  let reply = e.pushes().find((f) => f.url.endsWith('/reply')); const q = J(reply.body.messages.at(-1).quickReply.items);
+  assert.match(textOf(reply), /เลือกวันที่/); assert.equal(q[0].action.type, 'datetimepicker'); assert.equal(q[0].action.mode, 'date'); assert.equal(q[0].action.data, 'action=leave_pick'); assert.equal(q[0].action.initial, '2026-10-30');
+  assert.ok(q.length <= 13 && q.every((x) => (x.action.label || '').length <= 20)); assert.equal(q[1].action.data, 'action=leave_day&date=2026-10-30'); assert.equal(q[2].action.data, 'action=leave_day&date=2026-10-31');
+  assert.ok(q.slice(3).every((x) => ![0, 6].includes(new Date(x.action.data.slice(-10) + 'T00:00:00Z').getUTCDay())), 'shortcut days skip weekends');
+  e.clear();                                                                                                                      // the picker answers with params.date → slimmed to ev.date
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ type: 'postback', source: { type: 'user', userId: 'Ustaff' }, data: 'action=leave_pick', date: '2026-11-05', text: undefined })] });
+  reply = e.pushes().find((f) => f.url.endsWith('/reply')); const t = textOf(reply);
+  assert.match(t, /📅 พฤ\. 5 พ\.ย\. 2569/); assert.match(t, /🚗 ไปราชการ \(1\)[\s\S]*สมหญิง รักงาน/); assert.match(t, /🌴 ลา \(1\)[\s\S]*สมชาย ใจดี/); assert.doesNotMatch(t, /ไข้หวัด/, 'no leave notes'); assert.doesNotMatch(t, /อบรม HA/, 'only that day');
+  const nav = J(reply.body.messages.at(-1).quickReply.items).map((x) => x.action.label); assert.equal(nav[0], '◀ พ. 4 พ.ย.'); assert.equal(nav[1], 'ศ. 6 พ.ย. ▶'); assert.ok(nav.includes('📅 เลือกวันอื่น')); assert.ok(nav.includes('สัปดาห์นี้'));
+  e.clear(); e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'ใครลา 7 พ.ย.' })] });                // Saturday, nobody
+  const sat = textOf(e.pushes().find((f) => f.url.endsWith('/reply'))); assert.match(sat, /วันหยุดสุดสัปดาห์/); assert.match(sat, /ไม่มีผู้ลา/);
+});
+
+test('day questions follow the same rules: no role = no answer; groups only when configured; LINE_QUERY_SCOPE=leave hides trips; month-end rule untouched', () => {
+  const e = seeded();
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Unone' }, text: 'ใครลา 5 พ.ย.' })] });
+  assert.match(textOf(e.pushes()[0]), /ยังไม่ได้รับสิทธิ์/); e.clear();
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'group', groupId: 'Cother', userId: 'Ustaff' }, text: 'ใครลา 5 พ.ย.' })] }); assert.equal(e.pushes().length, 0, 'unknown group: silent');
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'group', groupId: 'Cgroup1', userId: 'Ustaff' }, text: 'ใครลาวันไหน' })] });
+  const g = e.pushes()[0]; assert.equal(J(g.body.messages.at(-1).quickReply.items)[0].action.type, 'datetimepicker', 'the picker also works in a configured group'); e.clear();
+  e.store.HR_LINE_QUERY_SCOPE = 'leave';
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'ใครลา 4 พ.ย.' })] });
+  assert.doesNotMatch(textOf(e.pushes()[0]), /ไปราชการ/);
+});
+
+test('phone page: mobileWho gives one day (same grouping), flags weekend / holiday, rejects garbage', () => {
+  const e = seeded();
+  const w = J(e.call('mobileWho', ['2026-11-04'], 'user@x.go.th')); assert.equal(w.day, '2026-11-04'); assert.deepEqual(w.items.map((x) => x.name), ['สมหญิง รักงาน']); assert.equal(w.items[0].group, 'trip'); assert.equal(w.weekend, false);
+  assert.equal(J(e.call('mobileWho', ['2026-11-07'], 'user@x.go.th')).weekend, true);
+  assert.equal(J(e.call('mobileWho', ['2026-12-10'], 'user@x.go.th')).holiday.length > 0, true, 'public holiday named');
+  assert.throws(() => e.call('mobileWho', ['2026-02-31'], 'user@x.go.th'), /วันที่ไม่ถูกต้อง/); assert.throws(() => e.call('mobileWho', ['x'], 'user@x.go.th'));
+});
+
+test('auto-admin (as deployed): a new friend becomes แอดมิน at once; follow promotes a friend without a role; HR_LINE_AUTO_ADMIN=false turns it off', () => {
+  const e = lineEnv({ HR_LINE_GROUP_IDS: 'Cgroup1' });
+  const hook = (...events) => e.run('hrLineHook', { secret: 'edge-secret', events });
+  hook(ev({ source: { type: 'user', userId: 'Unew' }, text: 'สัปดาห์นี้ใครลา' }));
+  assert.equal(e.sheets.LineUsers.find((r) => r[0] === 'Unew')[5], 'แอดมิน'); assert.match(textOf(e.pushes().find((f) => f.url.endsWith('/reply'))), /สัปดาห์นี้/);
+  e.clear(); hook({ id: 'f9', type: 'follow', replyToken: 'rt', source: { type: 'user', userId: 'Unew3' } });
+  assert.match(textOf(e.pushes().find((f) => f.url.endsWith('/reply'))), /ได้รับสิทธิ์ "แอดมิน"/);
+  const off = lineEnv({ HR_LINE_AUTO_ADMIN: 'false' });
+  off.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Unew' }, text: 'สัปดาห์นี้ใครลา' })] });
+  assert.equal(off.sheets.LineUsers.find((r) => r[0] === 'Unew')[5], ''); assert.match(textOf(off.pushes().find((f) => f.url.endsWith('/reply'))), /ยังไม่ได้รับสิทธิ์/);
+});
+
+test('"ใครลาวันไหน" = day-by-day list AND the date picker buttons under it', () => {
+  const e = seeded();
+  e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'ใครลาวันไหน' })] });
+  const reply = e.pushes().find((f) => f.url.endsWith('/reply')); const q = J(reply.body.messages.at(-1).quickReply.items);
+  assert.ok(textOf(reply).length > 20); assert.equal(q[0].action.type, 'datetimepicker');
 });

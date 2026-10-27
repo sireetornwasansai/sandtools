@@ -34,10 +34,10 @@ function site(s) {
 export const THEMES = {
   ems: { icon: '🚑', label: 'ยานพาหนะ / รถพยาบาล' }, hrd: { icon: '🎓', label: 'ห้องอบรมบุคลากร' }, ec: { icon: '🔬', label: 'ห้องวิจัย / จริยธรรมการวิจัย' }, vaccine: { icon: '💉', label: 'ห้องวัคซีน' },
   dental: { icon: '🦷', label: 'ห้องทันตกรรม' }, pt: { icon: '🩺', label: 'ห้องกายภาพบำบัด' }, plan: { icon: '📊', label: 'ห้องแผนงาน / ยุทธศาสตร์' }, doc: { icon: '🗂️', label: 'ห้องสารบรรณ' },
-  visit: { icon: '🏠', label: 'เยี่ยมบ้าน / แผนที่' }, fte: { icon: '📈', label: 'ห้องรายงานอัตรากำลัง (FTE)' }, web: { icon: '🌐', label: 'เว็บไซต์ / ระบบทั่วไป' },
+  visit: { icon: '🏠', label: 'เยี่ยมบ้าน / แผนที่' }, eval: { icon: '🏆', label: 'ห้องติดตามประเมินผลงาน (ยื่น อวช.)' }, fte: { icon: '📈', label: 'ห้องรายงานอัตรากำลัง (FTE)' }, web: { icon: '🌐', label: 'เว็บไซต์ / ระบบทั่วไป' },
 };
 const RULES = [
-  ['fte', /\bfte\b|อัตรากำลัง/], ['vaccine', /vaccin|วัคซีน|\bepi\b|immuniz/], ['dental', /dental|ทันต|ฟัน/], ['pt', /physio|กายภาพ|\bpt\b|pt-?station/],
+  ['fte', /\bfte\b|อัตรากำลัง/], ['eval', /อวช|อ\.ว\.ช|ประเมินผลงาน|ติดตามผลงาน|ยื่นผลงาน|portfolio|performance-?(eval|review|track)/], ['vaccine', /vaccin|วัคซีน|\bepi\b|immuniz/], ['dental', /dental|ทันต|ฟัน/], ['pt', /physio|กายภาพ|\bpt\b|pt-?station/],
   ['ems', /ยานพาหนะ|พาหนะ|ขอใช้รถ|จองรถ|รถพยาบาล|รถ|ambulance|\bems\b|fleet|vehicle|carsystem/], ['hrd', /hrd|อบรม|training|บุคลากร|ทรัพยากรบุคคล/],
   ['ec', /\bec\b|จริยธรรม|วิจัย|ethic|research|\birb\b/], ['visit', /เยี่ยมบ้าน|home-?visit|แผนที่|\bmap\b/], ['doc', /สารบรรณ|เอกสาร|document|\bdocs?\b/], ['plan', /แผนงาน|ยุทธศาสตร์|strategy|\bplan\b|kpi|ตัวชี้วัด/],
 ];
@@ -561,7 +561,7 @@ export function headStand(d, rank) { const q = rank % 6; return [d.hall.cx + ((q
 export const HOSP = { X0: 0.4, Y0: 0.4, BLD: 5.2, YARD: 0.8, ROOM_W: 2.0, ROOM_D: 2.0, GAP_X: 0.7, SP: 1.3, AVE: 2.4, AVE_GAP: 0.45, SIDE: 0.4, WALK: 0.4, ROAD: 2.2, MIN_COLS: 2 };
 export const HOSP_GROUPS = [
   { id: 'admin', name: 'บริหารทั่วไป', icon: '🏢', col: '#0369a1', side: -1, themes: ['ems', 'fte', 'doc', 'web'] },
-  { id: 'quality', name: 'พัฒนาคุณภาพ', icon: '🩺', col: '#0f766e', side: 1, themes: ['hrd', 'ec', 'vaccine', 'plan', 'dental', 'pt', 'visit'] },
+  { id: 'quality', name: 'พัฒนาคุณภาพ', icon: '🩺', col: '#0f766e', side: 1, themes: ['hrd', 'ec', 'vaccine', 'plan', 'eval', 'dental', 'pt', 'visit'] },
 ];
 /** Which wing a project belongs to: a `group:admin` / `group:quality` tag wins, otherwise its theme (vehicle · FTE · documents · websites → general administration; HRD · EC · vaccine · clinics · plans → quality development). */
 export function groupOf(s, theme = themeOf(s)) {

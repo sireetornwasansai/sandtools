@@ -54,7 +54,10 @@ export function slim(body) {
       out.push({ ...base, text: str(e.message.text, 200) });
     } else if (e.type === 'postback') {
       if (!e.postback) continue;
-      out.push({ ...base, data: str(e.postback.data, 200) });
+      const ev = { ...base, data: str(e.postback.data, 200) };
+      const date = e.postback.params && typeof e.postback.params.date === 'string' ? e.postback.params.date : '';      // the LINE date picker ("ใครลาวันไหน")
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) ev.date = date;
+      out.push(ev);
     } else if (e.type === 'follow' || e.type === 'unfollow' || e.type === 'join') out.push(base);
   }
   return out;

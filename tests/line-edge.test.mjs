@@ -49,6 +49,15 @@ test('slim: long text is cut, control characters are removed, at most 20 events,
   assert.deepEqual(slim(null), []); assert.deepEqual(slim({ events: 'nope' }), []); assert.deepEqual(slim({ events: [null, 5, 'x'] }), []);
 });
 
+test('slim: the date chosen in the LINE date picker is passed on (and only if it is a plain date)', () => {
+  const src = { type: 'user', userId: 'U1' };
+  const out = slim({ events: [
+    { type: 'postback', webhookEventId: 'p1', replyToken: 'r', source: src, postback: { data: 'action=leave_pick', params: { date: '2026-11-05' } } },
+    { type: 'postback', webhookEventId: 'p2', replyToken: 'r', source: src, postback: { data: 'action=leave_pick', params: { date: '5 Nov <script>' } } },
+    { type: 'postback', webhookEventId: 'p3', replyToken: 'r', source: src, postback: { data: 'action=leave_day&date=2026-11-04' } }
+  ] });
+  assert.equal(out[0].date, '2026-11-05'); assert.ok(!('date' in out[1])); assert.ok(!('date' in out[2])); assert.equal(out[2].data, 'action=leave_day&date=2026-11-04');
+});
 
 test('refusal: tells the admin WHY a call is refused (header x-sand-reason) without leaking anything', async () => {
   const good = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';                          // a channel secret is 32 hex characters

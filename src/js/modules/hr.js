@@ -169,6 +169,13 @@ export async function mount(root) {
     hide(g('nav-dailylog'), !dev); hide(g('nav-projects'), !dev); hide(sec, !dev);
   };
   gate(boot.me);
+  // Why is the calendar empty (or smaller than the sheet)?  Hr.gs sends `diag` with boot — say it instead of leaving a blank page.
+  const diag = boot.diag;
+  if (diag && diag.rows) {
+    const why = `อ่านวันที่ไม่ได้ ${diag.noDate || 0} · ไม่มีชื่อ ${diag.noName || 0} · เก่าเกินช่วงที่แสดง ${diag.old || 0}`;
+    if (!diag.shown) body.prepend(notice('warn', 'ปฏิทินว่าง แต่ในชีตมีข้อมูล', `พบ ${diag.rows} แถวในแท็บ ${diag.sheet || 'HR_Control'} แต่ไม่มีรายการที่แสดงได้ — ${why} (ตรวจคอลัมน์วันที่/ชื่อในชีต)`));
+    else if (boot.me && boot.me.admin && diag.shown < diag.rows) body.prepend(notice('info', `แสดง ${diag.shown} จาก ${diag.rows} แถวในชีต`, why));
+  }
   if (safeMode) body.prepend(notice('warn', 'เปิดในโหมดสำรอง', 'ระบบหลักตอบช้าหรือขัดข้อง จึงโหลดข้อมูลแบบย่อ — เมนูสำหรับผู้ดูแลถูกซ่อนไว้ชั่วคราว ลองรีเฟรชอีกครั้งภายหลัง'));
   g('loadingScreen')?.remove();   // the page is already painted from real data — the second "loading" overlay only added a delay
 

@@ -50,7 +50,7 @@ async function gasCallOnce(action, payload = {}, timeoutMs = 20000) {
 /** Read-only operations are safe to repeat; writes (create/update/delete…) are never retried so nothing is saved twice. */
 const READ_OPS = new Set(['list', 'get', 'stats', 'overview', 'names', 'getimg', 'my', 'dash', 'config', 'queue', 'track', 'numbers', 'rows', 'parties', 'units', 'dup', 'analytics', 'nextno',
   /* hr */ 'boot', 'getAll', 'getHolidayMap', 'getStaffList', 'getDashboard', 'getEvents', 'getMonthlySummary', 'getRecordsByName', 'getHolidayList', 'exportReport', 'getDailyLogList', 'getProjectList',
-  /* hr · mobile + LINE admin (reads only; lineSend / lineSetUser / lineSaveSchedule / lineSwitch are writes and never retried) */ 'mobileBoot', 'lineStatus', 'lineUsers', 'linePreview']);
+  /* hr · mobile + LINE admin (reads only; lineSend / lineSetUser / lineSaveSchedule / lineSwitch are writes and never retried) */ 'mobileBoot', 'mobileWho', 'lineStatus', 'lineUsers', 'linePreview']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**

@@ -21,10 +21,6 @@
 .lv-seg-lg { margin-bottom: .6rem; }
 .lv-quick { display: flex; gap: .4rem; flex-wrap: wrap; } .lv-quick .chip { min-height: 38px; }
 .lv-check { display: flex !important; align-items: center; gap: .6rem; min-height: 44px; font-weight: 500 !important; } .lv-check input { width: 22px; height: 22px; min-height: 0; flex: none; }
-.lv-times { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: .5rem; align-items: center; }
-.lv-times > span { color: var(--muted); font-size: .9rem; }
-.lv-times .tf24 select { min-height: 50px; font-size: 1.05rem; padding-inline: .25rem; }   /* 24-hour HH : MM (core/timefield.js) */
-@media (max-width: 360px) { .lv-times { grid-template-columns: 1fr; } .lv-times > span { text-align: center; } }
 .lv-hint { margin: -.35rem 0 .85rem; font-size: .88rem; color: var(--muted); min-height: 1.2em; }
 .lv-bad { color: var(--error); }
 .lv-msg { min-height: 0; margin: 0 0 .6rem; font-weight: 600; white-space: pre-line; } .lv-msg:empty { display: none; }
@@ -54,3 +50,64 @@
 
 @media (min-width: 861px) { .lv { padding-top: .5rem; } .lv-tabs { position: static; } }
 @media (prefers-reduced-motion: reduce) { .lv-tick { animation: none; } }
+
+/* ---- v2: speed & feel -------------------------------------------------------------------------------------------------------------------------- */
+.lv button, .lv select, .lv input, .lv label { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }   /* no 300 ms tap delay / double-tap zoom */
+.lv-type, .lv-tab, .lv-seg button, .lv-day { transition: transform .08s var(--ease), background-color .15s, border-color .15s, box-shadow .15s; }
+.lv-type:active, .lv-tab:active, .lv-seg button:active, .lv-day:active { transform: scale(.96); }
+.lv-type:focus-visible, .lv-tab:focus-visible, .lv-seg button:focus-visible, .lv-day:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lv-head { display: grid; gap: .1rem; } .lv-head p.muted { margin-bottom: .35rem; }
+.lv-head .lv-sync { display: flex; align-items: center; gap: .45rem; margin: 0 0 .75rem; font-size: .8rem; min-height: 1.6rem; }
+.lv-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--success); } .lv-dot.is-busy { background: var(--warning); animation: lv-pulse 1s ease-in-out infinite; }
+@keyframes lv-pulse { 50% { opacity: .35; } }
+.lv-link { margin-left: auto; min-height: 36px; padding: 0 .6rem; border: 0; border-radius: 8px; background: transparent; color: var(--primary); font: inherit; font-weight: 600; cursor: pointer; } .lv-link:disabled { opacity: .4; cursor: default; }
+.lv-invalid { border-color: var(--error) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 22%, transparent) !important; }
+.lv-quick .chip { min-height: 40px; padding-inline: 1rem; }
+.lv-msg { scroll-margin-block: 5rem; }
+.lv-save.is-loading { opacity: .85; }
+
+/* Monday–Friday strip: tap a day to see only that day */
+.lv-days { display: grid; grid-template-columns: repeat(5, 1fr); gap: .4rem; margin: 0 0 .75rem; }
+.lv-day { display: grid; justify-items: center; gap: .05rem; padding: .45rem .1rem .4rem; min-height: 72px; border: 1.5px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.lv-day small { color: var(--muted); font-size: .74rem; } .lv-day b { font-size: 1.15rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.lv-count { min-width: 1.6rem; padding: 0 .4rem; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-size: .78rem; font-weight: 700; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.lv-count.is-zero { background: transparent; color: var(--muted); font-weight: 400; opacity: .6; }
+.lv-day.is-today { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); } .lv-day.is-today small { color: var(--primary); font-weight: 700; }
+.lv-day.is-hol { background: var(--surface-2); } .lv-day.is-hol b { color: var(--muted); }
+.lv-day[aria-pressed="true"] { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px var(--primary-ring); } .lv-day[aria-pressed="true"] .lv-count { background: var(--primary); color: var(--primary-contrast); }
+.lv-depts { margin: 0 0 .75rem; }
+.lv-grp li { transition: border-color .15s; } .lv-grp li:active { border-color: var(--primary); }
+
+/* first paint while the first answer is on its way (shaped like the form, so nothing jumps) */
+.lv-skel { display: grid; gap: .9rem; } .lv-skel .skeleton { border-radius: 12px; }
+.lv-skel-1 { height: 52px; } .lv-skel-2 { height: 150px; } .lv-skel-3 { height: 120px; } .lv-skel-4 { height: 54px; margin-top: .5rem; }
+
+.lv-rec.is-now { border-left: 4px solid var(--primary); } .lv-badge { margin-left: .4rem; background: var(--primary-soft); color: var(--primary); border-color: transparent; }
+.lv-rec-act { flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 380px) { .lv-day { min-height: 66px; padding-inline: 0; } .lv-types-4 .lv-type { font-size: .82rem; } }
+@media (prefers-reduced-motion: reduce) { .lv-dot.is-busy { animation: none; } .lv-type, .lv-tab, .lv-seg button, .lv-day { transition: none; } .lv-type:active, .lv-tab:active, .lv-seg button:active, .lv-day:active { transform: none; } }
+
+/* leave types (4) above duty types (3): no orphan tile on a phone */
+.lv-typebox { display: grid; gap: .5rem; } .lv-types-4 { grid-template-columns: repeat(4, 1fr); } .lv-types-3 { grid-template-columns: repeat(3, 1fr); }
+.lv-types-4 .lv-type { padding-inline: .1rem; font-size: .86rem; }
+
+/* ---- one chosen day ("เลือกวัน"): ‹ date › + swipe ---------------------------------------------------------------------------------------------- */
+.lv-seg-3 button { padding-inline: .25rem; }
+.lv-dayctl { display: grid; grid-template-columns: 52px 1fr 52px; gap: .5rem; margin: 0 0 .6rem; }
+.lv-dayctl input[type="date"] { min-height: 52px; text-align: center; font-weight: 600; }
+.lv-arrow { min-height: 52px; border: 1.5px solid var(--border-strong); border-radius: 14px; background: var(--surface); color: var(--primary); font: inherit; font-size: 1.6rem; line-height: 1; cursor: pointer; touch-action: manipulation; transition: transform .08s var(--ease), border-color .15s; }
+.lv-arrow:active { transform: scale(.94); border-color: var(--primary); } .lv-arrow:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lv-dayview .lv-quick { margin-bottom: .75rem; }
+.lv-dayres { min-height: 42vh; touch-action: pan-y; }
+@media (prefers-reduced-motion: reduce) { .lv-arrow { transition: none; } .lv-arrow:active { transform: none; } }
+
+/* touch targets ≥ 44 px (audited) */
+.lv-link { min-height: 44px; padding-inline: .8rem; }
+.lv-admin a { display: inline-block; padding: .8rem .6rem; }
+.lv-head .lv-sync { min-height: 44px; margin-bottom: .25rem; }
+
+/* 24-hour time (HH : MM) — core/timefield.js (v1.13) */
+.lv-times { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: .5rem; align-items: center; }
+.lv-times > span { color: var(--muted); font-size: .9rem; }
+.lv-times .tf24 select { min-height: 50px; font-size: 1.05rem; padding-inline: .25rem; }
+@media (max-width: 360px) { .lv-times { grid-template-columns: 1fr; } .lv-times > span { text-align: center; } }
