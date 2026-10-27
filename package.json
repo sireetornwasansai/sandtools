@@ -13,11 +13,11 @@
     "build": "node scripts/build.mjs",
     "ocr:fetch": "node scripts/fetch-ocr.mjs",
     "preview": "node scripts/preview.mjs",
-    "line:richmenu": "node scripts/line-richmenu.mjs",
     "typecheck": "tsc -p jsconfig.json",
     "test": "node --test \"tests/unit/*.test.mjs\" tests/gas.test.mjs tests/inbox.test.mjs tests/saraban.test.mjs tests/saraban-import.test.mjs tests/saraban-send-dash.test.mjs tests/saraban-v110.test.mjs tests/hr.test.mjs tests/hrline.test.mjs tests/line-edge.test.mjs tests/line-richmenu.test.mjs",
     "test:e2e": "node scripts/build.mjs && node tests/e2e/run.mjs",
-    "test:all": "npm run typecheck && npm test && npm run test:e2e"
+    "test:all": "npm run typecheck && npm test && npm run test:e2e",
+    "line:richmenu": "node scripts/line-richmenu.mjs"
   },
   "devDependencies": {
     "playwright": "^1.50.0",

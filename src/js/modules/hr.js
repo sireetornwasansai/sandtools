@@ -169,7 +169,7 @@ export async function mount(root) {
     hide(g('nav-dailylog'), !dev); hide(g('nav-projects'), !dev); hide(sec, !dev);
   };
   gate(boot.me);
-  // Why is the calendar empty (or smaller than the sheet)?  Hr.gs sends `diag` with boot — say it instead of leaving a blank page.
+  // Why is the calendar empty (or smaller than the sheet)?  Hr.gs sends `diag` with boot — say it instead of leaving a blank page (admins also see rows that were left out).
   const diag = boot.diag;
   if (diag && diag.rows) {
     const why = `อ่านวันที่ไม่ได้ ${diag.noDate || 0} · ไม่มีชื่อ ${diag.noName || 0} · เก่าเกินช่วงที่แสดง ${diag.old || 0}`;

@@ -195,8 +195,8 @@ test('phone page: mobileWho gives one day (same grouping), flags weekend / holid
   assert.throws(() => e.call('mobileWho', ['2026-02-31'], 'user@x.go.th'), /วันที่ไม่ถูกต้อง/); assert.throws(() => e.call('mobileWho', ['x'], 'user@x.go.th'));
 });
 
-test('auto-admin (as deployed): a new friend becomes แอดมิน at once; follow promotes a friend without a role; HR_LINE_AUTO_ADMIN=false turns it off', () => {
-  const e = lineEnv({ HR_LINE_GROUP_IDS: 'Cgroup1' });
+test('auto-admin (as deployed): a new friend of the OA becomes แอดมิน at once, a follow promotes an existing friend without a role; HR_LINE_AUTO_ADMIN=false turns it off', () => {
+  const e = lineEnv({ HR_LINE_GROUP_IDS: 'Cgroup1' });                                             // default = on
   const hook = (...events) => e.run('hrLineHook', { secret: 'edge-secret', events });
   hook(ev({ source: { type: 'user', userId: 'Unew' }, text: 'สัปดาห์นี้ใครลา' }));
   assert.equal(e.sheets.LineUsers.find((r) => r[0] === 'Unew')[5], 'แอดมิน'); assert.match(textOf(e.pushes().find((f) => f.url.endsWith('/reply'))), /สัปดาห์นี้/);
@@ -207,9 +207,9 @@ test('auto-admin (as deployed): a new friend becomes แอดมิน at once;
   assert.equal(off.sheets.LineUsers.find((r) => r[0] === 'Unew')[5], ''); assert.match(textOf(off.pushes().find((f) => f.url.endsWith('/reply'))), /ยังไม่ได้รับสิทธิ์/);
 });
 
-test('"ใครลาวันไหน" = day-by-day list AND the date picker buttons under it', () => {
+test('"ใครลาวันไหน": day-by-day list AND the date picker buttons under it', () => {
   const e = seeded();
   e.run('hrLineHook', { secret: 'edge-secret', events: [ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'ใครลาวันไหน' })] });
-  const reply = e.pushes().find((f) => f.url.endsWith('/reply')); const q = J(reply.body.messages.at(-1).quickReply.items);
-  assert.ok(textOf(reply).length > 20); assert.equal(q[0].action.type, 'datetimepicker');
+  const reply = e.pushes().find((f) => f.url.endsWith('/reply')), q = J(reply.body.messages.at(-1).quickReply.items);
+  assert.match(textOf(reply), /ใครลา \/ ไปราชการ วันไหน/); assert.equal(q[0].action.type, 'datetimepicker'); assert.ok(q.length <= 13);
 });
