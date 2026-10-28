@@ -111,6 +111,8 @@ test('api: gasCallRetry retries a dropped connection, but never an answer the se
   let calls = 0; const answers = [() => { throw new TypeError('Failed to fetch'); }, () => ({ json: async () => ({ success: true, data: { ok: 1 } }), ok: true })];
   globalThis.fetch = async () => answers[Math.min(calls++, answers.length - 1)]();
   assert.deepEqual((await api.gasCallRetry('archive', {}, 1000, { tries: 3, delayMs: 1 })).data, { ok: 1 }); assert.equal(calls, 2);
+  calls = 0; const seen = []; globalThis.fetch = async () => answers[Math.min(calls++, answers.length - 1)]();
+  await api.gasCallRetry('archive', {}, 1000, { tries: 3, delayMs: 1, onRetry: (n, t2, code) => seen.push([n, t2, code]) }); assert.deepEqual(seen, [[2, 3, 'NETWORK']]);
   calls = 0; globalThis.fetch = async () => { calls += 1; return { ok: true, json: async () => ({ success: false, error: { code: 'FILE_TOO_LARGE', message: 'x' } }) }; };
   await assert.rejects(() => api.gasCallRetry('archive', {}, 1000, { tries: 3, delayMs: 1 }), { code: 'FILE_TOO_LARGE' }); assert.equal(calls, 1);
   calls = 0; globalThis.fetch = async () => { calls += 1; throw new TypeError('Failed to fetch'); };

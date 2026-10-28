@@ -13,6 +13,7 @@ import { loginRequired, getSession, revalidateInBackground, preloadLogin, render
 import { setPendingFile, routeForFile } from './core/handoff.js';
 import { toast } from './core/toast.js';
 import { initDates } from './core/datefield.js';
+import { routableDrop } from './core/dnd.js';
 
 const app = document.getElementById('app');
 let main;
@@ -143,8 +144,8 @@ function installGlobalHandlers() {
   window.addEventListener('drop', (e) => {
     depth = 0; document.body.classList.remove('dragging');
     if (!hasFiles(e)) return;
-    e.preventDefault();
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    const file = routableDrop(e);   // null when a page's own drop zone already took the file (e.g. สารบรรณ → รับหนังสือ)
+    e.preventDefault();             // never let the browser open the dropped file itself
     if (!file) return;
     const dest = routeForFile(file.name);
     if (!dest) { toast('ไม่รองรับไฟล์ประเภทนี้', 'error'); return; }

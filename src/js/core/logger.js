@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { getSession } from './auth.js';
 import { gasCall, gasCallRetry, backendConfigured } from './api.js';
+import { uploadKey } from './files.js';
 
 export const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024;
 /** Logging/archiving happens only when the backend is set up and the user is signed in (the backend rejects anonymous writes). */
@@ -33,7 +34,7 @@ export async function record(tool, op, d = {}) {
   let i = 0;
   for (const { role, blob, name } of files.filter((f) => f.blob && f.blob.size <= MAX_ARCHIVE_BYTES)) {
     i += 1;
-    const key = `${logId}-${role}-${i}-${blob.size}`.replace(/[^\w.:-]/g, '_').slice(0, 80);
+    const key = uploadKey(logId, role, i, blob.size);
     try { await gasCallRetry('archive', { session: token, tool, logId, role, name, key, mime: blob.type || 'application/octet-stream', data: await toBase64(blob) }, 120000, { tries: 3 }); } catch (e) { console.warn('archive copy not stored:', name, e && /** @type {any} */ (e).code); }
   }
   return true;

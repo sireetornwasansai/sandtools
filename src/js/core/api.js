@@ -72,7 +72,7 @@ export async function gasCall(action, payload = {}, timeoutMs = 20000) {
 /**
  * For writes that are safe to send again (an upload carrying a `key`, or one that replaces the same thing): retry only when the answer never arrived
  * (dropped connection / timeout / blank page / server busy). An answer the server really gave (too large, forbidden …) is returned as it is.
- * @param {string} action @param {Record<string, any>} payload @param {number} [timeoutMs] @param {{tries?:number, delayMs?:number}} [opt]
+ * @param {string} action @param {Record<string, any>} payload @param {number} [timeoutMs] @param {{tries?:number, delayMs?:number, onRetry?:(attempt:number, tries:number, code:string)=>void}} [opt]
  */
 export async function gasCallRetry(action, payload = {}, timeoutMs = 20000, opt = {}) {
   const tries = Math.max(1, opt.tries || 3); const delayMs = opt.delayMs == null ? 1200 : opt.delayMs;
@@ -80,6 +80,7 @@ export async function gasCallRetry(action, payload = {}, timeoutMs = 20000, opt 
     try { return await gasCallOnce(action, payload, timeoutMs); } catch (e) {
       const c = e && /** @type {any} */ (e).code;
       if (i >= tries || (c !== 'NETWORK' && c !== 'TIMEOUT' && c !== 'BAD_RESPONSE' && c !== 'BUSY')) throw e;
+      if (opt.onRetry) { try { opt.onRetry(i + 1, tries, c); } catch { /* a notice must never break the upload */ } }
       await sleep(delayMs * i);
     }
   }

@@ -79,6 +79,11 @@ export async function prepareAttachment(file, opts = {}) {
   return { name: out.name, mime: out.blob.type === 'image/png' ? 'image/png' : 'image/jpeg', size: out.blob.size, base64: await blobToBase64(out.blob), note: out.note };
 }
 
+/** Idempotency key of one archive copy: the backend answers a repeated key instead of storing the file twice, so two different files must never share one. */
+export function uploadKey(logId, role, index, size) {
+  return `${logId || 'nolog'}-${role}-${index}-${size}`.replace(/[^\w.:-]/g, '_').slice(0, 80);
+}
+
 /** URLs stored in the sheet cell (one per line; older rows hold a single URL) → clean list of http(s) links. */
 export function splitFiles(cell) {
   return String(cell == null ? '' : cell).split(/\s+/).filter((u) => /^https?:\/\//i.test(u)).slice(0, ATTACH.maxFiles);

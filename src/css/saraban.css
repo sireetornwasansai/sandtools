@@ -233,3 +233,11 @@ div.sar-drop { display: flex; } div.sar-drop:focus-visible { outline: 0; box-sha
 .sar-cam-thumb { position: relative; margin: 0; flex: none; } .sar-cam-thumb img { height: 84px; border-radius: 6px; border: 1px solid var(--border); display: block; }
 .sar-cam-x { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--error); color: #fff; cursor: pointer; line-height: 1; }
 @media (prefers-reduced-motion: reduce) { .sar-dz { transition: none; } }
+
+/* v1.14.3 — upload progress: spinner + step x/n + retry notice + "taking longer" hint; the drop zone is inert while a letter is being saved */
+.sar-up { margin-top: .9rem; padding: .8rem 1rem; border: 1px solid var(--primary); border-radius: var(--radius); background: var(--primary-soft); animation: sar-in .2s ease-out; }
+.sar-up[hidden], .sar-up-slow[hidden] { display: none; }
+.sar-up-head { display: flex; align-items: center; gap: .6rem; } .sar-up-now { margin: 0; color: var(--text); font-weight: 600; min-height: 0; }
+.sar-up .sar-scan-steps { margin: .7rem 0 .2rem; } .sar-up-slow { margin: .5rem 0 0; }
+.sar-dz.is-busy { opacity: .55; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .sar-up { animation: none; } }

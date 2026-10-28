@@ -679,6 +679,7 @@ var editPendingFiles = [];         // File ที่เพิ่มในหน�
 var editKeptFiles = [];            // ลิงก์ไฟล์เดิมของรายการที่ยังคงไว้
 var uploadedLinks = new WeakMap(); // File → ลิงก์ที่อัปโหลดแล้ว
 var saving = false, savingEdit = false;
+function leaveGuard(e) { e.preventDefault(); e.returnValue = ''; }   // a file on its way would be cut if the tab closes
 function newRid() {
   try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* fall through */ }
   return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
@@ -688,10 +689,10 @@ var formRid = newRid();
 function gsr(method, args) {
   return new Promise(function(resolve, reject) { google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[method].apply(null, args); });
 }
-function gsrRetry(method, args, tries) {
+function gsrRetry(method, args, tries, onRetry) {
   return gsr(method, args).catch(function(e) {
     var code = e && e.code;
-    if (tries > 1 && (code === 'NETWORK' || code === 'BAD_RESPONSE' || code === 'TIMEOUT')) return gsrRetry(method, args, tries - 1);
+    if (tries > 1 && (code === 'NETWORK' || code === 'BAD_RESPONSE' || code === 'TIMEOUT')) { if (onRetry) onRetry(tries - 1); return gsrRetry(method, args, tries - 1, onRetry); }
     throw e;
   });
 }
@@ -755,7 +756,7 @@ async function uploadFiles(files, statusEl) {
     statusEl.textContent = '⏳ กำลังเตรียมไฟล์ ' + (i + 1) + '/' + files.length + ' …';
     var p = await prepareAttachment(f);
     statusEl.textContent = '⏳ กำลังอัปโหลดไฟล์ ' + (i + 1) + '/' + files.length + ' (' + fmtSize(p.size) + (p.note ? ' · ' + p.note : '') + ') — อย่าปิดหน้านี้';
-    var r = await gsrRetry('uploadFile', [{ fileName: p.name, fileMime: p.mime, fileBase64: p.base64 }], 2);
+    var r = await gsrRetry('uploadFile', [{ fileName: p.name, fileMime: p.mime, fileBase64: p.base64 }], 3, function(left) { statusEl.textContent = '⚠️ เครือข่ายสะดุด — กำลังส่งไฟล์ ' + (i + 1) + '/' + files.length + ' ใหม่ (เหลือ ' + left + ' ครั้ง) — อย่าปิดหน้านี้'; });
     if (!r || r.status !== 'success' || !r.url) throw new Error((r && r.message) || 'อัปโหลดไฟล์ไม่สำเร็จ');
     uploadedLinks.set(f, r.url); links.push(r.url);
   }
@@ -786,7 +787,7 @@ async function submitForm() {
   if (endDate === date && toMinutes(eTime) <= toMinutes(sTime)) { showToast("เวลาสิ้นสุดต้องหลังเวลาเริ่ม", "error"); return; }
 
   var btn = $r.getElementById('submitBtn'), statusEl = $r.getElementById('fUploadStatus');
-  saving = true; btn.disabled = true; btn.classList.add('loading');
+  saving = true; btn.disabled = true; btn.classList.add('loading'); window.addEventListener('beforeunload', leaveGuard);
   try {
     var links = await uploadFiles(pendingFiles, statusEl);
     var result = await gsr('saveData', [{
@@ -811,7 +812,7 @@ async function submitForm() {
   } catch (err) {
     showToast(friendlyError(err), 'error');
   } finally {
-    saving = false; btn.classList.remove('loading'); statusEl.textContent = ''; checkQuota();
+    saving = false; btn.classList.remove('loading'); statusEl.textContent = ''; window.removeEventListener('beforeunload', leaveGuard); checkQuota();
   }
 }
 
@@ -1758,7 +1759,7 @@ async function submitEdit() {
   if (startTime && endDate === startDate && toMinutes(endTime) <= toMinutes(startTime)) { showToast("เวลาสิ้นสุดต้องหลังเวลาเริ่ม","error"); return; }
 
   var btn = $r.getElementById('editSaveBtn'), statusEl = $r.getElementById('editUploadStatus');
-  savingEdit = true; btn.disabled = true; btn.textContent = '⏳ กำลังบันทึก...';
+  savingEdit = true; btn.disabled = true; btn.textContent = '⏳ กำลังบันทึก...'; window.addEventListener('beforeunload', leaveGuard);
   try {
     var links = await uploadFiles(editPendingFiles, statusEl);
     var result = await gsr('updateRecord', [{ id: id, name: name, department: dept, type: type, startDate: startDate, endDate: endDate, startTime: startTime, endTime: endTime,
@@ -1771,7 +1772,7 @@ async function submitEdit() {
   } catch (e) {
     showToast(friendlyError(e), 'error');
   } finally {
-    savingEdit = false; btn.disabled = false; btn.textContent = '💾 บันทึกการแก้ไข'; statusEl.textContent = '';
+    savingEdit = false; btn.disabled = false; btn.textContent = '💾 บันทึกการแก้ไข'; statusEl.textContent = ''; window.removeEventListener('beforeunload', leaveGuard);
   }
 }
 
