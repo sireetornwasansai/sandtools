@@ -4,7 +4,7 @@ import { notice, privacyNotice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { modal } from '../core/layers.js';
 import { cameraSupported, openScanner, cameraErrorText } from './saraban-scan.js';
-import { URGENCY, SECRECY, RECEIVE_STEPS, SCAN_FIELD_LABELS, parseLetter, plainText, addDays, newRid, fileToBase64 } from './saraban-engine.js';
+import { URGENCY, SECRECY, RECEIVE_STEPS, SCAN_FIELD_LABELS, READ_MAX_PAGES, ATT_MAX, ATT_LIMIT, ATT_TARGET, attachKind, splitDrop, readEnough, parseLetter, plainText, addDays, newRid, fileToBase64 } from './saraban-engine.js';
 
 const badge = (label, tone = 'muted') => h('span', { class: `sar-badge sar-${tone}` }, label);
 
@@ -13,44 +13,61 @@ const badge = (label, tone = 'muted') => h('span', { class: `sar-badge sar-${ton
 const opt = (value, label, selected) => h('option', { value, selected: selected ? true : null }, label);
 const errText = (e) => (e && e.message) || 'ทำรายการไม่สำเร็จ';
 
-/** Letter scan → ONE PDF File. A PDF is used as is; one or several photos (pages) are combined into a PDF so the receive stamp can be applied and everything is stored the same way. */
-async function toPdfFile(input) {
-  const files = Array.isArray(input) ? input : [input];
-  const pdfs = files.filter((f) => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
-  if (pdfs.length > 1 || (pdfs.length === 1 && files.length > 1)) throw Object.assign(new Error('เลือก PDF ได้ครั้งละ 1 ไฟล์ หรือเลือกรูปสแกนหลายรูป (หลายหน้า) — ไม่ผสมกัน'), { fatal: true });
-  if (pdfs.length === 1) return pdfs[0];
-  const imgs = files.filter((f) => /^image\//.test(f.type));
-  if (imgs.length && imgs.length === files.length) {
-    const { imagesToPdf } = await import('./pdf/engine.js');
-    const r = await imagesToPdf(imgs.map((file) => ({ file })), { size: 'a4', margin: 0, quality: 'balanced' });
-    return new File([r.bytes], imgs[0].name.replace(/\.[^.]+$/, '') + '.pdf', { type: 'application/pdf' });
-  }
-  throw Object.assign(new Error('ไฟล์ที่ใช้อ่านข้อมูลได้คือ PDF หรือรูปภาพ (JPG/PNG) — ไฟล์อื่นแนบในภายหลังได้'), { fatal: true });
+const mbText = (n) => `${(n / 1048576).toFixed(2)} MB`;
+
+/** The letter file → ONE PDF File (the copy that is read and stored): a PDF as is; photos (= its pages) combined — smaller when they would not fit the 10 MB limit. `files` comes from splitDrop().main. */
+async function toPdfFile(files) {
+  if (files.length === 1 && attachKind(files[0]) === 'pdf') return files[0];
+  if (!files.length || files.some((f) => attachKind(f) !== 'image')) throw Object.assign(new Error('ไฟล์ที่ใช้อ่านข้อมูลได้คือ PDF หรือรูปภาพ (JPG/PNG/WebP)'), { fatal: true });
+  const { imagesToPdf } = await import('./pdf/engine.js');
+  const build = async (quality) => { const r = await imagesToPdf(files.map((file) => ({ file })), { size: 'a4', margin: 0, quality }); return new File([r.bytes], files[0].name.replace(/\.[^.]+$/, '') + '.pdf', { type: 'application/pdf' }); };
+  let out = await build('balanced');
+  if (out.size > ATT_TARGET) { const small = await build('small'); if (small.size < out.size) out = small; }
+  return out;
 }
+
+/** A PDF over the storage limit (a 20+ page scan is often 15–40 MB): rebuild it from page images, smaller each round, until it fits. The text layer is lost — what is READ is always the original. */
+async function shrinkToFit(file, onStatus) {
+  const { shrinkPdf } = await import('./shrink-docs.js');
+  let best = file;
+  for (const [scale, quality] of [[1.6, 0.72], [1.3, 0.6], [1.0, 0.5]]) {
+    const blob = await shrinkPdf(file, { quality, scale, onPage: (i, n) => { if (onStatus) onStatus(`กำลังย่อไฟล์ให้ไม่เกิน 10 MB — หน้า ${i}/${n}`); } });
+    best = new File([blob], file.name, { type: 'application/pdf' });
+    if (best.size <= ATT_TARGET) return best;
+  }
+  throw new Error(`ย่อไฟล์แล้วยังใหญ่ ${mbText(best.size)} (เกิน 10 MB) — แบ่งไฟล์เป็นหลายส่วนแล้วแนบแยก`);
+}
+
 /**
- * Read the letter on this device (PDF text layer, or on-device OCR for scans). Nothing is sent anywhere.
- * Photos are OCR-ed directly (cleaned first — see converters/ocr-preprocess.js) instead of going through the image→PDF copy that is stored.
- * @param {File} pdf the single PDF that will be stored  @param {File[]} originals what the clerk picked/photographed
+ * Read the letter on this device — ONLY its first READ_MAX_PAGES pages (เลขที่ · วันที่ · เรื่อง · เรียน are on page 1; a 24-page letter used to be OCR-ed page by page for minutes).
+ * A long PDF is first cut to its first pages (pdf/engine.js firstPages), then read from the text layer or by on-device OCR, and OCR stops as soon as เลขที่ + เรื่อง + เรียน are found.
+ * Photos are OCR-ed directly (cleaned first — see converters/ocr-preprocess.js). Nothing is sent anywhere.
+ * Reading never decides what is stored: the file is attached on its own (see the attachment list in receiveView).
+ * @returns {Promise<{text:string,pages:number}>} pages = pages in the whole file (0 when unknown)
  */
 async function readLetter(pdf, originals, onStatus) {
-  const imgs = originals.filter((f) => /^image\//.test(f.type));
+  const imgs = originals.filter((f) => attachKind(f) === 'image');
   if (imgs.length && imgs.length === originals.length) {
     const { ocrImageBlob, createOcrEngine } = await import('./converters/ocr.js');
     const engine = await createOcrEngine({ onStatus });
     try {
-      const parts = [];
-      for (let i = 0; i < imgs.length && i < 6; i += 1) {
-        if (onStatus && imgs.length > 1) onStatus(`กำลังอ่านหน้า ${i + 1} จาก ${imgs.length}`);
-        const r = await ocrImageBlob(imgs[i], { engine, onStatus: imgs.length > 1 ? undefined : onStatus });
+      const n = Math.min(imgs.length, READ_MAX_PAGES); const parts = [];
+      for (let i = 0; i < n; i += 1) {
+        if (onStatus && n > 1) onStatus(`กำลังอ่านหน้า ${i + 1} จาก ${n}${imgs.length > n ? ` (อ่านเฉพาะ ${READ_MAX_PAGES} หน้าแรก)` : ''}`);
+        const r = await ocrImageBlob(imgs[i], { engine, onStatus: n > 1 ? undefined : onStatus });
         parts.push(r.markdown);
-        if (i === 0 && /(เรื่อง|เรียน)/.test(r.markdown) && parts.join('').length > 400) break;   // the first page carries every field we need
+        if (readEnough(plainText(parts.join('\n\n')))) break;                 // the first page carries every field we need
       }
-      return plainText(parts.join('\n\n'));
+      return { text: plainText(parts.join('\n\n')), pages: imgs.length };
     } finally { await engine.terminate(); }
   }
+  let head = { file: pdf, total: 0, trimmed: false };
+  try { if (onStatus) onStatus('กำลังเลือกหน้าแรกของหนังสือ'); const { firstPages } = await import('./pdf/engine.js'); head = await firstPages(pdf, READ_MAX_PAGES); } catch { /* encrypted / odd file: the converter below reports it, or reads the start of the whole file */ }
+  if (onStatus && head.total > READ_MAX_PAGES) onStatus(`ไฟล์มี ${head.total} หน้า — อ่านเฉพาะ ${READ_MAX_PAGES} หน้าแรก`);
+  const named = /\.pdf$/i.test(head.file.name || '') ? head.file : new File([head.file], `${head.file.name || 'letter'}.pdf`, { type: 'application/pdf' });
   const { convertFile } = await import('./converters/index.js');
-  const r = await convertFile(pdf, { maxBytes: 15 * 1024 * 1024, timeoutMs: 90000, ocr: true, ocrTimeoutMs: 4 * 60 * 1000, onStatus });
-  return plainText(r.markdown);
+  const r = await convertFile(named, { maxBytes: 15 * 1024 * 1024, timeoutMs: 90000, ocr: true, ocrTimeoutMs: 3 * 60 * 1000, maxPages: READ_MAX_PAGES, enough: readEnough, onStatus });
+  return { text: plainText(r.markdown), pages: head.total };
 }
 
 /** Receive stamp on page 1 (top right): หน่วยงาน · เลขรับ · วันที่ · เวลา. Returns a new PDF Blob. */
@@ -132,7 +149,7 @@ function progressPanel(labels) {
    ข้อมูลที่อ่านได้แก้ไขได้ทุกช่องจนกว่าจะกดยืนยัน · เลขรับออกครั้งเดียว (rid กันกดซ้ำ) · การส่งต่อทำหลังมีเลขรับแล้ว (op route) */
 
 export function receiveView(root, X, pre = {}) {
-  let pdf = null; let rid = newRid(); const inboxId = pre.inboxId || ''; let busy = false; let step = pre.inboxId ? 'read' : 'import'; let suggestions = []; let previewUrl = ''; let scanRun = 0;
+  let pdf = null; let rid = newRid(); const inboxId = pre.inboxId || ''; let busy = false; let step = pre.inboxId ? 'read' : 'import'; let suggestions = []; let previewUrl = ''; let scanRun = 0; let registered = false;
   const today = X.cfg.today; const F = {}; const touched = new Set();
   const mk = (name, label, input, hint) => { F[name] = input; input.addEventListener('input', () => touched.add(name)); return field(label, input, hint); };
   const text = (name, label, ph, max = 300, hint) => mk(name, label, h('input', { type: 'text', maxlength: max, placeholder: ph || '', autocomplete: 'off', value: pre[name] || '' }), hint);
@@ -140,18 +157,89 @@ export function receiveView(root, X, pre = {}) {
 
   /* ---- stepper ---- */
   const stepper = h('ol', { class: 'sar-wiz', 'aria-label': 'ขั้นตอนการรับหนังสือ' }, RECEIVE_STEPS.map(([k, l], i) => h('li', { dataset: { k } }, h('span', { class: 'sar-wiz-n' }, String(i + 1)), h('span', null, l))));
-  const scanCard = h('div', { class: 'card sar-scan' }); const checkCard = h('div', { class: 'card' }); const resultCard = h('div'); const fwdCard = h('div');
+  const scanCard = h('div', { class: 'card sar-scan' }); const checkCard = h('div', { class: 'card' }); const resultCard = h('div'); const fwdCard = h('div'); const attCard = h('div', { class: 'card sar-att' });
+  const showAtt = () => { attCard.hidden = !(step === 'read' || step === 'dup' || (step === 'number' && !resultCard.childNodes.length)); };
   function setStep(k) {
     step = k; const idx = RECEIVE_STEPS.findIndex((s) => s[0] === k);
     [...stepper.children].forEach((li, i) => { li.classList.toggle('on', i === idx); li.classList.toggle('done', i < idx); if (i === idx) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current'); });
-    scanCard.hidden = !(k === 'import' || k === 'read'); checkCard.hidden = !(k === 'dup' || (k === 'number' && !resultCard.childNodes.length)); resultCard.hidden = !(k === 'forward' || k === 'number'); fwdCard.hidden = k !== 'forward';
+    scanCard.hidden = !(k === 'import' || k === 'read'); checkCard.hidden = !(k === 'dup' || (k === 'number' && !resultCard.childNodes.length)); resultCard.hidden = !(k === 'forward' || k === 'number'); fwdCard.hidden = k !== 'forward'; showAtt();
   }
 
+  /* ---- attachments (v1.15): a file given to the page is ATTACHED to the letter, not only read ----
+     Every file starts uploading to the register's Drive folder the moment it is dropped (one at a time, in step with reading, not after "ยืนยัน"),
+     is listed below with its own status, and can be removed or retried. Confirming waits for all of them, so a letter is never numbered with a file missing.
+     The letter file (the one that is read) is `kind: 'main'`; anything else is `extra` (สิ่งที่ส่งมาด้วย). A queue item's own file is already attached by the backend. */
+  const atts = []; let attSeq = 0; let chain = Promise.resolve();
+  const attBusy = () => atts.some((a) => a.state === 'wait' || a.state === 'prep' || a.state === 'up');
+  const discard = (id) => { if (id) Promise.resolve().then(() => X.call('discard', { id }, 30000)).catch(() => { /* an older backend, or already gone: the file just stays in Drive */ }); };
+  const extraIn = h('input', { type: 'file', accept: '.pdf,.docx,.xlsx,.pptx,image/jpeg,image/png,image/webp', multiple: true, hidden: true });
+  const attList = h('ul', { class: 'sar-att-list', 'aria-live': 'polite' });
+  const addBtn = h('label', { class: 'btn btn-sm' }, svgIcon(ICONS.plus, 16), 'แนบไฟล์เพิ่ม', extraIn);
+  attCard.append(h('h3', { class: 'sar-h3' }, 'ไฟล์แนบของหนังสือ'), h('p', { class: 'muted sar-sub' }, `ไฟล์ที่วางหรือสแกนจะ “แนบเข้าทะเบียนทันที” ไม่ใช่แค่อ่านข้อมูล · แนบได้สูงสุด ${ATT_MAX} ไฟล์ ไฟล์ละไม่เกิน 10 MB (PDF ที่ใหญ่กว่าระบบย่อให้เอง)`), attList, h('div', { class: 'btn-row' }, addBtn));
+  function paintAtt() {
+    const rows = atts.map((a) => {
+      const st = a.state; const working = st === 'wait' || st === 'prep' || st === 'up';
+      const text = st === 'err' ? a.err : working ? (a.note || { wait: 'รอส่ง…', prep: 'กำลังย่อไฟล์…', up: 'กำลังแนบเข้าทะเบียน…' }[st]) : a.from === 'queue' ? '✓ แนบอยู่แล้ว (ไฟล์จากคิว)' : a.shrunk ? `✓ แนบแล้ว (ย่อเหลือ ${mbText(a.file.size)})` : '✓ แนบแล้ว';
+      return h('li', { class: `sar-att-row st-${st}` }, svgIcon(ICONS.file, 18),
+        h('div', { class: 'sar-att-main' }, h('div', null, h('strong', null, a.name), ` ${mbText(a.size)} `, badge(a.kind === 'main' ? 'หนังสือ (ใช้อ่านข้อมูล)' : 'ไฟล์แนบเพิ่ม', a.kind === 'main' ? 'info' : 'muted')),
+          h('div', { class: `sar-att-st ${st}`, role: 'status' }, working ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : null, text)),
+        h('div', { class: 'sar-att-act' },
+          st === 'err' ? h('button', { class: 'btn btn-sm', type: 'button', disabled: busy ? true : null, onclick: () => { a.err = ''; schedule(a); } }, 'ลองใหม่') : null,
+          a.from === 'queue' ? null : h('button', { class: 'btn btn-sm', type: 'button', disabled: busy ? true : null, 'aria-label': `เอา ${a.name} ออก`, onclick: () => removeAtt(a) }, svgIcon(ICONS.trash, 16), 'เอาออก')));
+    });
+    attList.replaceChildren(...(rows.length ? rows : [h('li', { class: 'muted sar-sub' }, 'ยังไม่มีไฟล์แนบ — ลงรับโดยไม่มีไฟล์ได้ หรือกด “แนบไฟล์เพิ่ม”')]));
+    addBtn.classList.toggle('is-disabled', busy); extraIn.disabled = busy; guardLeave(attBusy() || busy); showAtt();
+  }
+  /** Queue the upload (one file at a time — the backend answers slowly under parallel uploads, see v1.14.1). */
+  function schedule(a) { a.state = 'wait'; paintAtt(); a.job = chain = chain.then(() => runAtt(a)); return a.job; }
+  async function runAtt(a) {
+    if (a.removed) return;
+    try {
+      if (a.needsShrink && !a.shrunk) { a.state = 'prep'; a.note = 'กำลังย่อไฟล์ให้ไม่เกิน 10 MB…'; paintAtt(); a.file = await shrinkToFit(a.src, (t) => { a.note = t; paintAtt(); }); a.shrunk = true; }
+      if (a.removed) return;
+      a.state = 'up'; a.note = `กำลังแนบเข้าทะเบียน (${mbText(a.file.size)})…`; paintAtt();
+      const f = await upload(X, a.file, { kind: 'in' }, (n, t) => { a.note = `⚠️ เครือข่ายสะดุด — กำลังส่งไฟล์ใหม่ (ครั้งที่ ${n}/${t})…`; paintAtt(); });
+      if (a.removed) { discard(f.id); return; }
+      a.ref = f; a.state = 'done'; a.note = '';
+    } catch (e) { a.state = 'err'; a.err = errText(e); }
+    paintAtt();
+  }
+  function addAtt(file, kind, o = {}) {
+    const a = { id: (attSeq += 1), kind, name: file.name, size: file.size, src: file, file, state: 'wait', ref: null, err: '', note: '', from: o.from || '', needsShrink: false, shrunk: false, removed: false, job: null };
+    atts.push(a);
+    if (a.from === 'queue') { a.state = 'done'; paintAtt(); return a; }
+    a.needsShrink = attachKind(file) === 'pdf' && file.size > ATT_TARGET;
+    schedule(a); return a;
+  }
+  function removeAtt(a) {
+    const i = atts.indexOf(a); if (i < 0 || busy) return;
+    atts.splice(i, 1); a.removed = true; if (a.ref) discard(a.ref.id);
+    if (a.kind === 'main') {
+      scanRun += 1; pdf = null; fileLine.replaceChildren(); preview.replaceChildren(); foundBox.replaceChildren();
+      if (step === 'read') { status.textContent = ''; scanSteps.hidden = true; drop.hidden = false; scanBtns.hidden = false; setStep('dup'); }
+    }
+    paintAtt();
+  }
+  /** Extra attachments (not read). Returns how many were added. */
+  function addExtras(list, o = {}) {
+    let added = 0;
+    for (const f of list) {
+      if (atts.length >= ATT_MAX) { toast(`แนบได้สูงสุด ${ATT_MAX} ไฟล์ต่อหนังสือ`, 'info', 5000); break; }
+      const k = attachKind(f);
+      if (!k) { toast(`“${f.name}” แนบไม่ได้ — รองรับ PDF รูป JPG/PNG/WebP และไฟล์ Word/Excel/PowerPoint`, 'error', 6000); continue; }
+      if (k !== 'pdf' && f.size > ATT_LIMIT) { toast(`“${f.name}” ใหญ่เกิน 10 MB`, 'error', 6000); continue; }
+      if (atts.some((a) => a.name === f.name && a.size === f.size)) { toast(`“${f.name}” แนบไว้แล้ว`, 'info', 4000); continue; }
+      addAtt(f, 'extra', o); added += 1;
+    }
+    return added;
+  }
+  extraIn.addEventListener('change', () => { const l = [...(extraIn.files || [])]; extraIn.value = ''; if (!busy && l.length) addExtras(l); });
+
   /* ---- steps 1–2: import (file / camera) → automatic reading ---- */
-  const fileIn = h('input', { type: 'file', accept: '.pdf,image/*', multiple: true, hidden: true });
+  const fileIn = h('input', { type: 'file', accept: '.pdf,.docx,.xlsx,.pptx,image/*', multiple: true, hidden: true });
   const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });   // fallback where getUserMedia is unavailable
   const status = h('p', { class: 'muted sar-status', role: 'status', 'aria-live': 'polite' });
-  const manual = () => { pdf = null; fileLine.replaceChildren(); foundBox.replaceChildren(); status.textContent = ''; setStep('dup'); F.subject.focus(); };
+  const manual = () => { status.textContent = ''; setStep('dup'); F.subject.focus(); };   // an attached file stays attached
   async function useCamera() {
     if (!cameraSupported()) { camIn.click(); return; }
     try { const shots = await openScanner(); if (shots && shots.length) pickFiles(shots); } catch (e) { toast(cameraErrorText(e), 'error', 7000); if (e && e.name !== 'NotAllowedError') camIn.click(); }
@@ -160,14 +248,14 @@ export function receiveView(root, X, pre = {}) {
   const drop = h('div', { class: 'sar-drop sar-dz', tabindex: '0', role: 'group', 'aria-label': 'นำเข้าหนังสือ' },
     h('div', { class: 'sar-dz-ic' }, svgIcon(ICONS.upload, 34)),
     h('strong', null, 'ลากไฟล์หนังสือมาวางที่นี่'),
-    h('span', { class: 'muted' }, 'PDF หรือรูปสแกน/ภาพถ่าย (หลายรูป = หลายหน้า) · อ่านข้อความทันทีเมื่อวางไฟล์'),
+    h('span', { class: 'muted' }, 'PDF หรือรูปสแกน/ภาพถ่าย (หลายรูป = หลายหน้า) · แนบเข้าทะเบียนทันที พร้อมอ่านข้อมูลจาก 3 หน้าแรก · ไฟล์ Word/Excel แนบเป็นไฟล์เพิ่มได้'),
     h('div', { class: 'sar-dz-actions' }, h('button', { class: 'btn', type: 'button', dataset: { act: 'scan' }, onclick: useCamera }, 'สแกนด้วยกล้อง'), pick),
     h('button', { class: 'sar-linkbtn', type: 'button', onclick: manual }, 'กรอกข้อมูลเอง (ไม่มีไฟล์)'));
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   drop.addEventListener('dragleave', (e) => { e.preventDefault(); drop.classList.remove('over'); });
   drop.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); document.body.classList.remove('dragging'); if (busy) return; const fs = e.dataTransfer && e.dataTransfer.files; if (fs && fs.length) pickFiles(fs); });
-  const bullets = h('ul', { class: 'sar-dz-feat' }, ['อ่านข้อความ PDF / OCR ภาษาไทย (ในเครื่อง)', 'AI เติมเลขที่ เรื่อง จาก เรียน กำหนด', 'ตรวจหนังสือซ้ำอัตโนมัติ', 'ออกเลขรับและประทับตราบนหน้าจริง'].map((t) => h('li', null, svgIcon(ICONS.check, 16), t)));
-  const scanSteps = h('ol', { class: 'sar-scan-steps', hidden: true }, ['เตรียมไฟล์', 'ปรับภาพ + อ่านข้อความ (PDF/OCR)', 'จัดข้อมูลลงแบบฟอร์ม'].map((l) => h('li', null, l)));
+  const bullets = h('ul', { class: 'sar-dz-feat' }, ['แนบไฟล์เข้าทะเบียนทันทีที่วาง (ไม่ใช่แค่อ่าน)', 'อ่านเฉพาะ 3 หน้าแรก — PDF / OCR ภาษาไทย (ในเครื่อง)', 'เติมเลขที่ เรื่อง จาก เรียน กำหนด ให้เอง', 'ตรวจหนังสือซ้ำ · ออกเลขรับและประทับตราบนหน้าจริง'].map((t) => h('li', null, svgIcon(ICONS.check, 16), t)));
+  const scanSteps = h('ol', { class: 'sar-scan-steps', hidden: true }, ['เตรียม + แนบไฟล์', 'อ่านข้อความ 3 หน้าแรก (PDF/OCR)', 'จัดข้อมูลลงแบบฟอร์ม'].map((l) => h('li', null, l)));
   const scanBtns = h('div', { class: 'sar-scan-more' }, bullets);
   scanCard.append(drop, scanSteps, status, scanBtns, camIn);
   function markScan(i) { [...scanSteps.children].forEach((li, j) => { li.classList.toggle('done', j < i); li.classList.toggle('now', j === i); }); }
@@ -195,30 +283,41 @@ export function receiveView(root, X, pre = {}) {
     if (img) previewUrl = URL.createObjectURL(img);
     preview.replaceChildren(previewUrl ? h('img', { src: previewUrl, alt: 'ตัวอย่างหน้าแรกของหนังสือ', class: 'sar-preview-img' }) : svgIcon(ICONS.file, 40), h('div', { class: 'muted sar-sub' }, pdf ? `${pdf.name} · ${(pdf.size / 1048576).toFixed(2)} MB${files.length > 1 ? ` · ${files.length} หน้า` : ''}` : ''));
   }
-  async function pickFiles(list) {
-    const files = [...(list || [])].filter(Boolean); if (!files.length) return;
+  /** @param {File[]|FileList} list @param {{fromQueue?:boolean}} [o] fromQueue: the file is the queue item's own copy (the backend attaches it already, so it is only read) */
+  async function pickFiles(list, o = {}) {
+    const files = [...(list || [])].filter(Boolean); if (!files.length || busy) return;
+    const sp = splitDrop(files); const from = o.fromQueue ? 'queue' : '';
+    if (sp.rejected.length) toast(`แนบ ${sp.rejected.map((f) => `“${f.name}”`).slice(0, 2).join(', ')}${sp.rejected.length > 2 ? ` และอีก ${sp.rejected.length - 2} ไฟล์` : ''} ไม่ได้ — รองรับ PDF รูป JPG/PNG/WebP และไฟล์ Word/Excel/PowerPoint`, 'error', 7000);
+    if (!sp.main) {                                                   // nothing to read: the files are attached and the clerk types the data
+      const n = addExtras(sp.extras, { from });
+      if (n) { toast(`แนบไฟล์แล้ว ${n} ไฟล์ — ไฟล์ Word/Excel อ่านข้อมูลอัตโนมัติไม่ได้ กรุณากรอกข้อมูลเอง`, 'success', 6000); if (step === 'import') manual(); }
+      return;
+    }
     const run = ++scanRun; scanSteps.hidden = false; drop.hidden = true; scanBtns.hidden = true; markScan(0); status.textContent = 'กำลังเตรียมไฟล์…'; setStep('read');
     let found = {}; let note = '';
     try {
-      pdf = await toPdfFile(files); if (run !== scanRun) return;
-      fileLine.replaceChildren(svgIcon(ICONS.file, 18), `${pdf.name} · ${(pdf.size / 1048576).toFixed(2)} MB`); setPreview(files);
-      if (pdf.size > 10 * 1024 * 1024) throw Object.assign(new Error('ไฟล์ใหญ่เกิน 10 MB — ลดขนาดด้วยเครื่องมือ “ย่อไฟล์” ก่อน'), { fatal: true });
-      markScan(1); status.textContent = 'กำลังอ่านข้อมูลจากหนังสือ (ในเครื่อง ไม่ส่งออกอินเทอร์เน็ต)…';
-      const t = await readLetter(pdf, files, (s) => { if (run === scanRun) status.textContent = s; }); if (run !== scanRun) return;
-      markScan(2); const r = parseLetter(t);
+      const built = await toPdfFile(sp.main); if (run !== scanRun) return;
+      pdf = built;
+      const old = atts.find((a) => a.kind === 'main');               // a new letter file replaces the previous one (its upload is discarded; a queue item's own copy stays attached)
+      if (old) { if (old.from === 'queue') old.kind = 'extra'; else { atts.splice(atts.indexOf(old), 1); old.removed = true; if (old.ref) discard(old.ref.id); } }
+      addAtt(pdf, 'main', { from }); addExtras(sp.extras, { from });   // attached NOW, while the page is still being read
+      fileLine.replaceChildren(svgIcon(ICONS.file, 18), `${pdf.name} · ${mbText(pdf.size)}`); setPreview(sp.main);
+      markScan(1); status.textContent = `กำลังอ่านข้อมูลจาก ${READ_MAX_PAGES} หน้าแรกของหนังสือ (ในเครื่อง ไม่ส่งออกอินเทอร์เน็ต)…`;
+      const rd = await readLetter(pdf, sp.main, (s2) => { if (run === scanRun) status.textContent = s2; }); if (run !== scanRun) return;
+      markScan(2); const r = parseLetter(rd.text);
       const set = (k, v) => { if (v && (!F[k].value.trim() || !touched.has(k))) F[k].value = v; };    // a re-scan never overwrites what the clerk typed
       ['docNo', 'docDate', 'subject', 'party', 'salut', 'refs', 'encl', 'due'].forEach((k) => set(k, r[k]));
       if (!r.due && r.dueDays) set('due', addDays(today, r.dueDays));
       if (r.urgency !== 'normal') F.urgency.value = r.urgency; if (r.secrecy !== 'normal') F.secrecy.value = r.secrecy;
       found = r.found; autoMark(found); const n = Object.keys(found).length;
-      note = n ? 'ตรวจทานช่องที่ไฮไลต์สีให้ถูกต้อง แก้ไขได้ทุกช่องก่อนกดยืนยัน' : 'อ่านข้อความจากไฟล์ไม่ได้ (อาจเป็นภาพไม่ชัด) — กรอกข้อมูลเองได้';
+      const pageNote = rd.pages > READ_MAX_PAGES ? `อ่านจาก ${READ_MAX_PAGES} หน้าแรก (ไฟล์มี ${rd.pages} หน้า — แนบครบทุกหน้า) · ` : '';
+      note = n ? `${pageNote}ตรวจทานช่องที่ไฮไลต์สีให้ถูกต้อง แก้ไขได้ทุกช่องก่อนกดยืนยัน` : `${pageNote}อ่านข้อความจากไฟล์ไม่ได้ (อาจเป็นภาพไม่ชัด) — กรอกข้อมูลเองได้ ไฟล์ยังแนบอยู่ตามปกติ`;
       if (r.secrecy !== 'normal') toast('พบคำว่าชั้นความลับในหนังสือ — ตรวจสอบและให้เจ้าหน้าที่ที่ได้รับอนุญาตลงรับ', 'error', 6000);
       dupCheck.flush();
     } catch (e) {
       if (run !== scanRun) return;
-      if (e && e.fatal) { pdf = null; fileLine.replaceChildren(); preview.replaceChildren(); }
-      if (!pdf) { drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = `${errText(e)}`; return; }
-      note = `${errText(e)} — กรอกข้อมูลเองได้`;
+      if (!pdf) { drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = `${errText(e)}`; setStep('import'); return; }
+      note = `${errText(e)} — กรอกข้อมูลเองได้ ไฟล์ยังแนบอยู่ตามปกติ`;           // reading failed, the attachment did not
     }
     status.textContent = ''; scanSteps.hidden = true; drop.hidden = false; scanBtns.hidden = false; paintFound(found, note); setStep('dup');
     checkCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -231,7 +330,7 @@ export function receiveView(root, X, pre = {}) {
     try {
       const r = await X.call('queuefile', { inboxId }, 60000);
       const bin = atob(r.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i += 1) u8[i] = bin.charCodeAt(i);
-      await pickFiles([new File([u8], r.name || 'queue.pdf', { type: r.mime })]);
+      await pickFiles([new File([u8], r.name || 'queue.pdf', { type: r.mime })], { fromQueue: true });
     } catch (e) {
       status.textContent = ''; scanSteps.hidden = true; paintFound({}, `${errText(e)} — ตรวจข้อมูลจากคิวและแก้ไขได้ หรืออัปโหลดไฟล์เอง`); setStep('dup');
     }
@@ -258,7 +357,7 @@ export function receiveView(root, X, pre = {}) {
   ['subject', 'docNo', 'party'].forEach((k) => F[k].addEventListener('input', dupCheck));
   F.docNo.value = pre.docNo || ''; F.subject.value = pre.subject || ''; F.party.value = pre.party || ''; F.docDate.value = pre.docDate || ''; touched.clear();
 
-  const prog = progressPanel(['อัปโหลดไฟล์ต้นฉบับ', 'ออกเลขรับ', 'ประทับตราและแนบ']); const status2 = prog.detail;
+  const prog = progressPanel(['ตรวจไฟล์แนบ', 'ออกเลขรับ', 'ประทับตราและแนบ']); const status2 = prog.detail;
   const submit = h('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: () => go(false) }, svgIcon(ICONS.check, 20), 'ยืนยันข้อมูลและออกเลขรับ');
   async function go(dupOk) {
     if (busy) return;
@@ -266,14 +365,17 @@ export function receiveView(root, X, pre = {}) {
     if (!v('subject')) { F.subject.focus(); toast('กรุณาระบุเรื่อง', 'info'); return; }
     if (!v('party')) { F.party.focus(); toast('กรุณาระบุผู้ส่ง (จาก)', 'info'); return; }
     if (v('secrecy') !== 'normal' && !X.cfg.me.clear) { toast('หนังสือชั้นความลับต้องลงรับโดยเจ้าหน้าที่ที่ได้รับอนุญาตเท่านั้น', 'error', 6000); return; }
-    busy = true; submit.disabled = true; submit.classList.add('is-loading'); setStep('number'); prog.show(pdf && !pre._sent ? 0 : 1, 'กำลังบันทึก…'); drop.classList.add('is-busy');
+    if (atts.some((a) => a.state === 'err')) { toast('มีไฟล์แนบที่แนบไม่สำเร็จ — กด “ลองใหม่” หรือ “เอาออก” ที่รายการไฟล์แนบก่อน', 'error', 7000); attCard.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    busy = true; submit.disabled = true; submit.classList.add('is-loading'); setStep('number'); prog.show(0, attBusy() ? 'กำลังแนบไฟล์ให้เสร็จ…' : 'ไฟล์แนบเรียบร้อย'); drop.classList.add('is-busy'); paintAtt();
     try {
-      const files = []; if (pdf && !pre._sent) { prog.show(0, `กำลังอัปโหลดไฟล์ (${(pdf.size / 1048576).toFixed(2)} MB)…`); const f = await upload(X, pdf, { kind: 'in' }, (n, t) => prog.note(`⚠️ เครือข่ายสะดุด — กำลังส่งไฟล์ใหม่ (ครั้งที่ ${n}/${t})…`)); files.push({ id: f.id }); pre._sent = files; } else if (pre._sent) files.push(...pre._sent);
+      await chain;                                                     // every file is attached before a number is issued
+      const bad = atts.find((a) => a.state !== 'done'); if (bad) throw Object.assign(new Error(`แนบไฟล์ “${bad.name}” ไม่สำเร็จ${bad.err ? ` — ${bad.err}` : ''} · กด “ลองใหม่” หรือ “เอาออก”`), { code: 'ATTACH' });
+      const files = atts.filter((a) => a.ref && a.from !== 'queue').map((a) => ({ id: a.ref.id }));
       prog.show(1, 'กำลังออกเลขรับ…');
       const body = { rid, dupOk, inboxId, files, route: { mode: 'none' }, ...Object.fromEntries(Object.keys(F).map((k) => [k, v(k)])) };
       const r = await X.call('receive', body, 40000);
       if (r.needsConfirm) {
-        busy = false; submit.disabled = false; submit.classList.remove('is-loading'); prog.hide(); drop.classList.remove('is-busy'); setStep('dup');
+        busy = false; submit.disabled = false; submit.classList.remove('is-loading'); prog.hide(); drop.classList.remove('is-busy'); setStep('dup'); paintAtt();
         let m = null;
         m = modal('พบหนังสือที่เหมือนกัน', [h('p', null, 'ระบบพบหนังสือเลขที่/เรื่อง/ผู้ส่งเดียวกันที่ลงรับหรืออยู่ในคิวแล้ว:'), h('ul', null, r.dups.map((d) => h('li', null, `${d.reg ? `เลขรับ ${d.reg}` : 'อยู่ในคิว'} — ${d.docNo || '-'} · ${d.subject}`))), h('p', { class: 'muted' }, 'ถ้าเป็นฉบับเดียวกัน ไม่ควรลงรับซ้ำ — เลขรับจะถูกใช้ไปและยกเลิกได้เฉพาะพร้อมเหตุผล')],
           [h('button', { class: 'btn btn-danger', type: 'button', onclick: () => { m.close(); go(true); } }, 'ลงรับซ้ำจริง ๆ'), h('button', { class: 'btn btn-primary', type: 'button', onclick: () => m.close() }, 'ยกเลิก ไม่ลงรับ')]);
@@ -281,7 +383,7 @@ export function receiveView(root, X, pre = {}) {
       }
       await done(r);
     } catch (e) {
-      busy = false; submit.disabled = false; submit.classList.remove('is-loading'); prog.hide(); drop.classList.remove('is-busy'); setStep('dup');
+      busy = false; submit.disabled = false; submit.classList.remove('is-loading'); prog.hide(); drop.classList.remove('is-busy'); setStep('dup'); paintAtt();
       if (e && (e.code === 'NETWORK' || e.code === 'TIMEOUT' || e.code === 'BAD_RESPONSE')) toast('ไม่แน่ใจว่าบันทึกสำเร็จหรือไม่ — กด “ยืนยัน” อีกครั้งได้เลย ระบบจะไม่ออกเลขซ้ำ', 'error', 8000);
       else toast(errText(e), 'error', 7000);
     }
@@ -289,16 +391,25 @@ export function receiveView(root, X, pre = {}) {
 
   /* ---- steps 3 + 4: number issued → stamp → forward ---- */
   async function done(r) {
-    const d = r.doc; let stampBlob = null; let stampMsg = '';
-    if (pdf && !r.replay) {
-      try { prog.show(2, 'กำลังประทับตรารับและแนบไฟล์…'); stampBlob = await stampReceive(pdf, r.stamp); const f = new File([stampBlob], `${d.reg.replace('/', '-')}_ประทับตรารับ.pdf`, { type: 'application/pdf' }); await upload(X, f, { kind: 'in', docId: d.id, label: 'ฉบับประทับตรารับ' }); stampMsg = 'แนบฉบับประทับตรารับในทะเบียนแล้ว'; } catch (e) { stampMsg = `ประทับตราไม่สำเร็จ: ${errText(e)} (ลงรับเรียบร้อยแล้ว — แนบไฟล์ได้ที่หน้ารายละเอียด)`; }
+    registered = true;                                                  // the files now belong to a letter: nothing is discarded any more
+    const d = r.doc; let stampBlob = null; let stampMsg = ''; let stampRetry = false;
+    const stampName = `${d.reg.replace('/', '-')}_ประทับตรารับ.pdf`;
+    const mainAtt = atts.find((a) => a.kind === 'main'); const src = mainAtt ? mainAtt.file : pdf;   // stamp the copy that is stored (≤ 10 MB), not the oversized original
+    const attachStamp = () => upload(X, new File([stampBlob], stampName, { type: 'application/pdf' }), { kind: 'in', docId: d.id, label: 'ฉบับประทับตรารับ' });
+    if (src && !r.replay) {
+      try { prog.show(2, 'กำลังประทับตรารับและแนบไฟล์…'); stampBlob = await stampReceive(src, r.stamp); await attachStamp(); stampMsg = 'แนบฉบับประทับตรารับในทะเบียนแล้ว'; } catch (e) { stampRetry = !!stampBlob; stampMsg = `ประทับตราไม่สำเร็จ: ${errText(e)} (ลงรับเรียบร้อยแล้ว${stampRetry ? ' — กด “ลองแนบฉบับประทับตราอีกครั้ง”' : ' — แนบไฟล์ได้ที่หน้ารายละเอียด'})`; }
     }
     prog.hide(); drop.classList.remove('is-busy'); checkCard.hidden = true;
+    const stampLine = h('p', { class: 'muted' }, stampMsg);
+    const retryBtn = stampRetry ? h('button', { class: 'btn', type: 'button', onclick: async () => { retryBtn.disabled = true; try { await attachStamp(); stampLine.textContent = 'แนบฉบับประทับตรารับในทะเบียนแล้ว'; retryBtn.remove(); } catch (e) { retryBtn.disabled = false; toast(errText(e), 'error', 7000); } } }, 'ลองแนบฉบับประทับตราอีกครั้ง') : null;
+    const nFiles = atts.filter((a) => a.state === 'done').length;
     resultCard.replaceChildren(h('div', { class: 'card sar-done' }, h('div', { class: 'sar-bignum' }, h('span', { class: 'muted' }, r.replay ? 'ลงรับไว้แล้ว (ไม่ออกเลขซ้ำ)' : 'ลงรับสำเร็จ — เลขรับ'), h('strong', null, d.reg)),
       h('p', null, `${r.stamp.registry} · ${r.stamp.date} เวลา ${r.stamp.time}`), h('p', { class: 'muted' }, `รหัสตรวจสอบ ${r.verify} (ใช้ค้นหาในหน้า “ติดตาม”)`),
+      nFiles ? h('p', { class: 'muted' }, `แนบไฟล์ในทะเบียนแล้ว ${nFiles} ไฟล์${stampMsg.startsWith('แนบฉบับ') ? ' + ฉบับประทับตรารับ' : ''}`) : null,
       ...(r.warnings || []).map((w) => notice('warn', 'ข้อควรตรวจสอบ', w)), r.jumped ? notice('warn', 'เลขรับข้ามลำดับ', 'เลขที่ระบุข้ามจากเลขล่าสุด — ดูช่องว่างได้ที่หน้า “เลขทะเบียน”') : null,
-      stampMsg ? h('p', { class: 'muted' }, stampMsg) : null,
-      stampBlob ? h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => download(stampBlob, `${d.reg.replace('/', '-')}_ประทับตรารับ.pdf`) }, svgIcon(ICONS.download, 18), 'ดาวน์โหลดไฟล์ที่ประทับตรา')) : null));
+      stampMsg ? stampLine : null,
+      stampBlob || retryBtn ? h('div', { class: 'btn-row' }, stampBlob ? h('button', { class: 'btn', type: 'button', onclick: () => download(stampBlob, stampName) }, svgIcon(ICONS.download, 18), 'ดาวน์โหลดไฟล์ที่ประทับตรา') : null, retryBtn) : null));
+    attCard.hidden = true;
     fwdCard.replaceChildren(forwardPanel(d, stampBlob)); setStep('forward');
     resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -323,9 +434,12 @@ export function receiveView(root, X, pre = {}) {
     return panel;
   }
 
-  checkCard.append(h('div', { class: 'sar-check-top' }, h('div', { class: 'sar-check-file' }, preview, fileLine, h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { scanRun += 1; drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = ''; setStep('import'); } }, pdf ? 'เปลี่ยนไฟล์ / สแกนใหม่' : 'อัปโหลดไฟล์'))), foundBox), dupBox, grid,
-    h('div', { class: 'btn-row sar-submit' }, submit, h('button', { class: 'btn', type: 'button', onclick: () => X.refresh('receive') }, 'ล้างแบบฟอร์ม')), prog.root);
-  root.append(privacyNotice({ detail: 'หนังสือราชการอาจมีชื่อ-ข้อมูลผู้ป่วย ไฟล์ที่ลงรับจะเก็บใน Google Drive ของหน่วยงานในโฟลเดอร์ _saraban เฉพาะเจ้าหน้าที่ที่ได้รับสิทธิ์ — การอ่านข้อความด้วย OCR ทำบนเครื่องของคุณ ไม่ส่งออกอินเทอร์เน็ต' }), stepper, scanCard, checkCard, resultCard, fwdCard);
+  /** Start over: files already uploaded for this unregistered letter are removed from Drive first (a registered letter keeps its files). */
+  function clearForm() { if (busy) return; if (!registered) atts.forEach((a) => { a.removed = true; if (a.ref && a.from !== 'queue') discard(a.ref.id); }); X.refresh('receive'); }
+  checkCard.append(h('div', { class: 'sar-check-top' }, h('div', { class: 'sar-check-file' }, preview, fileLine, h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { scanRun += 1; drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = ''; setStep('import'); } }, 'เปลี่ยนไฟล์หนังสือ / สแกนใหม่'))), foundBox), dupBox, grid,
+    h('div', { class: 'btn-row sar-submit' }, submit, h('button', { class: 'btn', type: 'button', onclick: clearForm }, 'ล้างแบบฟอร์ม')), prog.root);
+  root.append(privacyNotice({ detail: 'หนังสือราชการอาจมีชื่อ-ข้อมูลผู้ป่วย ไฟล์ที่วางจะถูกแนบเข้า Google Drive ของหน่วยงาน (โฟลเดอร์ _saraban) เฉพาะเจ้าหน้าที่ที่ได้รับสิทธิ์ — การอ่านข้อความด้วย OCR ทำบนเครื่องของคุณ ไม่ส่งออกอินเทอร์เน็ต' }), stepper, scanCard, attCard, checkCard, resultCard, fwdCard);
+  paintAtt();
   if (pre.inboxId) {
     checkCard.prepend(notice('info', 'ลงรับจากคิว', 'ระบบดึงไฟล์จากคิวมาอ่านให้อัตโนมัติ — ตรวจทานและแก้ไขได้ทุกช่องก่อนกดยืนยัน'));
     setTimeout(() => dupCheck.flush(), 50);

@@ -178,6 +178,44 @@ export function thaiDateLong(iso) {
 export function ageLabel(n) { n = Number(n); if (!Number.isFinite(n) || n < 0) return ''; return n === 0 ? 'วันนี้' : n === 1 ? 'เมื่อวาน' : `${n} วันก่อน`; }
 export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+/* ------------------------------ v1.15: reading + attaching the letter's file ------------------------------ */
+
+/** Only the first pages of a letter are read: เลขที่ · ลงวันที่ · เรื่อง · เรียน are all on page 1 (a long letter has 20+ pages — reading them all only costs minutes). */
+export const READ_MAX_PAGES = 3;
+/** Files kept with one letter (the backend keeps 12 per letter; two places are left for the receive stamp copy and one later attachment). */
+export const ATT_MAX = 10;
+/** Biggest file the backend stores (SAR_FILE_MAX = 10 MB); the page aims a little below it so base64 + headers still fit. */
+export const ATT_LIMIT = 10 * 1024 * 1024;
+export const ATT_TARGET = Math.floor(9.5 * 1024 * 1024);
+
+/** 'pdf' | 'image' | 'office' | '' (not storable). Mirrors what the backend accepts (sarMagicOk): PDF, JPG/PNG/WebP, docx/xlsx/pptx. */
+export function attachKind(f) {
+  const n = String((f && f.name) || '').toLowerCase(); const t = String((f && f.type) || '').toLowerCase();
+  if (!f || !(f.size > 0)) return '';
+  if (/\.pdf$/.test(n) || t === 'application/pdf') return 'pdf';
+  if (/\.(jpe?g|png|webp)$/.test(n) || /^image\/(jpeg|png|webp)$/.test(t)) return 'image';
+  if (/\.(docx|xlsx|pptx)$/.test(n)) return 'office';
+  return '';
+}
+/**
+ * Sort what the clerk dropped: ONE letter file is read (a PDF, or several photos = its pages), everything is attached.
+ *   a PDF present → the first PDF is the letter; other PDFs / photos / Office files are extra attachments
+ *   photos only   → the photos are the pages of one letter (Office files are extras)
+ *   neither       → nothing to read; the files are attached and the clerk types the data
+ * @returns {{main: any[]|null, extras: any[], rejected: any[]}}
+ */
+export function splitDrop(files) {
+  const pdfs = [], imgs = [], offs = [], rejected = [];
+  [...(files || [])].filter(Boolean).forEach((f) => { const k = attachKind(f); if (k === 'pdf') pdfs.push(f); else if (k === 'image') imgs.push(f); else if (k === 'office') offs.push(f); else rejected.push(f); });
+  if (pdfs.length) return { main: [pdfs[0]], extras: [...pdfs.slice(1), ...imgs, ...offs], rejected };
+  if (imgs.length) return { main: imgs, extras: offs, rejected };
+  return { main: null, extras: offs, rejected };
+}
+/** Enough read to stop OCR early: เลขที่ + เรื่อง + เรียน are all found (they sit on page 1, so pages 2–3 are only read when page 1 fell short). */
+export function readEnough(text) {
+  try { const r = parseLetter(text); return !!(r.found.subject && r.found.docNo && r.found.salut); } catch { return false; }
+}
+
 /** The four steps a received letter walks through (the progress bar on the tracking page). */
 export const STAGE_STEPS = [['registered', 'ลงรับ'], ['routed', 'ส่งต่อ'], ['inprogress', 'ดำเนินการ'], ['done', 'เสร็จสิ้น']];
 /** Index (0-3) of the step a letter has reached; returned letters wait at 0; void/unknown → -1. */

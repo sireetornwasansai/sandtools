@@ -268,6 +268,33 @@ test('upload: only real documents; attach to a letter; attachments must come fro
   assert.equal(up2.attached, r.doc.id); assert.equal(c('get', { id: r.doc.id }).doc.files.length, 2);
 });
 
+test('discard (v1.15): an unregistered upload can be binned — only the uploader\'s own, only if no letter links to it', () => {
+  const e = env(); units(e); const c = e.as(clerk); const trashed = [];
+  e.ctx.DriveApp = { getFileById: (id) => ({ setTrashed: (t) => { if (t) trashed.push(id); } }) };
+  const pdf = Buffer.from('%PDF-1.4 test').toString('base64');
+  const mine = c('upload', { name: 'a.pdf', data: pdf, kind: 'in' }).file, other = e.as(admin)('upload', { name: 'b.pdf', data: pdf, kind: 'in' }).file;
+  assert.throws(() => e.as(nobody)('discard', { id: mine.id }), /เฉพาะเจ้าหน้าที่/);
+  assert.throws(() => c('discard', { id: 'x' }), /รหัสไฟล์ไม่ถูกต้อง/);
+  assert.throws(() => c('discard', { id: other.id }), /เฉพาะไฟล์ที่คุณอัปโหลดเอง/);
+  const linked = c('upload', { name: 'c.pdf', data: pdf, kind: 'in' }).file;
+  c('receive', F({ docNo: 'D-1', subject: 'หนังสือที่แนบไฟล์', files: [{ id: linked.id }] }));
+  assert.throws(() => c('discard', { id: linked.id }), /แนบกับหนังสือในทะเบียนแล้ว/);
+  assert.equal(trashed.length, 0);
+  assert.equal(c('discard', { id: mine.id }).ok, true); assert.deepEqual([...trashed], [mine.id]);
+  const gone = c('discard', { id: 'F0000000000000000' }); assert.equal(gone.ok, true); assert.equal(gone.gone, true);
+});
+
+test('upload (v1.15): Office files are stored with their real type; a plain ZIP is not accepted', () => {
+  const e = env(); units(e); const c = e.as(clerk); const saved = []; const orig = e.ctx.sarSave;
+  e.ctx.sarSave = (k, n, b, m, em) => { saved.push(m); return orig(k, n, b, m, em); };
+  const zip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4]).toString('base64');
+  c('upload', { name: 'a.docx', data: zip }); c('upload', { name: 'b.XLSX', data: zip }); c('upload', { name: 'c.pptx', data: zip });
+  assert.deepEqual([...saved], ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation']);
+  assert.throws(() => c('upload', { name: 'a.zip', data: zip }), /ZIP/);
+  assert.throws(() => c('upload', { name: 'noext', data: zip }), /ZIP/);
+  assert.equal(saved.length, 3);
+});
+
 test('Inbox integration: one counter for both pages; a queue item cannot be registered twice', () => {
   const e = env({ INBOX_STAFF_EMAILS: 'clerk@x.go.th' }); units(e); const c = e.as(clerk);
   const upd = (mid, text) => ({ chat: { id: -1001, title: 'กลุ่มงานธุรการ' }, mid, date: 1760400000, text, urls: [], doc: null });

@@ -241,3 +241,17 @@ div.sar-drop { display: flex; } div.sar-drop:focus-visible { outline: 0; box-sha
 .sar-up .sar-scan-steps { margin: .7rem 0 .2rem; } .sar-up-slow { margin: .5rem 0 0; }
 .sar-dz.is-busy { opacity: .55; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .sar-up { animation: none; } }
+
+/* v1.15 — attachment list of the receive screen: every file is attached the moment it is dropped */
+.sar-att[hidden] { display: none; }
+.sar-att-list { list-style: none; margin: .6rem 0; padding: 0; display: grid; gap: .5rem; }
+.sar-att-row { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .8rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.sar-att-row.st-done { border-color: var(--success); background: var(--success-bg); }
+.sar-att-row.st-err { border-color: var(--error); background: var(--error-bg); }
+.sar-att-row.st-wait, .sar-att-row.st-prep, .sar-att-row.st-up { border-color: var(--primary); background: var(--primary-soft); }
+.sar-att-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sar-att-st { display: flex; align-items: center; gap: .4rem; margin-top: .2rem; font-size: .88rem; color: var(--text-2); }
+.sar-att-st.done { color: var(--success); font-weight: 600; } .sar-att-st.err { color: var(--error); font-weight: 600; }
+.sar-att-act { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }
+.btn.is-disabled { opacity: .5; pointer-events: none; }
+@media (max-width: 640px) { .sar-att-row { flex-wrap: wrap; } .sar-att-act { width: 100%; justify-content: flex-start; } }

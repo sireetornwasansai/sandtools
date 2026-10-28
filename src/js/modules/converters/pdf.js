@@ -54,7 +54,8 @@ const BULLET = /^[•●▪◦‣∙·\uF0B7\uF0A7\uF0D8\uF076–-]\s*/;
  * unless `opts.ocr === false`.
  * @param {ArrayBuffer} buf
  * `opts.tables` (Word/Excel output) rebuilds text pages from the positioned text: tables become Markdown tables, big text becomes headings.
- * @param {{tables?:boolean,deadline?:any,onProgress?:(f:number)=>void,onStage?:(s:string)=>void,onStatus?:(s:string)=>void,signal?:AbortSignal,ocr?:boolean,ocrTimeoutMs?:number}} [opts]
+ * `opts.maxPages` reads only the first N pages · `opts.enough(text)` lets OCR stop early once the text read so far is enough (see ocr.js).
+ * @param {{tables?:boolean,deadline?:any,onProgress?:(f:number)=>void,onStage?:(s:string)=>void,onStatus?:(s:string)=>void,signal?:AbortSignal,ocr?:boolean,ocrTimeoutMs?:number,maxPages?:number,enough?:(text:string)=>boolean}} [opts]
  */
 export async function convertPdf(buf, opts = {}) {
   const pdfjs = await getPdfjs();
@@ -75,8 +76,10 @@ export async function convertPdf(buf, opts = {}) {
       });
       pdf = th.pdf; if (th.warning) warnings.push(th.warning);
     } catch { /* the repair is best-effort */ }
-    const total = Math.min(pdf.numPages, LIMITS.maxPdfPages);
-    if (pdf.numPages > total) warnings.push(`PDF มี ${pdf.numPages} หน้า แปลงเฉพาะ ${total} หน้าแรก`);
+    // opts.maxPages: the caller only needs the start of the file (สารบรรณ reads the first 3 pages of a letter) — nothing beyond it is extracted or OCR-ed
+    const cap = opts.maxPages > 0 ? Math.min(LIMITS.maxPdfPages, Math.floor(opts.maxPages)) : LIMITS.maxPdfPages;
+    const total = Math.min(pdf.numPages, cap);
+    if (pdf.numPages > total && !(opts.maxPages > 0)) warnings.push(`PDF มี ${pdf.numPages} หน้า แปลงเฉพาะ ${total} หน้าแรก`);
     const pages = [];
     /** @type {Array<{width:number,words:any[]}>} */ const wordsByPage = [];
     const sizeChars = new Map();

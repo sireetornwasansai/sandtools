@@ -147,18 +147,26 @@ export async function ocrImageBlob(blob, opts = {}) {
   } finally { if (own) await engine.terminate(); }
 }
 
+/** True when OCR may stop after page n+1 of `total`: more pages are waiting and the caller's enough(textSoFar) says what was read already has everything it needs. */
+export function ocrEnough(opts, chunks, n, total) {
+  if (!opts || typeof opts.enough !== 'function' || n + 1 >= total) return false;
+  try { return !!opts.enough([...chunks.values()].join('\n\n')); } catch { return false; }
+}
+
 /**
  * OCR the given pages of an open PDF.js document.
  * @param {any} pdf PDF.js document
  * @param {number[]} indexes zero-based page indexes to read
- * @param {{signal?:AbortSignal,onStage?:Function,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocrTimeoutMs?:number}} opts
+ * @param {{signal?:AbortSignal,onStage?:Function,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocrTimeoutMs?:number,maxPages?:number,enough?:(text:string)=>boolean}} opts
+ *   maxPages — read at most this many of the given pages · enough(textSoFar) — return true to stop after the current page
  * @param {string[]} warnings pushed to
  * @param {Map<number,{words:any[],width:number,height:number}>} [wordsOut] when given, the recognised words (pixel boxes) of every page are stored here too — the Word layout writer needs positions, not just text
  * @returns {Promise<Map<number,string>>} page index → Markdown ('' when the page has no readable text)
  */
 export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
-  const todo = indexes.slice(0, OCR_MAX_PAGES);
-  if (indexes.length > todo.length) warnings.push(`OCR อ่านได้สูงสุด ${OCR_MAX_PAGES} หน้าต่อไฟล์ — ข้ามหน้าที่เหลืออีก ${indexes.length - todo.length} หน้า`);
+  const cap = opts.maxPages > 0 ? Math.min(OCR_MAX_PAGES, Math.floor(opts.maxPages)) : OCR_MAX_PAGES;
+  const todo = indexes.slice(0, cap);
+  if (indexes.length > todo.length && !(opts.maxPages > 0)) warnings.push(`OCR อ่านได้สูงสุด ${OCR_MAX_PAGES} หน้าต่อไฟล์ — ข้ามหน้าที่เหลืออีก ${indexes.length - todo.length} หน้า`);
   if (opts.onStage) opts.onStage('ocr');
   if (opts.onProgress) opts.onProgress(0);
   const engine = await createOcrEngine({ signal: opts.signal, onStatus: opts.onStatus });
@@ -179,6 +187,7 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
       chunks.set(todo[n], r.markdown);
       if (r.markdown && r.words) conf.push(r.confidence);
       if (opts.onProgress) opts.onProgress((n + 1) / todo.length);
+      if (ocrEnough(opts, chunks, n, todo.length)) break;                   // the fields we came for are already read
     }
   } finally { await engine.terminate(); }
   if (conf.length) {

@@ -32,6 +32,19 @@ export async function openDoc(file, name = file && file.name) {
   }
 }
 export async function pageCount(file) { return (await openDoc(file)).getPageCount(); }
+/**
+ * The first `n` pages as a small PDF of their own — a 24-page scan becomes a 3-page file, so reading it (text layer / OCR) never touches the other pages.
+ * A file that already has ≤ n pages is returned as is. Throws PdfError (ENCRYPTED / CORRUPT) like openDoc — callers fall back to the whole file.
+ */
+export async function firstPages(file, n) {
+  const lib = await getPdfLib(); const src = await openDoc(file); const total = src.getPageCount();
+  if (total <= n) return { file, total, trimmed: false };
+  const out = await lib.PDFDocument.create();
+  const pages = await out.copyPages(src, Array.from({ length: n }, (_, i) => i));
+  pages.forEach((p) => out.addPage(p));
+  const bytes = await out.save({ useObjectStreams: false });
+  return { file: new File([bytes], (file && file.name) || 'letter.pdf', { type: 'application/pdf' }), total, trimmed: true };
+}
 
 /* ------------------------------ page ranges ------------------------------ */
 

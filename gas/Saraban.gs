@@ -7,7 +7,7 @@
  *
  *   POST {action:"saraban", session, op: ...}
  *     everyone signed in : config | dash | analytics (staff/exec) | my | get | ack | assign | done | return        (only what concerns their unit)
- *     clerks (staff)     : queue | reject | dup | upload | receive | send | reserve | cancelno | route | update | note |
+ *     clerks (staff)     : queue | reject | dup | upload | discard | receive | send | reserve | cancelno | route | update | note |
  *                          list | rows | track | numbers | parties
  *     admins             : units | unitsave | unitdel   (units list is readable by every signed-in user, without e-mails)
  *
@@ -489,6 +489,12 @@ function sarUpload(sc, b) {
   var mime = sarMagicOk(bytes);
   if (!mime) throw httpError('BAD_FILE', 'รองรับเฉพาะ PDF รูปภาพ (JPG/PNG/WebP) และไฟล์ Office (docx/xlsx/pptx)');
   var name = String(b.name || 'file').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+/, '').slice(0, 120) || 'file';
+  if (mime === 'application/zip') {   // docx / xlsx / pptx are ZIP containers: store them with their real type so Drive can preview them; any other ZIP is refused
+    var ext = (/\.([A-Za-z0-9]{1,5})$/.exec(name) || [])[1];
+    var office = { docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }[String(ext || '').toLowerCase()];
+    if (!office) throw httpError('BAD_FILE', 'ไฟล์ ZIP ไม่รองรับ — แนบได้เฉพาะ PDF รูปภาพ และไฟล์ Office (docx/xlsx/pptx)');
+    mime = office;
+  }
   var kind = b.kind === 'out' ? 'out' : 'in', file = sarSave(kind, name, bytes, mime, sc.email);
   var res = { file: { id: file.id, url: file.url, name: file.name, size: bytes.length } }, grants = [{ url: file.url, emails: sarStaffEmails() }];
   if (b.docId) {                                                  // attach to a registered letter (e.g. the copy carrying the receive stamp)
@@ -506,6 +512,27 @@ function sarUpload(sc, b) {
   res._grants = grants;
   sarLog(sc.email, 'upload', file.id, { size: bytes.length });
   return sarRunGrants(res);
+}
+
+/**
+ * v1.15 — the page uploads a file the moment the clerk drops it (so it is attached, not just read). When the clerk then removes or replaces it, or starts the form
+ * over, before the letter is registered, the page asks to bin it. Only the uploader's OWN file (Drive description "sar:<email>") that no register row links to
+ * goes to the Drive trash — a file attached to a letter can never be removed this way. A file that is already gone is not an error.
+ */
+function sarDiscard(sc, b) {
+  sarNeedStaff(sc);
+  rateLimit('sardiscard', intProp('SARABAN_UPLOAD_PER_MIN', 40));
+  var id = String(b && b.id || '');
+  if (!/^[-\w]{10,100}$/.test(id)) throw httpError('BAD_REQUEST', 'รหัสไฟล์ไม่ถูกต้อง');
+  var info = sarFileInfo(id);
+  if (!info) return { ok: true, gone: true };
+  if (info.desc !== 'sar:' + sc.email) throw httpError('FORBIDDEN', 'ลบได้เฉพาะไฟล์ที่คุณอัปโหลดเอง');
+  var linked = false;
+  sarAll(sarTab(SAR_TAB)).forEach(function (o) { if (!linked && (o.files || []).some(function (u) { return sarFileId(u) === id; })) linked = true; });
+  if (linked) throw httpError('LOCKED', 'ไฟล์นี้แนบกับหนังสือในทะเบียนแล้ว ลบไม่ได้');
+  try { DriveApp.getFileById(id).setTrashed(true); } catch (x) { return { ok: true, gone: true }; }
+  sarLog(sc.email, 'discard', id, {});
+  return { ok: true };
 }
 
 /* ------------------------------------- receive (ลงรับ) ------------------------------------- */
@@ -1183,6 +1210,7 @@ function sarabanOp(u, op, b) {
     case 'reject':   return sarReject(sc, b);
     case 'dup':      sarNeedStaff(sc); { var f = sarFields(b, 'in'); return { items: sarDupFind(sarAll(sarTab(SAR_TAB)), f, String(b.inboxId || ''), sarInboxRows()).map(function (d) { return sarDupPublic(sc, d); }), suggest: sarSuggestUnits(f.subject, sarUnits(sc)) }; }
     case 'upload':   return sarUpload(sc, b);
+    case 'discard':  return sarDiscard(sc, b);
     case 'receive':  return sarReceive(sc, b);
     case 'send':     return sarSend(sc, b);
     case 'reserve':  return sarReserve(sc, b);

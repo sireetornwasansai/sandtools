@@ -70,7 +70,7 @@ export async function prepareFile(file, opts) {
 /**
  * Convert a File to Markdown entirely in the browser (the "hub" format every other output is built from).
  * @param {File} file
- * @param {{maxBytes:number,timeoutMs:number,onStage?:(s:'reading'|'converting'|'ocr')=>void,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocr?:boolean,ocrTimeoutMs?:number,pdfTables?:boolean}} opts
+ * @param {{maxBytes:number,timeoutMs:number,onStage?:(s:'reading'|'converting'|'ocr')=>void,onProgress?:(f:number)=>void,onStatus?:(s:string)=>void,ocr?:boolean,ocrTimeoutMs?:number,pdfTables?:boolean,maxPages?:number,enough?:(text:string)=>boolean}} opts
  * @returns {Promise<{markdown:string,filename:string,format:string,warnings:string[],ms:number}>}
  */
 export async function convertFile(file, opts) {
@@ -81,7 +81,7 @@ export async function convertFile(file, opts) {
   // OCR (scanned PDFs) is slow, so it gets its own, longer budget; the normal timeout still covers everything that is not OCR.
   const ac = new AbortController();
   const ocrOn = opts.ocr !== false, ocrTimeoutMs = opts.ocrTimeoutMs || 15 * 60 * 1000;
-  const o = { tables: opts.pdfTables === true, deadline, onProgress: opts.onProgress, onStage: opts.onStage, onStatus: opts.onStatus, signal: ac.signal, ocr: ocrOn, ocrTimeoutMs };
+  const o = { tables: opts.pdfTables === true, deadline, onProgress: opts.onProgress, onStage: opts.onStage, onStatus: opts.onStatus, signal: ac.signal, ocr: ocrOn, ocrTimeoutMs, maxPages: opts.maxPages, enough: opts.enough };
   const run = async () => {
     switch (id) {
       case 'pdf': return convertPdf(buf, o);
