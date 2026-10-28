@@ -71,7 +71,13 @@ export async function stampReceive(file, st) {
 
 async function upload(X, file, params) {
   const data = await fileToBase64(file);
-  return (await X.call('upload', { name: file.name, data, ...params }, 120000)).file;
+  // A plain upload only creates a Drive file, so a lost answer may be retried; attaching to a letter (docId) is not repeatable and is sent once.
+  for (let i = 1; ; i += 1) {
+    try { return (await X.call('upload', { name: file.name, data, ...params }, 120000)).file; } catch (e) {
+      const c = e && e.code; if (params.docId || i >= 3 || (c !== 'NETWORK' && c !== 'TIMEOUT' && c !== 'BAD_RESPONSE')) throw e;
+      await new Promise((r) => setTimeout(r, 1200 * i));
+    }
+  }
 }
 function download(blob, name) { const a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000); }
 

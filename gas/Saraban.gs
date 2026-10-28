@@ -448,6 +448,7 @@ function sarFolder(yearBE, kind) {
 }
 function sarSave(kind, name, bytes, mime, email) {
   var yr = sarYearBE(), file = sarFolder(yr, kind).createFile(Utilities.newBlob(bytes, mime, sarNowStamp().slice(8, 10) + '-' + sarNowStamp().slice(11).replace(/:/g, '') + '_' + name));
+  try { if (typeof file.getSize === 'function' && Number(file.getSize()) !== bytes.length) { var got = Number(file.getSize()); try { file.setTrashed(true); } catch (xt) { /* gone */ } throw httpError('UPLOAD_INCOMPLETE', 'ไฟล์ที่บันทึกไม่สมบูรณ์ (' + got + ' จาก ' + bytes.length + ' ไบต์) กรุณาอัปโหลดใหม่อีกครั้ง'); } } catch (xe) { if (xe && xe.code === 'UPLOAD_INCOMPLETE') throw xe; }
   try { file.setDescription('sar:' + email); } catch (x) { /* optional */ }
   return { id: file.getId(), url: file.getUrl(), name: file.getName() };
 }

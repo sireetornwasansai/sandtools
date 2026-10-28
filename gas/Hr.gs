@@ -25,7 +25,7 @@
  * The ops  mobileBoot · line*  at the end of HR_OPS are implemented in HrLine.gs (keep it in the same project).
  */
 
-var HR_VERSION = '1.2.0';
+var HR_VERSION = '1.3.1';
 var HR_T = { CONTROL: 'HR_Control', STAFF: 'Staff', HOLIDAY: 'HolidayOverrides', DLOG: 'DailyLog', PROJ: 'Projects', LUSERS: 'LineUsers', LSCHED: 'LineReportSchedule' };
 var HR_H = {
   CONTROL: ['Timestamp', 'Name', 'Department', 'Type', 'StartDate', 'EndDate', 'StartTime', 'EndTime', 'Note', 'FileURL', 'ID', 'Province', 'Mission', 'Owner'],
@@ -100,6 +100,7 @@ var HR_OPS = {
   deleteProject: { fn: function (sc, a) { return hrProjDelete(sc, a[0]); }, write: true, dev: true },
   // ---- HrLine.gs: the phone page (any signed-in user) and the LINE admin page (HR admins only)
   mobileBoot: { fn: function (sc) { return hrlMobileBoot(sc); } },
+  mobileWho: { fn: function (sc, a) { return hrlMobileWho(a[0]); } },                                                      // one day (phone page, "เลือกวัน")
   lineStatus: { fn: function () { return hrlOpStatus(); }, admin: true },
   lineUsers: { fn: function () { return hrlOpUsers(); }, admin: true },
   lineSetUser: { fn: function (sc, a) { return hrlOpSetUser(a[0], a[1], a[2]); }, write: true, admin: true },
@@ -179,20 +180,34 @@ function hrFindRow(rows, col, id) {
 }
 function hrStr(v, max) { return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, max || 500); }
 function hrPad(n) { return (n < 10 ? '0' : '') + n; }
-/** yyyy-MM-dd of a sheet cell (Date, ISO text, or dd/MM/yyyy with a Buddhist or Christian year). '' when unreadable. */
+/** A person's name as ONE canonical text: no line breaks, no double spaces (a name typed with two spaces used to become a second person). */
+function hrName(v, max) { return String(v == null ? '' : v).replace(/[\u00a0\u200b\s]+/g, ' ').trim().slice(0, max || 100); }
+/** Spreadsheet serial number (days since 1899-12-30) → yyyy-MM-dd. Only plausible dates (1990–2100). */
+function hrSerialDay(n) {
+  if (!(n > 32874 && n < 73415)) return '';
+  var t = new Date(Date.UTC(1899, 11, 30) + Math.floor(n) * 86400000);
+  return t.getUTCFullYear() + '-' + hrPad(t.getUTCMonth() + 1) + '-' + hrPad(t.getUTCDate());
+}
+/** yyyy-MM-dd of a sheet cell: Date, serial number, ISO text, d/M/yyyy, or Date.toString() text — with a Buddhist (พ.ศ.) or Christian year. '' when unreadable. */
 function hrDay(v, tz) {
   if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, tz || 'Asia/Bangkok', 'yyyy-MM-dd');
-  var s = String(v == null ? '' : v).trim(), m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (m) return m[1] + '-' + m[2] + '-' + m[3];
-  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (typeof v === 'number') return hrSerialDay(v);
+  var s = String(v == null ? '' : v).replace(/'/g, '').trim(), m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) { var yi = Number(m[1]); if (yi > 2400) yi -= 543; return yi + '-' + hrPad(Number(m[2])) + '-' + hrPad(Number(m[3])); }
+  m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/.exec(s);
   if (m) { var y = Number(m[3]); if (y > 2400) y -= 543; return y + '-' + hrPad(Number(m[2])) + '-' + hrPad(Number(m[1])); }
+  if (/^\d{5}(\.\d+)?$/.test(s)) return hrSerialDay(Number(s));
+  if (/^[A-Za-z]{3}\s+[A-Za-z]{3}\s+\d{1,2}\s+\d{4}/.test(s)) { var p = new Date(s); if (!isNaN(p.getTime())) return Utilities.formatDate(p, tz || 'Asia/Bangkok', 'yyyy-MM-dd'); }
   return '';
 }
-/** HH:mm of a sheet cell (text such as 08:30 or '08:30, or a time value). '' when empty/unreadable. */
+/** HH:mm of a sheet cell: text such as 8:00 · 08.30 · '09:15, a time value (Date), or a day fraction (0.5 = 12:00). '' when empty/unreadable. */
 function hrTime(v, tz) {
   if (v instanceof Date) return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, tz || 'Asia/Bangkok', 'HH:mm');
-  var m = /(\d{1,2})[:.](\d{2})/.exec(String(v == null ? '' : v).replace(/'/g, ''));
-  return m ? hrPad(Number(m[1])) + ':' + m[2] : '';
+  if (typeof v === 'number') { if (!(v > 0 && v < 1)) return ''; var mins = Math.round(v * 1440); return mins >= 1440 ? '' : hrPad(Math.floor(mins / 60)) + ':' + hrPad(mins % 60); }
+  var t = String(v == null ? '' : v).replace(/'/g, '').trim();
+  if (/^0?\.\d+$/.test(t) && Number(t) > 0) return hrTime(Number(t), tz);
+  var m = /(\d{1,2})[:.](\d{2})/.exec(t);
+  return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? hrPad(Number(m[1])) + ':' + m[2] : '';
 }
 function hrTimeIn(v) {   // user input → HH:mm or '' (throws on garbage)
   var s = hrStr(v, 10); if (!s) return '';
@@ -279,15 +294,15 @@ function hrRestoreDefaultHolidays() {
 /* --------------------------------- staff ----------------------------------- */
 function hrStaffList() {
   return hrRead(hrTab('STAFF'), 3).filter(function (r) { return String(r[0] == null ? '' : r[0]).trim() !== ''; })
-    .map(function (r) { return { name: String(r[0]).trim(), department: String(r[1] || ''), color: hrColor(r[2]) }; });
+    .map(function (r) { return { name: hrName(r[0]), department: String(r[1] || ''), color: hrColor(r[2]) }; });
 }
 function hrStaffRow(sh, name) {
   var rows = hrRead(sh, 3);
-  for (var i = 0; i < rows.length; i++) if (String(rows[i][0]).trim() === name) return i + 2;
+  for (var i = 0; i < rows.length; i++) if (hrName(rows[i][0]) === name) return i + 2;
   return -1;
 }
 function hrAddStaff(name, department, color) {
-  name = hrStr(name, 100); department = hrStr(department, 60);
+  name = hrName(name); department = hrStr(department, 60);
   if (!name || !department) return hrErr('กรอกข้อมูลไม่ครบ');
   if (HR_REAL_DEPARTMENTS.indexOf(department) < 0) return hrErr('กลุ่มงานไม่ถูกต้อง');
   var sh = hrTab('STAFF');
@@ -296,19 +311,19 @@ function hrAddStaff(name, department, color) {
   return hrOk('เพิ่มเจ้าหน้าที่สำเร็จ', { id: name });
 }
 function hrDeleteStaff(name) {
-  name = hrStr(name, 100); var sh = hrTab('STAFF'), row = hrStaffRow(sh, name);
+  name = hrName(name); var sh = hrTab('STAFF'), row = hrStaffRow(sh, name);
   if (row < 0) return hrErr('ไม่พบชื่อในระบบ');
   sh.deleteRow(row); return hrOk('ลบเจ้าหน้าที่สำเร็จ', { id: name });
 }
 function hrUpdateStaffDept(name, dept) {
-  name = hrStr(name, 100); dept = hrStr(dept, 60);
+  name = hrName(name); dept = hrStr(dept, 60);
   if (HR_REAL_DEPARTMENTS.indexOf(dept) < 0) return hrErr('กลุ่มงานไม่ถูกต้อง');
   var sh = hrTab('STAFF'), row = hrStaffRow(sh, name);
   if (row < 0) return hrErr('ไม่พบชื่อในระบบ');
   sh.getRange(row, 2).setValue(dept); return hrOk('อัปเดตกลุ่มงานสำเร็จ', { id: name });
 }
 function hrUpdateStaffColor(name, color) {
-  name = hrStr(name, 100);
+  name = hrName(name);
   if (!hrColor(color)) return hrErr('รูปแบบสีไม่ถูกต้อง');
   var sh = hrTab('STAFF'), row = hrStaffRow(sh, name);
   if (row < 0) return hrErr('ไม่พบชื่อในระบบ');
@@ -319,7 +334,7 @@ function hrUpdateStaffColor(name, color) {
 /** One normalised record from a HR_Control row (day strings, HH:mm times). */
 function hrRec(r, tz) {
   var start = hrDay(r[4], tz), end = hrDay(r[5], tz) || start;
-  return { name: String(r[1] || '').trim(), dept: String(r[2] || ''), type: String(r[3] || '').trim(), start: start, end: end < start ? start : end,
+  return { name: hrName(r[1]), dept: String(r[2] || ''), type: String(r[3] || '').trim(), start: start, end: end < start ? start : end,
     st: hrTime(r[6], tz), et: hrTime(r[7], tz), note: String(r[8] || ''), file: String(r[9] || ''), id: String(r[10] || ''), province: String(r[11] || '').trim(),
     mission: String(r[12] || '').trim(), owner: String(r[13] || '').trim().toLowerCase(), created: r[0] instanceof Date ? r[0].getTime() : (Date.parse(String(r[0] || '')) || 0) };
 }
@@ -331,6 +346,33 @@ function hrBundle() {
   var sh = hrTab('CONTROL'), tz = hrTz(sh), staff = hrStaffList(), colors = {};
   staff.forEach(function (s) { if (s.color) colors[s.name] = s.color; });
   return { recs: hrRead(sh, 14).map(function (r) { return hrRec(r, tz); }), staff: staff, colors: colors, holidays: hrHolidayMap() };
+}
+/** 'all' = every day of the record is a Saturday/Sunday · 'some' = the record spans at least one weekend day · '' = weekdays only. */
+function hrWeekendKind(start, end) {
+  if (!start) return '';
+  var d = start, n = 0, wk = 0, tot = 0;
+  end = end || start;
+  while (d <= end && n++ < HR_MAX_SPAN_DAYS) { tot++; var w = hrDow(d); if (w === 0 || w === 6) wk++; d = hrAddDays(d, 1); }
+  return !wk ? '' : wk === tot ? 'all' : 'some';
+}
+/**
+ * Why is the calendar (not) showing what is in the sheet?  Sent with boot / getAll so the page can explain an empty calendar instead of staying silent.
+ * rows = data rows in HR_Control · shown = records that become calendar events · noDate / noName = rows left out because the date or name cell is empty or unreadable
+ * old = ended before the keep window · weekendOnly = shown records that fall only on Saturday/Sunday · first/last = range of the shown records · own = HR has its own spreadsheet (HR_SHEET_ID).
+ */
+function hrDiag(pre, events) {
+  var cutoff = hrAddDays(hrToday(), -HR_KEEP_DAYS), d = { rows: 0, shown: events.length, noDate: 0, noName: 0, old: 0, weekendOnly: 0, first: '', last: '', own: !!hrSs(), sheet: HR_T.CONTROL };
+  pre.recs.forEach(function (x) {
+    if (!x.name && !x.start && !x.id && !x.type) return;   // a completely blank row is not a record
+    d.rows++;
+    if (!x.start) { d.noDate++; return; }
+    if (!x.name) { d.noName++; return; }
+    if (x.end < cutoff) { d.old++; return; }
+    if (hrWeekendKind(x.start, x.end) === 'all') d.weekendOnly++;
+    if (!d.first || x.start < d.first) d.first = x.start;
+    if (!d.last || x.end > d.last) d.last = x.end;
+  });
+  return d;
 }
 function hrEvents(sc, pre) {
   pre = pre || hrBundle();
@@ -381,17 +423,17 @@ function hrDashboard(pre) {
   Object.keys(load).forEach(function (k) { if (load[k] >= HR_MAX_LEAVE) over[k.split('|')[0]] = 1; });
   return { counts: counts, total: counts.total, overLimitDates: Object.keys(over).sort(), maxLeave: HR_MAX_LEAVE, departments: HR_DEPARTMENTS, leaveTypes: HR_LEAVE_TYPES };
 }
-function hrAll(sc, pre) { pre = pre || hrBundle(); return { dashboard: hrDashboard(pre), events: hrEvents(sc, pre) }; }
+function hrAll(sc, pre) { pre = pre || hrBundle(); var events = hrEvents(sc, pre); return { dashboard: hrDashboard(pre), events: events, diag: hrDiag(pre, events) }; }
 function hrBoot(sc) {
   var pre = hrBundle(), all = hrAll(sc, pre);
   return { me: { email: sc.email, admin: sc.admin, dev: sc.dev, editAll: sc.editAll }, config: { maxLeave: HR_MAX_LEAVE, departments: HR_DEPARTMENTS, leaveTypes: HR_LEAVE_TYPES, projectStatuses: HR_PROJECT_STATUSES },
-    staff: pre.staff, holidays: pre.holidays, dashboard: all.dashboard, events: all.events, version: HR_VERSION };
+    staff: pre.staff, holidays: pre.holidays, dashboard: all.dashboard, events: all.events, diag: all.diag, version: HR_VERSION };
 }
 
 /** Validate + normalise the form of saveData / updateRecord. Throws httpError for anything the page could never send. */
 function hrCleanForm(f, holidays, isUpdate) {
   if (!f || typeof f !== 'object') throw httpError('BAD_REQUEST', 'รูปแบบคำขอไม่ถูกต้อง');
-  var o = { id: hrStr(f.id, 60), name: hrStr(f.name, 100), department: hrStr(f.department, 60), type: hrStr(f.type, 40), startDate: hrStr(f.startDate, 10), endDate: hrStr(f.endDate, 10),
+  var o = { id: hrStr(f.id, 60), name: hrName(f.name), department: hrStr(f.department, 60), type: hrStr(f.type, 40), startDate: hrStr(f.startDate, 10), endDate: hrStr(f.endDate, 10),
     startTime: hrTimeIn(f.startTime), endTime: hrTimeIn(f.endTime), note: hrStr(f.note, 500), province: hrStr(f.province, 80), mission: hrStr(f.mission, 200) };
   if (isUpdate && !o.id) throw httpError('BAD_REQUEST', 'ไม่ระบุ ID');
   if (!o.name || !o.type || !o.startDate) throw httpError('BAD_REQUEST', isUpdate ? 'กรอกข้อมูลไม่ครบ' : 'กรอกข้อมูลไม่ครบ (ชื่อ / ประเภท / วันที่)');
@@ -441,7 +483,7 @@ function hrSaveData(sc, f) {
   sh.appendRow([new Date(), cell(o.name, 100), o.department, o.type, o.startDate, o.endDate, o.startTime ? "'" + o.startTime : '', o.endTime ? "'" + o.endTime : '', cell(noteText, 520), fileUrl, id, cell(o.province, 80), cell(o.mission, 200), sc.email]);
   recs.push({ name: o.name, dept: o.department, type: o.type, start: o.startDate, end: o.endDate });
   var msg = 'บันทึกสำเร็จ ✓' + (overlap ? '\n⚠️ มีเวลาทับซ้อนกับ: ' + overlap.trim() : '');
-  return hrOk(msg, { overlap: overlap !== '', overlapDetail: overlap.trim(), workdayWarning: o.isLeave ? hrWorkdayWarning(recs, holidays, o.name, o.startDate) : '', id: id });
+  return hrOk(msg, { overlap: overlap !== '', overlapDetail: overlap.trim(), workdayWarning: o.isLeave ? hrWorkdayWarning(recs, holidays, o.name, o.startDate) : '', weekend: hrWeekendKind(o.startDate, o.endDate), startDate: o.startDate, id: id });
 }
 /** Warns when the month would have fewer than 20 working days left for this person (affects the ฉ.11 allowance). */
 function hrWorkdayWarning(recs, holidays, name, day) {
@@ -475,7 +517,7 @@ function hrUpdateRecord(sc, f) {
   sh.getRange(row, 1, 1, 10).setValues([[new Date(), cell(o.name, 100), o.department, o.type, o.startDate, o.endDate, o.startTime ? "'" + o.startTime : '', o.endTime ? "'" + o.endTime : '', cell(o.note, 520), fileUrl]]);
   sh.getRange(row, 12, 1, 2).setValues([[cell(o.province, 80), cell(o.mission, 200)]]);
   var recs = hrRead(sh, 14).map(function (r) { return hrRec(r, tz); });
-  return hrOk('แก้ไขรายการสำเร็จ ✓', { workdayWarning: o.isLeave ? hrWorkdayWarning(recs, holidays, o.name, o.startDate) : '', id: o.id });
+  return hrOk('แก้ไขรายการสำเร็จ ✓', { workdayWarning: o.isLeave ? hrWorkdayWarning(recs, holidays, o.name, o.startDate) : '', weekend: hrWeekendKind(o.startDate, o.endDate), startDate: o.startDate, id: o.id });
 }
 function hrDeleteRecord(sc, id) {
   id = hrStr(id, 60);
@@ -486,7 +528,7 @@ function hrDeleteRecord(sc, id) {
   sh.deleteRow(i + 2); return hrOk('ลบรายการสำเร็จ', { id: id });
 }
 function hrRecordsByName(name) {
-  name = hrStr(name, 100); if (!name) return [];
+  name = hrName(name); if (!name) return [];
   var sh = hrTab('CONTROL'), tz = hrTz(sh), out = [];
   hrRead(sh, 14).forEach(function (r) {
     var x = hrRec(r, tz);
@@ -521,9 +563,12 @@ function hrStoreFile(sc, f) {
   if (!kind) throw httpError('BAD_FILE', 'รองรับเฉพาะไฟล์ PDF, JPG, PNG');
   var base = String(f.fileName || 'attachment').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/\.[A-Za-z0-9]{1,5}$/, '').replace(/^\.+/, '').slice(0, 100) || 'attachment';
   var file = hrFolder().createFile(Utilities.newBlob(bytes, kind.mime, Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyyMMdd-HHmmss') + '_' + base + '.' + kind.ext));
+  var id = file.getId();
+  var got = -1; try { if (typeof file.getSize === 'function') got = Number(file.getSize()); } catch (xs) { got = -1; }
+  if (got >= 0 && got !== bytes.length) { try { file.setTrashed(true); } catch (xt) { /* already gone */ } throw httpError('BAD_FILE', 'ไฟล์ที่บันทึกไม่สมบูรณ์ (' + got + ' จาก ' + bytes.length + ' ไบต์) — กรุณาแนบใหม่อีกครั้ง'); }
+  try { file.setDescription('hrup:' + sc.email); } catch (xd) { /* proof also kept in the cache below */ }   // survives a cache eviction
   var shared = hrShare(file);
   try { file.addViewer(sc.email); } catch (x) { /* the owner already has access, or not a Google account */ }
-  var id = file.getId();
   try { CacheService.getScriptCache().put('hrup:' + id, sc.email, 21600); } catch (x2) { /* saveData also accepts links the record already has */ }   // proof that THIS person uploaded it (6 h)
   return { url: file.getUrl(), id: id, name: file.getName(), size: bytes.length, shared: shared };
 }
@@ -546,6 +591,15 @@ function hrOpUpload(sc, a) {
 /** The "ไฟล์แนบ" cell → list of links (one per line; rows written before v1.2 hold a single link). */
 function hrFileList(cellValue) { return String(cellValue == null ? '' : cellValue).split(/\s+/).filter(function (u) { return /^https?:\/\//i.test(u); }); }
 function hrFileId(u) { var m = /\/d\/([A-Za-z0-9_-]{10,})/.exec(u) || /[?&]id=([A-Za-z0-9_-]{10,})/.exec(u); return m ? m[1] : ''; }
+/** The Drive file itself says who uploaded it (description "hrup:<email>") and it must be recent (24 h). */
+function hrUploadedBy(id, email) {
+  try {
+    var f = DriveApp.getFileById(id);
+    if (String(f.getDescription() || '') !== 'hrup:' + email) return false;
+    if (typeof f.getDateCreated === 'function' && Date.now() - f.getDateCreated().getTime() > 24 * 3600 * 1000) return false;
+    return true;
+  } catch (x) { return false; }
+}
 /** Links a record may carry: ones this person just uploaded (remembered by uploadFile) or ones the record already had. Anything else is refused, so a link cannot be made up. */
 function hrAcceptFiles(sc, urls, existing) {
   var out = [], seen = {}, cache = CacheService.getScriptCache();
@@ -555,6 +609,7 @@ function hrAcceptFiles(sc, urls, existing) {
     if (!id) throw httpError('BAD_FILE', 'ลิงก์ไฟล์แนบไม่ถูกต้อง — กรุณาแนบไฟล์ใหม่อีกครั้ง');
     if (seen[id]) return;
     var mine = false; try { mine = cache.get('hrup:' + id) === sc.email; } catch (x) { mine = false; }
+    if (!mine) mine = hrUploadedBy(id, sc.email);   // CacheService may have dropped the proof (it is best effort)
     if (!mine && existing.indexOf(u) < 0) throw httpError('BAD_FILE', 'ไฟล์แนบหมดอายุการยืนยัน — กรุณาแนบไฟล์ใหม่อีกครั้ง');
     seen[id] = 1; out.push(u);
   });

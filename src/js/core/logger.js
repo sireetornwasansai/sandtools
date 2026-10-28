@@ -1,6 +1,6 @@
 import { config } from './config.js';
 import { getSession } from './auth.js';
-import { gasCall, backendConfigured } from './api.js';
+import { gasCall, gasCallRetry, backendConfigured } from './api.js';
 
 export const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024;
 /** Logging/archiving happens only when the backend is set up and the user is signed in (the backend rejects anonymous writes). */
@@ -28,9 +28,13 @@ export async function record(tool, op, d = {}) {
   const files = [];
   for (const f of d.inputs || []) files.push({ role: 'input', blob: f, name: f.name });
   (d.outputs || []).forEach((b, i) => files.push({ role: 'output', blob: b, name: (b instanceof File && b.name) || d.outputName || `output-${i + 1}` }));
-  // Upload all copies at the same time (they were sent one after another before).
-  await Promise.all(files.filter((f) => f.blob && f.blob.size <= MAX_ARCHIVE_BYTES).map(async ({ role, blob, name }) => {
-    try { await gasCall('archive', { session: token, tool, logId, role, name, mime: blob.type || 'application/octet-stream', data: await toBase64(blob) }, 120000); } catch { /* ignore */ }
-  }));
+  // One copy at a time: parallel 10 MB requests fought over the backend lock and the losers vanished without a trace.
+  // Each is retried when the answer never arrives; `key` makes a retry harmless (the backend answers instead of storing the file again).
+  let i = 0;
+  for (const { role, blob, name } of files.filter((f) => f.blob && f.blob.size <= MAX_ARCHIVE_BYTES)) {
+    i += 1;
+    const key = `${logId}-${role}-${i}-${blob.size}`.replace(/[^\w.:-]/g, '_').slice(0, 80);
+    try { await gasCallRetry('archive', { session: token, tool, logId, role, name, key, mime: blob.type || 'application/octet-stream', data: await toBase64(blob) }, 120000, { tries: 3 }); } catch (e) { console.warn('archive copy not stored:', name, e && /** @type {any} */ (e).code); }
+  }
   return true;
 }

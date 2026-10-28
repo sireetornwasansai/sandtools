@@ -181,12 +181,20 @@ function inbFetchDoc(doc, ts) {
   if (!token || !doc || !doc.file_id) return '';
   if (Number(doc.size) > INB_FILE_MAX) return '';
   try {
-    var r1 = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getFile?file_id=' + encodeURIComponent(String(doc.file_id)), { muteHttpExceptions: true });
-    var j = JSON.parse(r1.getContentText());
-    if (!j || !j.ok || !j.result || !j.result.file_path) return '';
-    var r2 = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + token + '/' + j.result.file_path, { muteHttpExceptions: true });
-    if (r2.getResponseCode() !== 200) return '';
-    var blob = r2.getBlob(); if (blob.getBytes().length > INB_FILE_MAX) return '';
+    var blob = null, expected = Number(doc.size) || 0;
+    for (var attempt = 0; attempt < 2 && !blob; attempt++) {   // a download cut short is tried once more; a copy that stays short is never kept
+      var r1 = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getFile?file_id=' + encodeURIComponent(String(doc.file_id)), { muteHttpExceptions: true });
+      var j = JSON.parse(r1.getContentText());
+      if (!j || !j.ok || !j.result || !j.result.file_path) return '';
+      if (!expected) expected = Number(j.result.file_size) || 0;
+      var r2 = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + token + '/' + j.result.file_path, { muteHttpExceptions: true });
+      if (r2.getResponseCode() !== 200) continue;
+      var got = r2.getBlob(), n = got.getBytes().length;
+      if (n > INB_FILE_MAX) return '';
+      if (expected && n !== expected) { console.error('inbFetchDoc incomplete ' + n + '/' + expected); continue; }
+      blob = got;
+    }
+    if (!blob) return '';
     var name = String(doc.file_name || 'letter.pdf').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+/, '').slice(0, 120) || 'letter.pdf';
     var rootId = prop('DRIVE_FOLDER_ID'); if (!rootId) return '';
     var stamp = Utilities.formatDate(new Date(ts), LNK_TZ, 'yyyy-MM');

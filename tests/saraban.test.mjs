@@ -320,3 +320,17 @@ test('queue: urgency read from the words, age in days, and a letter already in t
   assert.ok(Number.isInteger(urgent.age) && urgent.age >= 0);
   assert.equal(c('queue', {}).today, e.ctx.sarToday());
 });
+
+test('queuefile: staff can fetch the Drive copy of a pending queue item (the receive page reads it); nothing else', () => {
+  const e = env({ INBOX_STAFF_EMAILS: 'clerk@x.go.th' }); units(e); const c = e.as(clerk);
+  const ID = 'AbCdEfGhIjKlMnOpQrStUv123'; const bytes = [0x25, 0x50, 0x44, 0x46, 0x2d, 1, 2, 3];
+  let rows = [{ id: 'q1', status: 'pending', file: `https://drive.google.com/file/d/${ID}/view` }, { id: 'q2', status: 'pending', file: 'https://example.com/x.pdf' }, { id: 'q3', status: 'rejected', file: `https://drive.google.com/file/d/${ID}/view` }];
+  e.ctx.inbSheet = () => ({}); e.ctx.inbAll = () => rows;
+  e.ctx.Utilities.base64Encode = (b) => Buffer.from(b).toString('base64');
+  e.ctx.DriveApp = { getFileById: (id) => { if (id !== ID) throw new Error('nf'); return { getSize: () => bytes.length, getName: () => 'letter.pdf', getBlob: () => ({ getBytes: () => bytes }) }; } };
+  const r = c('queuefile', { inboxId: 'q1' });
+  assert.equal(r.mime, 'application/pdf'); assert.equal(r.size, bytes.length); assert.equal(Buffer.from(r.data, 'base64').length, bytes.length);
+  assert.throws(() => c('queuefile', { inboxId: 'q2' }), /ไม่มีไฟล์ในระบบ/);
+  assert.throws(() => c('queuefile', { inboxId: 'q3' }), /ไม่พบรายการในคิว/);
+  assert.throws(() => e.as(nobody)('queuefile', { inboxId: 'q1' }), /เฉพาะเจ้าหน้าที่/);
+});

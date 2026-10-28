@@ -1,7 +1,7 @@
 // Shared by the QR generator (modules/qr.js), the QR history page (modules/qr-history.js) and the links page:
 // category/type lists, the backend call for saved QR codes, and helpers that rebuild a QR from a saved record.
 import { getSession, signOut } from './auth.js';
-import { gasCall } from './api.js';
+import { gasCall, gasCallRetry } from './api.js';
 import { PAYLOADS, buildMatrix, drawToCanvas } from '../modules/qr-engine.js';
 
 export const QR_TYPES = [
@@ -19,11 +19,11 @@ export const isQrKind = (k) => k === 'qr' || k === 'qrs' || k === 'qrx';
 export const shortUrl = (base, code) => `${String(base || location.origin).replace(/\/+$/, '')}/s/${code}`;
 
 /** Call the backend "links" action (which also stores QR history). Signs the user out when the session is no longer valid. */
-export async function linksCall(op, params = {}, timeout = 60000) {
+export async function linksCall(op, params = {}, timeout = 60000, retry = false) {
   if (op === 'create' || op === 'update' || op === 'saveimg') params = { origin: location.origin, ...params };   // lets the backend record the short URL when SHORT_BASE is not set
   const s = getSession();
   if (!s) { const e = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); /** @type {any} */ (e).code = 'INVALID_SESSION'; throw e; }
-  try { return (await gasCall('links', { session: s.token, op, ...params }, timeout)).data; } catch (e) {
+  try { return (await (retry ? gasCallRetry : gasCall)('links', { session: s.token, op, ...params }, timeout)).data; } catch (e) {
     if (e && (/** @type {any} */ (e).code === 'INVALID_SESSION' || /** @type {any} */ (e).code === 'DOMAIN_NOT_ALLOWED')) signOut();
     throw e;
   }
@@ -132,7 +132,7 @@ const NEEDS_DEPLOY = 'ฝั่ง Apps Script ยังเป็นเวอร
 /** Keep the picture in Drive (<DRIVE_FOLDER_ID>/<month>/<email>/QR) and record its URL in the Links sheet. Resolves to {link, imgUrl}. */
 export async function uploadQrImage(code, canvas) {
   const data = await canvasToPngBase64(canvas);
-  try { const r = await linksCall('saveimg', { code, data }, 120000); imgCache.delete(code); return r; } catch (e) {
+  try { const r = await linksCall('saveimg', { code, data }, 120000, true); imgCache.delete(code); return r; } catch (e) {
     if (e && /** @type {any} */ (e).code === 'UNKNOWN_ACTION') e.message = NEEDS_DEPLOY;
     throw e;
   }

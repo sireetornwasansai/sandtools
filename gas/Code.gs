@@ -212,6 +212,21 @@ function subFolder(parent, name) {
   var it = parent.getFoldersByName(name);
   return it.hasNext() ? it.next() : parent.createFolder(name);
 }
+/** <root>/<yyyy-MM>/<email>. Parallel uploads race on creating the same folder, so the lookup takes the lock briefly; if the lock cannot be had, go on anyway (worst case a duplicate folder, never a lost file). */
+function archiveDir(folderId, stamp, email) {
+  var lock = LockService.getScriptLock(), held = false;
+  try { lock.waitLock(10000); held = true; } catch (e) { held = false; }
+  try { return subFolder(subFolder(DriveApp.getFolderById(folderId), stamp), email); }
+  finally { if (held) { try { lock.releaseLock(); } catch (x) { /* not held */ } } }
+}
+/** A file Drive says is smaller than what was sent is a broken copy: trash it and say so, so the page can send it again. */
+function verifyStored(file, expected) {
+  var got = -1; try { if (typeof file.getSize === 'function') got = Number(file.getSize()); } catch (x) { got = -1; }
+  if (got >= 0 && got !== expected) {
+    try { file.setTrashed(true); } catch (y) { /* already gone */ }
+    throw httpError('UPLOAD_INCOMPLETE', 'ไฟล์ที่บันทึกในไดรฟ์ไม่สมบูรณ์ (' + got + ' จาก ' + expected + ' ไบต์) กรุณาส่งใหม่อีกครั้ง');
+  }
+}
 function archive(b) {
   var u = requireUser(b.session);
   if (prop('ARCHIVE_FILES') === 'false') throw httpError('ARCHIVE_DISABLED', 'หน่วยงานปิดการเก็บสำเนาไฟล์');
@@ -225,12 +240,13 @@ function archive(b) {
   var name = String(b.name || 'file').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/^\.+/, '').slice(0, 120) || 'file';
   var mime = /^[\w.+-]+\/[\w.+-]+$/.test(String(b.mime || '')) ? b.mime : 'application/octet-stream';
   var stamp = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyy-MM');
-  var lock = LockService.getScriptLock(); lock.waitLock(10000);
-  var file;
-  try {
-    var dir = subFolder(subFolder(DriveApp.getFolderById(folderId), stamp), u.email);
-    file = dir.createFile(Utilities.newBlob(bytes, mime, Utilities.formatDate(new Date(), 'Asia/Bangkok', 'dd-HHmmss') + '_' + role + '_' + name));
-  } finally { lock.releaseLock(); }
+  // The browser retries when a phone loses the answer: the same key must not store the file twice.
+  var key = /^[\w.:-]{6,80}$/.test(String(b.key || '')) ? 'arc:' + u.email + ':' + b.key : '', cache = CacheService.getScriptCache();
+  if (key) { var prev = ''; try { prev = cache.get(key) || ''; } catch (x0) { prev = ''; } if (prev) return { fileId: prev, replay: true }; }
+  var dir = archiveDir(folderId, stamp, u.email);   // the lock covers only the folder lookup — the file itself is written outside it
+  var file = dir.createFile(Utilities.newBlob(bytes, mime, Utilities.formatDate(new Date(), 'Asia/Bangkok', 'dd-HHmmss') + '_' + role + '_' + name));
+  verifyStored(file, bytes.length);
+  if (key) { try { cache.put(key, file.getId(), 21600); } catch (x1) { /* best effort */ } }
   try { file.addViewer(u.email); } catch (x) { /* owner/admin already has access */ }
   sheetTab('Files', FILE_HEADERS).appendRow([
     new Date(), cell(b.logId, 20), u.email, cell(b.tool, 40), role, cell(name, 200), bytes.length, file.getUrl()]);
