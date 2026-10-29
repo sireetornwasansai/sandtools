@@ -1,6 +1,7 @@
 // Drawing helpers for the 3D home page (site-sim.js) — canvas 2D only, no library:
-//   drawNumber  floating 3D usage figure above a model (extruded digits, floor shadow, gentle bob, counts up) — replaces the number on the white tab
-//   drawPlate   dark base plate in front of a model: the system name + the place (โรงพยาบาลสันทราย) — replaces the name on the white tab
+//   layoutPlate / paintPlate  dark base plate standing on the floor at the foot of a model: system name · the usage number as embossed 3D digits (counts up) · the place (โรงพยาบาลสันทราย)
+//   layoutSign  / paintSign   every other label: a sign on a post with a shadow on the ground — nothing floats in the air
+//   placeSigns                moves overlapping signs / plates apart and drops unimportant ones when the screen is crowded (phones)
 //   drawFigure  a person with head, neck, torso, two arms, two legs, hair and shoes; outfit and prop follow the ROLE (or the kind of person on the campus)
 // Every function takes a drawing kit `g` built by site-sim.js (getters, because the camera / scale / theme change between frames):
 //   { ctx, pal, font, tw, camZ, width, reduced }
@@ -32,80 +33,124 @@ export function eased(key, target, now, reduced) {
 }
 export const _resetEase = () => shown.clear();   // tests
 
-/* ------------------------------------------------------------------------------------------------ text with a halo (readable on any floor colour) */
-function haloText(g, text, x, y, size, color, weight = 700, halo) {
-  const { ctx } = g; ctx.font = `${weight} ${size}px ${g.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-  ctx.lineWidth = Math.max(2.5, size * 0.3); ctx.strokeStyle = halo || g.pal.pill; ctx.strokeText(text, x, y); ctx.fillStyle = color; ctx.fillText(text, x, y);
+/* ------------------------------------------------------------------------------------------------ signs & plates
+ * Nothing floats: a base PLATE stands on the floor at the foot of a model (name · embossed 3D number · the hospital), and every other label is a SIGN on a post with a
+ * shadow on the ground. planSigns() then moves overlapping ones apart (or drops the unimportant ones) so no label ever covers another. */
+const fw = (g, size, weight, text) => { g.ctx.font = `${weight} ${size}px ${g.font}`; return g.ctx.measureText(text).width; };
+function ellipsize(g, text, size, weight, maxW) {
+  if (fw(g, size, weight, text) <= maxW) return text; let s = String(text);
+  while (s.length > 2 && fw(g, size, weight, `${s}…`) > maxW) s = s.slice(0, -1);
+  return `${s}…`;
 }
 
-/* ------------------------------------------------------------------------------------------------ floating 3D number */
 /**
- * @param {object} n  { key, x, y (screen point of the number's centre), fx, fy (screen point on the floor right under it), value (number | null), approx, text (shown instead when value is null),
- *                      unit, online, col, sc, phase, busy }
+ * Measure a base plate. p = { key, name, sub (default: the hospital), col, value (number | null), approx, unit, online, status (word shown when value is null), sc, maxW, hov, dim }
+ * Returns the drawable item { kind: 'plate', w, h, x, y, prio } — x, y = the floor point under the plate's centre-top.
  */
-export function drawNumber(g, n, now) {
-  const { ctx, pal } = g; const kz = Math.pow(g.camZ, -0.6) * (n.sc || 1); const has = n.value !== null && n.value !== undefined;
-  const dark = pal.wk < 1; const col = n.col || '#3758f9';
-  let f = Math.max(18, g.tw * 0.44 * kz) * (has ? 1 : 0.5);
-  const text = has ? `${n.approx ? '≈' : ''}${fmt(Math.round(eased(n.key, n.value, now, g.reduced)))}` : String(n.text || '');
-  ctx.save(); ctx.font = `800 ${f}px ${g.font}`;
-  let w = ctx.measureText(text).width; const maxW = g.tw * (has ? 2.5 : 1.9) * kz; if (w > maxW) { f *= maxW / w; w = maxW; ctx.font = `800 ${f}px ${g.font}`; }
-  const depth = Math.max(3, Math.min(9, Math.round(f * 0.18))); const ph = n.phase || 0;
-  const bob = g.reduced ? 0 : Math.sin(now / 640 + ph) * f * 0.1; const sway = g.reduced ? 0 : Math.sin(now / 1300 + ph) * 0.07;
-  const cw = g.width; const x = g.clampX === false ? n.x : clamp(n.x, w / 2 + depth + 6, Math.max(w / 2 + depth + 6, cw - w / 2 - depth - 6)); const y = n.y - bob;
-  // 1 · floor shadow + a thin dotted tether down to the model (the number "floats", it is not stuck on the roof)
-  ctx.globalAlpha = dark ? 0.34 : 0.16; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(n.fx, n.fy, Math.max(8, w * 0.36) * (1 - bob / (f * 3)), Math.max(3, f * 0.2), 0, 0, 7); ctx.fill();
-  ctx.globalAlpha = 0.42; ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.setLineDash([2, 4]); ctx.beginPath(); ctx.moveTo(n.fx, n.fy); ctx.lineTo(x, y + f * 0.55 + depth); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
-  // 2 · the digits: halo, then the extrusion (back to front, darker at the back), then the lit face with a rim light
-  ctx.translate(x, y); ctx.transform(1, 0, sway, 1, 0, 0); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-  ctx.lineWidth = Math.max(3, f * 0.24); ctx.strokeStyle = pal.pill; ctx.strokeText(text, depth * 0.55, depth * 0.8); ctx.strokeText(text, 0, 0);
-  for (let k = depth; k >= 1; k--) { ctx.fillStyle = mix(col, (dark ? 0.62 : 0.4) + 0.2 * (1 - k / depth)); ctx.fillText(text, k * 0.55, k * 0.8); }
-  const gr = ctx.createLinearGradient(0, -f * 0.5, 0, f * 0.5); gr.addColorStop(0, mix(col, dark ? 1.5 : 1.3)); gr.addColorStop(0.55, col); gr.addColorStop(1, mix(col, 0.82));
-  ctx.fillStyle = gr; ctx.fillText(text, 0, 0); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.strokeText(text, 0, 0);
-  ctx.restore();
-  // 3 · small captions right under the digits (no white tab): the unit, and the people online now
-  const cs = Math.max(9, f * 0.36); let cy = y + f * 0.62 + depth + cs * 0.4;
-  if (has && n.unit) { haloText(g, n.unit, x, cy, cs, pal.ink, 600); cy += cs * 1.2; }
-  if (has && n.online > 0) {
-    const label = `ออนไลน์ ${fmt(n.online)}`; ctx.save(); ctx.font = `700 ${cs}px ${g.font}`; const lw = ctx.measureText(label).width; ctx.restore();
-    const pulse = g.reduced ? 1 : 0.55 + 0.45 * Math.sin(now / 350 + ph); const gx = x - lw / 2 - cs * 0.55;
-    ctx.save(); ctx.globalAlpha = pulse; ctx.fillStyle = '#16a34a'; ctx.strokeStyle = pal.pill; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(gx, cy, cs * 0.28, 0, 7); ctx.stroke(); ctx.fill(); ctx.restore();
-    haloText(g, label, x + cs * 0.15, cy, cs, '#16a34a', 700);
-  }
+export function layoutPlate(g, p, now) {
+  const kz = Math.pow(g.camZ, -0.6) * (p.sc || 1); const has = p.value !== undefined && p.value !== null; const sub = p.sub === undefined ? HOSPITAL_NAME : p.sub;
+  const numText = has ? `${p.approx ? '≈' : ''}${fmt(Math.round(eased(p.key || p.name, p.value, now, g.reduced)))}` : '';
+  const unit = has ? p.unit || '' : ''; const online = has && p.online > 0 ? `ออนไลน์ ${fmt(p.online)}` : ''; const stat = !has ? p.status || '' : '';
+  const maxW = Math.max(150, p.maxW || g.tw * 3.9 * kz);
+  let k = 1; let m;
+  const measure = () => {
+    const f1 = Math.max(10, g.tw * 0.135 * kz) * k; const f2 = Math.max(8.8, f1 * 0.78); const fn = f1 * 1.8; const bar = Math.max(3, f1 * 0.34); const padX = f1 * 0.7; const gap = f1 * 0.9;
+    const name = p.name; const left = Math.max(fw(g, f1, 700, name), sub ? f2 * 1.5 + fw(g, f2, 600, sub) : 0);
+    const capW = has ? fw(g, f2, 600, unit) + (online ? f2 * 1.9 + fw(g, f2, 700, online) : 0) : 0;
+    const right = has ? Math.max(fw(g, fn, 800, numText) + fn * 0.12, capW) : stat ? fw(g, f2 * 1.1, 700, stat) + f2 : 0;
+    const top = has ? fn * 1.05 : f1 * 1.25; const bottom = f2 * 1.45; const padY = f1 * 0.4;
+    return { f1, f2, fn, bar, padX, gap, left, right, capW, name, w: padX * 2 + bar + f1 * 0.5 + left + (right ? gap + right : 0), h: padY * 2 + top + bottom, top, bottom, padY };
+  };
+  m = measure();
+  for (let it = 0; it < 4 && m.w > maxW && m.f1 > 8.5; it++) { k *= Math.max(0.6, (maxW / m.w) * 0.97); m = measure(); }
+  if (m.w > maxW) { m.name = ellipsize(g, p.name, m.f1, 700, Math.max(40, m.left - (m.w - maxW))); m.left = Math.max(fw(g, m.f1, 700, m.name), sub ? m.f2 * 1.5 + fw(g, m.f2, 600, sub) : 0); m.w = m.padX * 2 + m.bar + m.f1 * 0.5 + m.left + (m.right ? m.gap + m.right : 0); }
+  return { kind: 'plate', p, m, w: m.w, h: m.h + Math.max(3, m.f1 * 0.38), x: p.x, y: p.y, ax: p.x, ay: p.y, prio: 3, numText, unit, online, stat, sub, has };
 }
 
-/* ------------------------------------------------------------------------------------------------ base plate */
-/**
- * A dark plate with a coloured edge, standing on the floor at the foot of a model.
- * @param {object} p  { x, y (screen point on the floor, front of the model), name, sub (defaults to the hospital), col, sc, hov, dim }
- */
-export function drawPlate(g, p) {
-  const { ctx, pal } = g; const kz = Math.pow(g.camZ, -0.6) * (p.sc || 1); const dark = pal.wk < 1; const col = p.col || '#3758f9';
-  let f1 = Math.max(10, g.tw * 0.16 * kz); let f2 = Math.max(8.5, f1 * 0.78); const sub = p.sub === undefined ? HOSPITAL_NAME : p.sub;
-  const maxW = Math.max(120, p.maxW || g.tw * 3.1 * kz);
-  ctx.save();
-  const meas = () => { ctx.font = `700 ${f1}px ${g.font}`; const a = ctx.measureText(p.name).width; ctx.font = `600 ${f2}px ${g.font}`; const b = sub ? ctx.measureText(sub).width + f2 * 1.5 : 0; return Math.max(a, b); };
-  let tw0 = meas(); if (tw0 > maxW - f1 * 1.9) { const k = (maxW - f1 * 1.9) / tw0; f1 *= k; f2 *= k; tw0 = meas(); }
-  const bar = Math.max(3, f1 * 0.34); const padX = f1 * 0.7; const w = tw0 + padX * 2 + bar; const h = f1 * 1.15 + (sub ? f2 * 1.25 : 0) + f1 * 0.4; const th = Math.max(3, f1 * 0.38);
-  let x = p.x; if (g.clampX !== false) x = clamp(x, w / 2 + 4, Math.max(w / 2 + 4, g.width - w / 2 - 4)); const y = p.y + h * 0.42;   // sits just below the model's foot
-  const x0 = x - w / 2; const y0 = y - h / 2; const r = Math.min(h / 2, f1 * 0.55);
-  ctx.globalAlpha = p.dim ? 0.72 : 1;
-  // contact shadow · front face (thickness) · top face · accent bar · text
-  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(x, y + h / 2 + th, w * 0.52, th * 1.1, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = dark ? '#0b1220' : '#0f172a'; ctx.beginPath(); ctx.roundRect(x0, y0 + th, w, h, r); ctx.fill();
-  const gr = ctx.createLinearGradient(0, y0, 0, y0 + h); gr.addColorStop(0, dark ? '#334155' : '#334155'); gr.addColorStop(1, dark ? '#1e293b' : '#1e293b');
-  ctx.fillStyle = gr; ctx.beginPath(); ctx.roundRect(x0, y0, w, h, r); ctx.fill();
-  ctx.lineWidth = p.hov ? 2.2 : 1; ctx.strokeStyle = p.hov ? pal.ink : 'rgba(255,255,255,.22)'; ctx.stroke();
-  ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(x0 + f1 * 0.3, y0 + f1 * 0.28, bar, h - f1 * 0.56, bar / 2); ctx.fill();
-  const tx = x0 + f1 * 0.3 + bar + padX * 0.8; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.font = `700 ${f1}px ${g.font}`; ctx.fillStyle = '#ffffff'; ctx.fillText(p.name, tx, y0 + f1 * 0.78);
-  if (sub) {
-    const cy = y0 + f1 * 0.78 + f1 * 0.62 + f2 * 0.5; const cr = f2 * 0.5;   // a small white cross = the hospital
-    ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.roundRect(tx, cy - cr * 0.3, cr * 2, cr * 0.6, cr * 0.2); ctx.fill(); ctx.beginPath(); ctx.roundRect(tx + cr * 0.7, cy - cr, cr * 0.6, cr * 2, cr * 0.2); ctx.fill();
-    ctx.font = `600 ${f2}px ${g.font}`; ctx.fillStyle = '#cbd5e1'; ctx.fillText(sub, tx + f2 * 1.5, cy);
+/** Draw a measured plate with its centre-top on the floor point (x, y). */
+function paintPlate(g, it, x, y, now) {
+  const { ctx } = g; const { p, m } = it; const col = p.col || '#3758f9'; const dark = g.pal.wk < 1; const th = Math.max(3, m.f1 * 0.38); const h = m.h; const w = m.w;
+  const x0 = x - w / 2; const y0 = y + 2; const r = Math.min(h / 2, m.f1 * 0.55);
+  ctx.save(); ctx.globalAlpha = p.dim ? 0.78 : 1;
+  // the model's footprint on the floor (a ring), and when the plate had to step aside to keep a model uncovered, a leader line from the plate down to that ring
+  { const rx = Math.max(7, g.tw * 0.16); const ry = rx * 0.5; ctx.fillStyle = col; ctx.globalAlpha = 0.16; ctx.beginPath(); ctx.ellipse(it.ax, it.ay, rx, ry, 0, 0, 7); ctx.fill(); ctx.globalAlpha = p.dim ? 0.7 : 0.95; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+    const near = Math.abs(it.ax - x) > w / 2 || it.ay < y0 - 3 || it.ay > y0 + h + 3;
+    if (near) { const px = clamp(it.ax, x0 + r, x0 + w - r); const py = it.ay < y0 ? y0 : y0 + h; ctx.lineWidth = 1.8; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(it.ax, it.ay); ctx.stroke(); }
+    ctx.globalAlpha = p.dim ? 0.78 : 1; }
+  ctx.fillStyle = 'rgba(0,0,0,.24)'; ctx.beginPath(); ctx.ellipse(x, y0 + h + th, w * 0.52, th * 1.15, 0, 0, 7); ctx.fill();        // contact shadow on the floor
+  ctx.fillStyle = dark ? '#05080f' : '#0b1220'; ctx.beginPath(); ctx.roundRect(x0, y0 + th, w, h, r); ctx.fill();                       // the slab's thickness
+  const gr = ctx.createLinearGradient(0, y0, 0, y0 + h); gr.addColorStop(0, '#3b4a63'); gr.addColorStop(1, '#1e293b'); ctx.fillStyle = gr; ctx.beginPath(); ctx.roundRect(x0, y0, w, h, r); ctx.fill();
+  ctx.lineWidth = p.hov ? 2.4 : 1; ctx.strokeStyle = p.hov ? '#ffffff' : 'rgba(255,255,255,.22)'; ctx.stroke();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(x0 + m.f1 * 0.3, y0 + m.f1 * 0.3, m.bar, h - m.f1 * 0.6, m.bar / 2); ctx.fill();
+  const tx = x0 + m.f1 * 0.3 + m.bar + m.f1 * 0.5; const rowTop = y0 + m.padY; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.font = `700 ${m.f1}px ${g.font}`; ctx.fillStyle = '#ffffff'; ctx.fillText(m.name, tx, rowTop + m.top / 2);
+  const by = rowTop + m.top + m.bottom / 2;
+  if (it.sub) {   // small white cross = the hospital
+    const cr = m.f2 * 0.5; ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.roundRect(tx, by - cr * 0.3, cr * 2, cr * 0.6, cr * 0.2); ctx.fill(); ctx.beginPath(); ctx.roundRect(tx + cr * 0.7, by - cr, cr * 0.6, cr * 2, cr * 0.2); ctx.fill();
+    ctx.font = `600 ${m.f2}px ${g.font}`; ctx.fillStyle = '#cbd5e1'; ctx.fillText(it.sub, tx + m.f2 * 1.5, by);
+  }
+  const rx = x0 + w - m.padX;   // right block: the number, embossed (extruded digits) — a fixed part of the plate, not floating
+  if (it.has) {
+    ctx.textAlign = 'right'; ctx.font = `800 ${m.fn}px ${g.font}`; const ny = rowTop + m.top / 2; const dp = Math.max(2, Math.round(m.fn * 0.1));
+    for (let q = dp; q >= 1; q--) { ctx.fillStyle = mix(col, 0.42 + 0.2 * (1 - q / dp)); ctx.fillText(it.numText, rx + q * 0.45, ny + q * 0.7); }
+    const ng = ctx.createLinearGradient(0, ny - m.fn * 0.5, 0, ny + m.fn * 0.5); ng.addColorStop(0, mix(col, 1.7)); ng.addColorStop(0.6, mix(col, 1.3)); ng.addColorStop(1, mix(col, 1.05)); ctx.fillStyle = ng; ctx.fillText(it.numText, rx, ny);
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.strokeText(it.numText, rx, ny);
+    ctx.font = `600 ${m.f2}px ${g.font}`; ctx.fillStyle = '#cbd5e1';
+    if (it.online) {
+      const ow = fw(g, m.f2, 700, it.online); const pulse = g.reduced ? 1 : 0.55 + 0.45 * Math.sin(now / 350 + x); ctx.font = `700 ${m.f2}px ${g.font}`; ctx.fillStyle = '#4ade80'; ctx.fillText(it.online, rx, by);
+      ctx.globalAlpha = (p.dim ? 0.78 : 1) * pulse; ctx.beginPath(); ctx.arc(rx - ow - m.f2 * 0.55, by, m.f2 * 0.3, 0, 7); ctx.fill(); ctx.globalAlpha = p.dim ? 0.78 : 1;
+      ctx.font = `600 ${m.f2}px ${g.font}`; ctx.fillStyle = '#cbd5e1'; ctx.fillText(it.unit, rx - ow - m.f2 * 1.3, by);
+    } else ctx.fillText(it.unit, rx, by);
+  } else if (it.stat) {
+    ctx.textAlign = 'right'; ctx.font = `700 ${m.f2 * 1.1}px ${g.font}`; ctx.fillStyle = col; ctx.fillText(it.stat, rx, rowTop + m.top / 2 + m.bottom * 0.2);
   }
   ctx.restore();
 }
+
+/** A label that stands on a short post with a shadow on the ground (no floating text). s = { text, x, y (floor point), col, sc, prio } */
+export function layoutSign(g, s) {
+  const kz = Math.pow(g.camZ, -0.6) * (s.sc || 1); const fs = Math.max(9.5, g.tw * 0.15 * kz); const w = fw(g, fs, 600, s.text) + 14 * kz; const hh = Math.max(16, g.tw * 0.27 * kz); const post = Math.max(5, hh * 0.5);
+  return { kind: 'sign', s, w, h: hh + post, fs, hh, post, x: s.x, y: s.y, prio: s.prio === undefined ? 1 : s.prio };
+}
+function paintSign(g, it, x, y) {
+  const { ctx, pal } = g; const { s, hh, post, w, fs } = it; const col = s.col || null; const cy = y - post;
+  ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(x, y + 1, Math.max(4, hh * 0.35), Math.max(1.6, hh * 0.13), 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = col || pal.pillLine; ctx.lineWidth = Math.max(1.6, hh * 0.1); ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x, cy + hh / 2 - 1); ctx.lineTo(x, y); ctx.stroke();
+  ctx.fillStyle = pal.pill; ctx.strokeStyle = col || pal.pillLine; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x - w / 2, cy - hh / 2, w, hh, hh / 2); ctx.fill(); ctx.stroke();
+  ctx.font = `600 ${fs}px ${g.font}`; ctx.fillStyle = col || pal.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(s.text, x, cy + 0.5); ctx.restore();
+}
+
+/**
+ * Put every sign / plate of the frame where it overlaps nothing: most important first (plates 3 › signs 1); each tries its own spot, then a little up / down / sideways.
+ * An unimportant sign (prio ≤ 1) that finds no free spot is dropped (only when `g.dropWhenCrowded`), so a small phone screen never turns into a wall of labels.
+ * Returns the items to paint, in painting order (signs first, plates on top), each with its final x, y.
+ */
+export function placeSigns(g, items) {
+  const placed = []; const out = []; const obst = g.obstacles || [];
+  const rectOf = (it, x, y) => (it.kind === 'plate' ? { x0: x - it.w / 2, x1: x + it.w / 2, y0: y, y1: y + it.h } : { x0: x - it.w / 2, x1: x + it.w / 2, y0: y - it.h, y1: y + 1 });
+  const area = (a, b) => Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) - 2) * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) - 2);
+  const order = items.map((it, i) => ({ it, i })).sort((a, b) => b.it.prio - a.it.prio || a.i - b.i);
+  const cw = g.width; const clampOn = g.clampX !== false;
+  for (const { it } of order) {
+    const x = clampOn ? clamp_(it.x, it.w / 2 + 4, Math.max(it.w / 2 + 4, cw - it.w / 2 - 4)) : it.x;
+    const d = it.h * 1.0; const plate = it.kind === 'plate'; const own = plate ? it.p.own : undefined;
+    const dys = plate ? [0, d, -d, d * 2, -d * 2, d * 3, -d * 3] : [0, -d, d, -d * 2, d * 2]; const dxs = plate ? [0, it.w * 0.55, -it.w * 0.55, it.w * 1.05, -it.w * 1.05] : [0, it.w * 0.6, -it.w * 0.6];
+    let best = null;
+    for (const dy of dys) for (const dx of dxs) {
+      const r = rectOf(it, x + dx, it.y + dy); let cs = 0; for (const b of placed) cs += area(r, b); let co = 0;
+      if (plate) for (const o of obst) if (!(o.own !== undefined && o.own === own)) co += area(r, o);   // never count the model the plate belongs to
+      const cost = cs * 60 + co + (Math.abs(dx) + Math.abs(dy)) * 0.25;
+      if (!best || cost < best.cost) best = { cost, cs, x: x + dx, y: it.y + dy, r };
+      if (cost === 0) break;
+    }
+    if (!plate && best.cs > 0 && g.dropWhenCrowded && it.prio <= 1) continue;   // an unimportant sign with no free spot is left out
+    placed.push(best.r); out.push({ ...it, x: best.x, y: best.y });
+  }
+  return out.sort((a, b) => a.prio - b.prio);
+}
+const clamp_ = clamp;
+/** Paint the result of placeSigns(). */
+export function paintSigns(g, list, now) { for (const it of list) { if (it.kind === 'plate') paintPlate(g, it, it.x, it.y, now); else paintSign(g, it, it.x, it.y); } }
 
 /* ------------------------------------------------------------------------------------------------ people */
 const SKINS = ['#f1c9a5', '#e0ac82', '#c68e64', '#8d5a3b'];

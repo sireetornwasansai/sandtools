@@ -12,7 +12,6 @@ export const DEFAULTS = { open: 360, close: 1200, walk: 10, dwell: 30 };
 
 const pad = (n) => String(n).padStart(2, '0');
 export const hhmm = (m) => { const t = Math.max(0, Math.round(m)); return `${pad(Math.floor(t / 60) % 24)}:${pad(t % 60)}`; };
-import { fmtDate } from '../core/datefield.js';
 export const fmt = (n) => Number(n || 0).toLocaleString('th-TH');
 export const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return String(u || ''); } };
 
@@ -398,7 +397,7 @@ export function normalizeReplay(d) {
   return { mode: d.mode === 'peak' ? 'peak' : 'today', day: String(d.day), today: String(d.today || ''), byDay, busiest: busiestDay(byDay), scale, sites };
 }
 
-export const dayLabel = (d) => { try { const x = new Date(`${d}T12:00:00+07:00`); return `${x.toLocaleDateString('th-TH', { weekday: 'long' })} ${fmtDate(String(d))}`; } catch { return d; } };   // วันอังคาร 13/10/2569
+export const dayLabel = (d) => { try { return new Date(`${d}T12:00:00+07:00`).toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch { return d; } };
 export const addDays = (d, n) => new Date(new Date(`${d}T12:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
 
 /** One walking person per VISIT (f=0 new, f=1 returning); pages of the same visit (f=2) only add to counters. Deterministic. */
@@ -684,7 +683,7 @@ export function campusLayout() {
   const yj2 = (towers[1].y0 + towers[1].y1) / 2;
   const corr = { ax: 18.0, hw: 0.7, yS: main.y0 + 0.3, yE: yj2 - 0.7, yj: 1.2, yj2, xL: er.x1, xR: towers[0].x0, xR2: towers[1].x0, z: 0.9 };
   const sp = (a) => a.map(([x, y]) => [x + DX, y + DY]);
-  const gz = 0.28; const hwA = 0.25;   // the people on the ground storey walk on the side that can be seen under the deck
+  const gz = 0.3; const hwA = 0.25;   // the people on the ground storey walk on the side that can be seen under the deck
   const t2 = towers[1].y1 - 0.05; const cx2 = (towers[1].x0 + towers[1].x1) / 2;
   const paths = {
     deckA: [[corr.xL + 0.3, corr.yj], [corr.ax, corr.yj], [corr.ax, corr.yS - 0.15]], deckB: [[corr.ax, corr.yj], [corr.xR - 0.25, corr.yj]], deckC: [[corr.ax, corr.yj], [corr.ax, corr.yj2]], deckD: [[corr.ax, corr.yj2], [corr.xR2 - 0.25, corr.yj2]],

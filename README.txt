@@ -1,4 +1,3 @@
-sandtools v1.14.0 — เฉพาะไฟล์ที่แก้/เพิ่ม
-1-GAS-backend  : วางทับใน Apps Script (HrLine.gs, Hr.gs) แล้ว Deploy เวอร์ชันใหม่ — ไม่ต้องรัน setup ใหม่
-2-GitHub-frontend : คัดลอกทับ repo ตามพาธเดิม แล้ว commit (Vercel build ใหม่)
-ตั้ง Script property HR_LINE_AUTO_ADMIN=false ถ้าไม่ต้องการให้ทุกคนที่เพิ่มเพื่อน OA เป็นแอดมินอัตโนมัติ
+คัดลอกทับ repo ตามพาธเดิม (ไฟล์ site-deco / site-3d / site-models3d และโฟลเดอร์ src/js/vendor/three เป็นของใหม่) แล้ว commit
+รายละเอียด: docs/SITE3D-MODELS.md
+ถ้า site-sim.js / site-engine.js ของคุณแก้ไปแล้ว: ใช้ docs/PORT-site3d.diff เพื่อย้ายเฉพาะส่วน

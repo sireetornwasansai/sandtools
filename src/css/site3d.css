@@ -124,3 +124,35 @@ button.s3-lg { cursor: pointer; } button.s3-lg:hover, button.s3-lg:focus-visible
 .s3-lg i.s3-r-committee { background: #16a34a; }
 .s3-lg i.s3-r-researcher { background: #db2777; }
 .s3-lg i.s3-r-user { background: #94a3b8; }
+
+/* ---- rotatable 3D view (site-3d.js) ---------------------------------------------------------------------------------------------------------- */
+.s3-3dbtn { margin-inline-start: .5rem; white-space: nowrap; min-height: 40px; border-radius: 999px; padding-inline: .9rem; font-weight: 700; }
+.s3-3dbtn[aria-pressed="true"] { background: var(--primary); color: var(--primary-contrast); border-color: var(--primary); }
+.s3-stage.is-3d .s3-brand, .s3-stage.is-3d .s3-chip { display: none; }
+.s3-stage.is-3d > .s3-scroll { display: none !important; }   /* the flat canvas keeps its own width otherwise (the `hidden` attribute loses to a display rule) */
+.s3-stage.is-3d { min-width: 0; }
+.s3 { grid-template-columns: minmax(0, 1fr); }   /* an item can never stretch the page column (a wide canvas / 3D box) */
+.s3d-host { position: relative; width: 100%; height: clamp(440px, 76vh, 760px); border-radius: inherit; overflow: hidden; touch-action: none; background: var(--surface-2); }
+.s3d-canvas { position: absolute; inset: 0; display: block; width: 100% !important; height: 100% !important; max-width: none; outline: none; touch-action: none; cursor: grab; } .s3d-canvas:active { cursor: grabbing; } .s3d-canvas:focus-visible { box-shadow: inset 0 0 0 3px var(--focus); }
+.s3d-hud { position: absolute; top: .6rem; right: .6rem; display: flex; flex-direction: column; align-items: flex-end; gap: .45rem; }
+.s3d-ic { font-size: 1.15rem; line-height: 1; } .s3d-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; border-radius: 999px; padding-inline: .9rem; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(6px); box-shadow: 0 2px 10px rgb(0 0 0 / .14); touch-action: manipulation; }
+.s3d-btn[aria-pressed="true"] { background: var(--primary); color: var(--primary-contrast); }
+.s3d-hint { position: absolute; left: 50%; bottom: 4.4rem; transform: translateX(-50%); margin: 0; padding: .45rem .9rem; max-width: calc(100% - 1.4rem); text-align: center; font-size: .82rem; line-height: 1.35; border-radius: 14px; color: var(--text-2); background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(6px); pointer-events: none; }
+.s3d-hint[hidden] { display: none; }
+.s3d-card { position: absolute; z-index: 3; left: .6rem; right: .6rem; bottom: .6rem; display: grid; gap: .35rem; padding: .9rem 1rem calc(.9rem + env(safe-area-inset-bottom, 0px)); border-radius: 18px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 34px rgb(0 0 0 / .26); }
+.s3d-card[hidden] { display: none; }
+.s3d-card-h { display: flex; align-items: center; justify-content: space-between; gap: .6rem; } .s3d-card-h b { font-size: 1.05rem; min-width: 0; overflow-wrap: anywhere; }
+.s3d-x { min-width: 44px; min-height: 44px; padding: 0; flex: none; border-radius: 50%; }
+.s3d-card-b { margin: 0; font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--primary); } .s3d-card small { color: var(--muted); }
+.s3d-card-a { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .25rem; } .s3d-card-a .btn { min-height: 46px; flex: 1 1 10rem; }
+@media (min-width: 761px) { .s3d-card { left: auto; right: .8rem; bottom: .8rem; width: min(360px, calc(100% - 1.6rem)); } .s3d-hint { left: .8rem; transform: none; border-radius: 12px; text-align: left; } }
+@media (max-width: 760px) { .s3d-host { height: clamp(420px, calc(100svh - 230px), 720px); } .s3d-bt { display: none; } .s3d-btn { padding-inline: 0; } .s3d-hud { top: .45rem; right: .45rem; } }
+@media (prefers-reduced-motion: reduce) { .s3d-canvas { cursor: default; } }
+.s3d-list { position: absolute; left: 0; right: 0; bottom: .7rem; display: flex; gap: .45rem; padding: .2rem .7rem; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
+.s3d-list::-webkit-scrollbar { display: none; } .s3d-list[hidden] { display: none; }
+.s3d-chip { flex: none; scroll-snap-align: start; display: inline-flex; align-items: center; gap: .45rem; min-height: 46px; padding: 0 .85rem; border-radius: 999px; border: 1.5px solid var(--c, var(--border)); background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--text); font: inherit; font-size: .9rem; cursor: pointer; touch-action: manipulation; box-shadow: 0 2px 8px rgb(0 0 0 / .12); }
+.s3d-chip:active { transform: scale(.97); } .s3d-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.s3d-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; } .s3d-chip-n { white-space: nowrap; max-width: 15rem; overflow: hidden; text-overflow: ellipsis; } .s3d-chip-v { font-variant-numeric: tabular-nums; color: var(--c); }
+
+.s3-stage.is-3d .s3-clockbox { z-index: 2; padding: .3rem .75rem; border-radius: 14px; background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(6px); pointer-events: none; }
+@media (max-width: 760px) { .s3-stage.is-3d .s3-clockbox small { display: none; } .s3-stage.is-3d .s3-clockbox { top: .45rem; left: .45rem; } }

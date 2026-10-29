@@ -27,8 +27,8 @@ const build = hash.digest('hex').slice(0, 10);
 const version = `${pkg.version}+${build}`;
 
 fs.writeFileSync(path.join(dist, 'config.js'), configJs(process.env, version));
-// js/vendor/ocr/ (≈8 MB OCR engine for scanned PDFs) is cached by the service worker on first use instead of being precached
-const precache = files.filter((f) => f !== 'sw.js' && f !== 'config.js' && !f.startsWith('js/vendor/ocr/'));
+// js/vendor/ocr/ (≈8 MB OCR engine for scanned PDFs) is cached by the service worker on first use instead of being precached — same for js/vendor/three/ (the rotatable 3D view)
+const precache = files.filter((f) => f !== 'sw.js' && f !== 'config.js' && !f.startsWith('js/vendor/ocr/') && !f.startsWith('js/vendor/three/'));   // the 3D engine (≈0.7 MB) is cached on first use too
 const sw = fs.readFileSync(path.join(src, 'sw.js'), 'utf8')
   .replace('__CACHE_VERSION__', build).replace('__PRECACHE__', JSON.stringify(['./', ...precache], null, 2));
 fs.writeFileSync(path.join(dist, 'sw.js'), sw);

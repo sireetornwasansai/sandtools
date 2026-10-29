@@ -1,0 +1,391 @@
+# ย้ายการเปลี่ยนแปลงหน้าแรก 3 มิติไปยัง repo ที่แก้ไปแล้ว — diff เทียบกับไฟล์ที่ส่งมาในแชท
+# ไฟล์ใหม่ทั้งไฟล์ (วางได้เลย): site-deco.js · site-3d.js · site-models3d.js · src/js/vendor/three/*
+# dashboard.js แก้ 1 บรรทัดข้อความ: เติม ', site-deco.js' หลัง 'site-rooms.js'
+
+--- a/src/js/modules/site-sim.js
++++ b/src/js/modules/site-sim.js
+@@ -21,6 +21,7 @@
+   MODES, MODE_IDS, usageRank, dayLabel, normalizeReplay, replayVisitors, replayRange, cumViews, dayStats, compareToPeak, replayInsights, replayCsv, makeSampleReplay, REPLAY_PRIVACY,
+   VIEW_KEY, VIEWS, VIEW_IDS, DEPT, HOSP, HOSP_GROUPS, HG, groupOf, HOSP_BLDS, BLD, bldOf, campusLayout, interiorLayout, deptWorld, deptLayout, deptStand, headStand, hospStand, hospRoute, hospDoor, ROLES, ROLE_IDS, roleOf, roleText, wingOf, normalizeWings, makeSampleWings, wingPick, wingNext } from './site-engine.js';
+ import { drawRoom, roomColor } from './site-rooms.js';
++import { HOSPITAL_NAME, layoutPlate, layoutSign, placeSigns, paintSigns, drawFigure } from './site-deco.js';
+ 
+ const G = 12; const CORR = 6; const ENT = [0.6, CORR]; const EXIT = [11.4, CORR]; const CAP = 16;
+ const RANGES = [[7, '7 วัน'], [30, '30 วัน'], [90, '90 วัน']]; const RANGE_KEY = 'sand:home3d:days';
+@@ -87,6 +88,7 @@
+   const clock = h('div', { class: 's3-clock' }); const sub = h('small'); const live = h('small', { class: 's3-live' }); const chip = h('div', { class: 's3-chip' }); const tip = h('div', { class: 's3-tip', role: 'status', hidden: true });
+   const scroller = h('div', { class: 's3-scroll' }, cv);
+   const brand = h('div', { class: 's3-brand', 'aria-hidden': 'true' }, h('i', null, '✚'), h('span', null, h('b', null, 'โรงพยาบาลสันทราย'), h('small', null, 'กลุ่มงานพัฒนาคุณภาพและระบบบริการ')));
++  const btn3d = h('button', { class: 'btn btn-sm s3-3dbtn', type: 'button', 'aria-pressed': 'false', title: 'ดูแบบ 3 มิติจริง — หมุน เลื่อน ซูมด้วยนิ้วหรือเมาส์ได้', onclick: () => toggle3d(false) }, '🧊 3D หมุนได้');
+   const stage = h('div', { class: 's3-stage' }, h('div', { class: 's3-clockbox' }, clock, sub, live), chip, scroller, brand, tip);
+   const prog = h('i'); const banner = h('div', { class: 's3-banner' }); const status = h('span', { class: 's3-status', role: 'status', 'aria-live': 'polite' });
+   const rangeEl = h('div', { class: 'tabs s3-range', role: 'tablist', 'aria-label': 'ช่วงเวลา' });
+@@ -107,7 +109,7 @@
+   const insightBox = h('div', { class: 's3-insights' }); const tableBox = h('div', { class: 's3-table-wrap' }); const note = h('p', { class: 's3-note' });
+   host.append(h('section', { class: 's3', 'aria-labelledby': 's3-title' },
+     h('div', { class: 's3-head' }, h('div', null, backBtn, titleEl, status), h('div', { class: 's3-tools' }, rangeEl, openBtn, refreshBtn, csvBtn)),
+-    banner, h('div', { class: 's3-viewbar' }, viewEl, viewHint), h('div', { class: 's3-modebar' }, modeEl, modeHint), stage,
++    banner, h('div', { class: 's3-viewbar' }, viewEl, btn3d, viewHint), h('div', { class: 's3-modebar' }, modeEl, modeHint), stage,
+     h('div', { class: 's3-controls' }, playBtn, liveBtn, loopBtn,
+       h('button', { class: 'btn', type: 'button', onclick: () => { t = range.from; lastMin = -1; playing = true; sync(); } }, svgIcon(ICONS.rotate, 16), 'เล่นใหม่ตั้งแต่เช้า'),
+       h('button', { class: 'btn', type: 'button', onclick: () => { setLive(true); } }, svgIcon(ICONS.eye, 16), 'ไปที่เวลาปัจจุบัน'),
+@@ -310,6 +312,37 @@
+       if (!Object.keys(W.map).length) banner.append(notice('warn', 'โหลดส่วนย่อยของระบบไม่สำเร็จ', (e && e.message) || 'เกิดข้อผิดพลาด'));
+     }
+   }
++  // ---------- rotatable 3D view (site-3d.js = three.js; loaded only when asked for, or on a phone) ----------
++  const RENDER_KEY = 'sand:home3d:render'; let v3 = null; let v3At = 0; let v3Busy = false;
++  const want3d = () => { try { const p = localStorage.getItem(RENDER_KEY); return p === '3d' || (!p && typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches); } catch { return false; } };
++  /** The people standing in system i right now, as role ids ('' = role not known), at most 8. */
++  function peopleOf(i, F) {
++    const here = F.at[i].length + (F.rm[i] ? 0 : 0) + (F.rm && deptOn() ? DL[i].rooms.reduce((a, _r, q) => a + (F.rm[i][q] ? F.rm[i][q].length : 0), 0) : 0); const n = Math.min(8, here || Math.min(3, sites[i].realtime || 0)); const m = siteMix(i);
++    return Array.from({ length: n }, (_x, q) => (m.tot ? roleDraw(m, 1000 + i * 17 + q) : '') || '');
++  }
++  function snapshot3d() {
++    const F = planState(t); const approx = !(dayOn() && R.rep.scale === 1); const topI = sites.reduce((b, s, i) => (s.pv > (sites[b] ? sites[b].pv : -1) ? i : b), 0);
++    return { dark: document.documentElement.dataset.theme === 'dark', stations: sites.map((s, i) => { const st = stateOf(s); const ok = st === 'ok'; return { key: s.key, name: short(s.name, 26), icon: THEMES[themes[i]].icon, theme: themes[i], col: colOf(i), state: st, stateText: STATE_TXT[st], value: ok ? F.cum[i] * pfNow() : null, approx, unit: 'ครั้ง', online: ok ? s.realtime || 0 : 0, people: peopleOf(i, F), top: i === topI && ok && sites.length > 1 }; }) };
++  }
++  function close3d(remember = true) {
++    if (!v3) return; const v = v3; v3 = null; try { v.destroy(); } catch { /* ignore */ }
++    stage.classList.remove('is-3d'); scroller.hidden = false; btn3d.setAttribute('aria-pressed', 'false'); btn3d.textContent = '🧊 3D หมุนได้'; if (remember) { try { localStorage.setItem(RENDER_KEY, '2d'); } catch { /* ignore */ } }
++    resize(); drawAll();
++  }
++  /** @param {boolean} auto true = opened by itself (phone) → stay quiet when WebGL is missing */
++  async function toggle3d(auto) {
++    if (v3Busy || dead) return; if (v3) { close3d(); return; }
++    v3Busy = true; btn3d.disabled = true; btn3d.textContent = 'กำลังโหลด 3D…';
++    try {
++      const mod = await import('./site-3d.js'); if (dead) return;
++      const host3 = h('div', { class: 's3d-host' }); stage.insertBefore(host3, scroller); scroller.hidden = true; stage.classList.add('is-3d');
++      try {
++        v3 = await mod.mountScene3D(host3, { reduced, font, sub: 'กลุ่มงานพัฒนาคุณภาพและระบบบริการ', onOpen: (key) => open(key), onEnter: (i, key) => { close3d(false); enterSite(i, key); }, onFail: (why) => { toast(why, 'info'); close3d(false); } });
++      } catch (e) { host3.remove(); stage.classList.remove('is-3d'); scroller.hidden = false; throw e; }
++      v3.update(snapshot3d()); v3At = performance.now(); btn3d.setAttribute('aria-pressed', 'true'); try { localStorage.setItem(RENDER_KEY, '3d'); } catch { /* ignore */ }
++    } catch (e) { if (!auto) toast(`เปิดภาพ 3 มิติไม่ได้ — ${(e && e.message) || 'อุปกรณ์ไม่รองรับ WebGL'}`, 'error'); }
++    finally { v3Busy = false; btn3d.disabled = false; btn3d.textContent = v3 ? '◻ กลับภาพแบน' : '🧊 3D หมุนได้'; }
++  }
+   function setView(v) {
+     if (!VIEW_IDS.includes(v) || v === view) return; if (ins) leave(); view = v; hb = null; try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ }
+     hoverT = null; hoverB = ''; hover = -1; tip.hidden = true; rebuildPlan(); resize(); planWings(); lastMin = -1; loadWings(); drawAll();
+@@ -458,25 +491,26 @@
+     poly([P(x0, y1, a), P(x1, y1, a), P(x1, y1, b), P(x0, y1, b)], shade(col, 0.82)); poly([P(x1, y0, a), P(x1, y1, a), P(x1, y1, b), P(x1, y0, b)], shade(col, 0.66));
+     poly([P(x0, y0, b), P(x1, y0, b), P(x1, y1, b), P(x0, y1, b)], shade(col, 1.08));
+   }
+-  function person(x, y, col, back = false, now = 0, sc = 1, role = '') {
+-    const [sx, sy] = P(x, y); const s = tw * 0.075 * sc;
++  /** Drawing kit for site-deco.js: getters, because the camera, scale and theme change between frames. */
++  const DG = { get ctx() { return ctx; }, get pal() { return pal; }, get font() { return font; }, get tw() { return tw; }, get camZ() { return cam.z; }, get width() { return cv.width / dpr; }, get reduced() { return reduced; }, get clampX() { return !ins && cam.z < 1.05; }, dropWhenCrowded: true, obstacles: [] };
++  /** A visitor: head, torso, two arms, two legs (they swing while walking). The outfit follows the role (admin purple blazer · head orange + clipboard · officer cyan + ID card · committee green + papers · researcher white coat + test tube · user casual + phone);
++   *  no role = a shirt in the colour of the room. `id` keeps one person looking the same on every frame; `kind` = 'nurse' for the vaccine room. */
++  function person(x, y, col, back = false, now = 0, sc = 1, role = '', id = 0, walk = false, kind = '') {
++    const [sx, sy] = P(x, y); const s = tw * 0.075 * sc * 1.25;
+     if (back) {   // came back the same day: gold halo on the floor, dark outline on the body, gold ring round the head
+       const k = reduced ? 1 : 0.9 + 0.1 * Math.sin(now / 280 + x * 3);
+       ctx.fillStyle = 'rgba(245,158,11,.30)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 2.1 * k, s * 0.98 * k, 0, 0, 7); ctx.fill();
+       ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.4, s * 0.32); ctx.beginPath(); ctx.ellipse(sx, sy, s * 2.1 * k, s * 0.98 * k, 0, 0, 7); ctx.stroke();
+-    } else { ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.2, s * 0.55, 0, 0, 7); ctx.fill(); }
+-    ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, sy - s * 3.3, s * 1.7, s * 3.3, s * 0.7); ctx.fill();
+-    if (back) { ctx.strokeStyle = pal.ink; ctx.lineWidth = Math.max(1.5, s * 0.4); ctx.stroke(); }
+-    ctx.fillStyle = '#f1c9a5'; ctx.beginPath(); ctx.arc(sx, sy - s * 4, s * 0.85, 0, 7); ctx.fill();
+-    if (back) { ctx.strokeStyle = BACK_COL; ctx.lineWidth = Math.max(1.5, s * 0.42); ctx.stroke(); }
+-    if (role && ROLES[role]) { ctx.fillStyle = ROLES[role].col; ctx.beginPath(); ctx.arc(sx, sy - s * 5.6, s * 0.75, 0, 7); ctx.fill(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, s * 0.25); ctx.stroke(); }   // coloured dot over the head = role (admin purple, head orange, officer cyan, committee green, researcher pink, general user grey)
+-  }
+-  function pill(text, x, y, color, sc = 1) {
+-    const kz = Math.pow(cam.z, -0.6) * sc;   // labels grow only a little when the camera zooms in
+-    ctx.font = `600 ${Math.max(9, tw * 0.15 * kz)}px ${font}`; const w = ctx.measureText(text).width + 14 * kz; const hh = Math.max(16, tw * 0.27 * kz);
+-    if (!ins && cam.z < 1.05) { const cw = cv.width / dpr; x = Math.min(Math.max(x, w / 2 + 4), cw - w / 2 - 4); }
+-    ctx.fillStyle = pal.pill; ctx.strokeStyle = color || pal.pillLine; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x - w / 2, y - hh / 2, w, hh, hh / 2); ctx.fill(); ctx.stroke();
+-    ctx.fillStyle = color || pal.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, x, y + 0.5);
++    } else { ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx, sy, s * 1.25, s * 0.55, 0, 0, 7); ctx.fill(); }
++    const known = role && ROLES[role] ? role : '';
++    drawFigure(DG, { sx, sy, s, now, walk, seed: id, role: known, kind, col, back, dot: known ? ROLES[known].col : '' });   // coloured dot over the head = role (legend)
++  }
++  /** A label = a sign on a post standing on the ground (never floating); queued and placed without overlaps by flushSigns(). */
++  function pill(text, x, y, color, sc = 1, prio = 1) { SIGNQ.push(layoutSign(DG, { text, x, y, col: color, sc, prio })); }
++  let SIGNQ = []; let PLT = [];   // this frame's signs and base plates
++  function flushSigns(now) {   // every model's click box = something a plate should not cover (a plate may stand on its own model's floor)
++    DG.obstacles = [...hits.map((q) => ({ ...q, own: q.i })), ...whits.map((q) => ({ ...q, own: undefined })), ...(typeof bhits === 'undefined' ? [] : bhits.map((q) => ({ ...q, own: undefined })))];
++    const list = [...SIGNQ, ...PLT.map((p) => layoutPlate(DG, p, now))]; SIGNQ = []; PLT = []; paintSigns(DG, placeSigns(DG, list), now);
+   }
+   // ---------- hospital building: floor slab, service corridor, emblem ----------
+   function hospitalBase(now) {
+@@ -550,7 +584,7 @@
+       box(cx - 0.62, cy - 0.5, 0.5, 0.5, 1.15, '#e0f2fe'); faceY(cx - 0.86, cx - 0.38, cy - 0.248, 0.6, 0.64, '#93c5fd'); faceY(cx - 0.55, cx - 0.5, cy - 0.248, 0.7, 0.95, '#64748b'); faceY(cx - 0.55, cx - 0.5, cy - 0.248, 0.2, 0.45, '#64748b');
+       box(cx + 0.1, cy + 0.15, 1.0, 0.5, 0.28, '#0d9488'); box(cx - 0.28, cy + 0.15, 0.25, 0.4, 0.06, '#f8fafc', 0.28);
+       box(cx + 0.65, cy - 0.45, 0.35, 0.3, 0.4, '#cbd5e1'); for (const d of [0, 1, 2]) { box(cx + 0.55 + d * 0.1, cy - 0.45, 0.07, 0.07, 0.13, '#38bdf8', 0.4); box(cx + 0.55 + d * 0.1, cy - 0.45, 0.07, 0.07, 0.03, '#ef4444', 0.53); }
+-      person(cx + 0.5, cy + 0.55, '#ffffff');
++      person(cx + 0.5, cy + 0.55, '#ffffff', false, now, 1, '', 3, false, 'nurse');
+     } else if (th === 'dental') {   // ห้องทันตกรรม: dental chair, lamp, instrument tray
+       box(cx, cy + 0.1, 0.5, 0.5, 0.12, '#475569'); box(cx - 0.1, cy + 0.1, 0.7, 0.45, 0.18, '#0ea5e9', 0.12); box(cx - 0.55, cy + 0.1, 0.25, 0.45, 0.55, '#0ea5e9', 0.12);
+       box(cx + 0.5, cy - 0.35, 0.06, 0.06, 0.95, '#94a3b8'); box(cx + 0.3, cy - 0.35, 0.42, 0.14, 0.08, '#f8fafc', 0.95); box(cx + 0.55, cy + 0.55, 0.35, 0.3, 0.4, '#e2e8f0'); box(cx + 0.55, cy + 0.55, 0.2, 0.08, 0.03, '#94a3b8', 0.4);
+@@ -558,6 +592,15 @@
+       box(cx - 0.35, cy + 0.1, 1.1, 0.55, 0.3, '#14b8a6'); box(cx - 0.7, cy + 0.1, 0.3, 0.5, 0.08, '#f8fafc', 0.3);
+       for (const [x, y] of [[0.05, -0.55], [0.95, -0.55], [0.05, -0.15], [0.95, -0.15]]) box(cx + x, cy + y, 0.05, 0.05, 0.5, '#94a3b8'); box(cx + 0.5, cy - 0.55, 1.0, 0.05, 0.05, '#64748b', 0.5); box(cx + 0.5, cy - 0.15, 1.0, 0.05, 0.05, '#64748b', 0.5);
+       disc(cx + 0.45, cy + 0.65, 0.22, tw * 0.1, col);
++    } else if (th === 'eval') {   // ห้องติดตามประเมินผลงาน / ยื่น อวช.: progress wall (4 stages, ticks) → submission tray with folders → review desk + monitor → podium with trophy + a reviewer
++      box(cx, cy - 0.85, 1.8, 0.06, 0.9, '#f8fafc', 0.4);
++      [[1.16, 0.95, col], [1.0, 0.72, '#16a34a'], [0.84, 0.48, '#f59e0b'], [0.68, 0.25, '#8b5cf6']].forEach(([z, len, c]) => { faceY(cx - 0.8, cx - 0.8 + len, cy - 0.819, z, z + 0.07, c); faceY(cx - 0.8 + len + 0.04, cx - 0.8 + len + 0.12, cy - 0.819, z - 0.005, z + 0.075, '#94a3b8'); });
++      faceY(cx + 0.45, cx + 0.62, cy - 0.819, 0.7, 1.17, '#16a34a'); faceY(cx + 0.66, cx + 0.8, cy - 0.819, 0.7, 0.9, '#16a34a');   // big tick: approved
++      box(cx - 0.62, cy + 0.2, 0.5, 0.42, 0.24, pal.desk); box(cx - 0.62, cy + 0.2, 0.42, 0.32, 0.05, '#60a5fa', 0.24); box(cx - 0.62, cy + 0.2, 0.4, 0.3, 0.05, '#fbbf24', 0.29); box(cx - 0.62, cy + 0.2, 0.38, 0.28, 0.05, col, 0.34);   // folders being submitted
++      box(cx - 0.05, cy + 0.2, 0.62, 0.42, 0.3, pal.desk); box(cx - 0.05, cy + 0.08, 0.4, 0.06, 0.34, lit ? shade(col, 1 + (blink ? 0.1 : 0)) : pal.screen, 0.3); box(cx - 0.05, cy + 0.2, 0.3, 0.16, 0.02, '#e2e8f0', 0.3);
++      box(cx + 0.62, cy + 0.12, 0.24, 0.3, 0.2, '#cbd5e1'); box(cx + 0.84, cy + 0.12, 0.2, 0.3, 0.32, '#e2e8f0'); box(cx + 0.4, cy + 0.12, 0.2, 0.3, 0.12, '#94a3b8');   // podium 2 · 1 · 3
++      box(cx + 0.84, cy + 0.12, 0.05, 0.05, 0.14, '#f59e0b', 0.32); disc(cx + 0.84, cy + 0.12, 0.54, tw * 0.07, '#fbbf24'); disc(cx + 0.84, cy + 0.12, 0.54, tw * 0.036, '#fde68a');
++      person(cx - 0.05, cy + 0.62, '#ffffff', false, now, 0.95, 'head', 5, false);
+     } else if (th === 'plan') {   // ห้องแผนงาน: Gantt wall board + planning table
+       box(cx, cy - 0.8, 1.7, 0.06, 0.9, '#f8fafc', 0.4); faceY(cx - 0.75, cx - 0.1, cy - 0.769, 1.12, 1.2, col); faceY(cx - 0.4, cx + 0.3, cy - 0.769, 0.97, 1.05, '#f59e0b'); faceY(cx - 0.1, cx + 0.65, cy - 0.769, 0.82, 0.9, '#16a34a'); faceY(cx + 0.2, cx + 0.7, cy - 0.769, 0.67, 0.75, '#8b5cf6');
+       box(cx, cy + 0.15, 1.3, 0.55, 0.3, pal.desk); box(cx - 0.2, cy + 0.15, 0.45, 0.3, 0.03, '#334155', 0.3); box(cx + 0.35, cy + 0.1, 0.12, 0.12, 0.02, '#fde047', 0.3); box(cx + 0.5, cy + 0.25, 0.12, 0.12, 0.02, '#fb7185', 0.3);
+@@ -624,6 +667,12 @@
+     { const pos = along([stand, ...route.slice().reverse(), ext], (tt - s0.end) / Math.max(1, j.exit - s0.end)); return { pos, state: 'walk', zone: z, rank: 0, a: fade(pos) }; }
+   }
+   const lineOf = (i, F) => { const s = sites[i]; const st = stateOf(s); return st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]; };
++  /** The base plate of one station: name · usage number (embossed) · the hospital — standing on the floor at the foot of the model. */
++  function plateFor(key, i, s, st, col, F, px, py, hov, sc = 1, maxW) {
++    const ok = st === 'ok';
++    return { key: `${view}|${key}`, own: i, x: px, y: py, name: `${THEMES[themes[i]].icon} ${short(s.name, 22)}`, sub: HOSPITAL_NAME, col: ok ? col : STATE_COL[st], hov, dim: st === 'paused' || st === 'idle', sc, maxW,
++      value: ok ? F.cum[i] * pfNow() : null, approx: !(dayOn() && R.rep.scale === 1), unit: 'ครั้ง', online: ok ? s.realtime || 0 : 0, status: STATE_TXT[st] };
++  }
+   const busyAt = (i, F) => F.at[i].length > 0 || (F.rm[i] || []).some((a2) => a2.length > 0);
+   const dotAt = (x, y, z, c, blink, now, i) => { const [bx, by] = P(x, y, Z(z)); ctx.fillStyle = c; ctx.globalAlpha = blink ? 0.55 + (reduced ? 0.45 : 0.45 * Math.sin(now / 350 + i)) : 1; ctx.beginPath(); ctx.arc(bx, by, Math.max(3, tw * 0.05), 0, 7); ctx.fill(); ctx.globalAlpha = 1; };
+ 
+@@ -638,16 +687,14 @@
+       const a2 = P(hall.cx, d.mouth[1]); const b2 = P(hall.cx, d.top ? hd.y1 : hd.y0); ctx.beginPath(); ctx.moveTo(a2[0], a2[1]); ctx.lineTo(b2[0], b2[1]); ctx.stroke(); ctx.restore();
+       items.push({ d: hc[0] + hc[1], f: () => { ctx.globalAlpha = st === 'paused' || st === 'idle' ? 0.6 : 1; scaled(0.82, hc[0], hc[1], () => prop(themes[i], hc[0], hc[1], col, lit && (s.realtime > 0 || s.key === topKey), st, now, i)); ctx.globalAlpha = 1; dotAt(hc[0], hc[1], 1.25, STATE_COL[st], lit || st === 'silent', now, i); } });
+       hits.push({ i, d: hc[0] + hc[1], ...bbox([...rectPts(hd.x0, hd.y0, hd.x1, hd.y1), P(hd.x0, hd.y0, Z(1.2)), P(hd.x1, hd.y0, Z(1.2))]) });
+-      const [lx, ly] = d.top ? P(hall.cx, hd.y0, Z(1.15)) : P(hall.cx, hd.y1, 0); const off = d.top ? -tw * 0.2 : tw * 0.22;
+-      labels.push({ x: lx, y: ly + off, text: `${THEMES[themes[i]].icon} ${short(s.name, 20)}`, col: !lit && st === 'silent' ? STATE_COL.silent : null, sc: 1 });
+-      labels.push({ x: lx, y: ly + off + hh + 3, text: lineOf(i, F), col: lit ? (busyAt(i, F) ? col : null) : STATE_COL[st], sc: 1 });
++      { const [px, py] = P(hc[0], hc[1] + 0.62, 0); PLT.push(plateFor(s.key, i, s, st, col, F, px, py, hov)); }
+       const wg = W.map[s.key]; const mxw = wg ? Math.max(1, ...wg.units.map((u) => u.pv)) : 1;
+       d.rooms.forEach((r) => {
+         const u = wg && wg.units[r.p]; if (!u) return; const rc = roomColor(u.kind); const hot = F.rm[i][r.p].length > 0; const hv = !!hoverT && hoverT.i === i && hoverT.p === r.p; const k = Math.max(0.34, Math.min(0.62, r.w / 2.7));
+         ctx.globalAlpha = 0.12 + 0.42 * (u.pv / mxw); poly(rectPts(r.x0, r.y0, r.x1, r.y1), rc); ctx.globalAlpha = 1; poly(rectPts(r.x0, r.y0, r.x1, r.y1), null, hv ? pal.ink : rc, hv ? 2.4 : 1);
+         items.push({ d: r.c[0] + r.c[1] + 0.02, f: () => { ctx.globalAlpha = u.pv ? 1 : 0.55; scaled(k, r.px, r.c[1], () => drawRoom(kit, u.kind, r.px, r.c[1], rc, hot, now)); ctx.globalAlpha = 1; if (u.realtime > 0) dotAt(r.px, r.c[1], 0.95 * k + 0.5, STATE_COL.ok, true, now, r.p); } });
+         whits.push({ i, p: r.p, key: u.key, d: r.c[0] + r.c[1], ...bbox([...rectPts(r.x0, r.y0, r.x1, r.y1), P(r.x0, r.y0, Z(0.8))]) });
+-        const [qx, qy] = P(r.c[0], r.y1 - 0.14, 0); labels.push({ x: qx, y: qy, text: `${kindMeta(u.kind).icon} ${short(u.name, hv ? 18 : 6)}`, col: hv ? rc : null, sc: 0.66 });
++        if (hv) { const [qx, qy] = P(r.c[0], r.y1 - 0.14, 0); labels.push({ x: qx, y: qy, text: `${kindMeta(u.kind).icon} ${short(u.name, 18)}`, col: rc, sc: 0.8, prio: 2 }); }   // page names only when pointed at (a wall of pills hid the models)
+       });
+     });
+   }
+@@ -1212,15 +1259,7 @@
+       ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = Math.max(1, s * 0.14); ctx.beginPath(); ctx.moveTo(sx + s * 1.5, sy); ctx.lineTo(sx + s * 1.5, by - s * 5); ctx.moveTo(sx + s * 1.1, by - s * 5); ctx.lineTo(sx + s * 1.9, by - s * 5); ctx.stroke();
+       ctx.fillStyle = '#e0f2fe'; ctx.beginPath(); ctx.roundRect(sx + s * 1.25, by - s * 4.8, s * 0.5, s * 0.9, s * 0.2); ctx.fill(); ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = Math.max(1, s * 0.1); ctx.stroke();
+     }
+-    if (kind === 'doctor') { body('#f8fafc', '#cbd5e1'); ctx.strokeStyle = '#334155'; ctx.lineWidth = Math.max(1, s * 0.15); ctx.beginPath(); ctx.arc(sx, by - s * 2.6, s * 0.5, 0.1, Math.PI - 0.1); ctx.stroke(); }
+-    else if (kind === 'nurse') body('#14b8a6', '#0f766e');
+-    else if (kind === 'patient') { body('#bfdbfe', '#93c5fd'); ctx.fillStyle = '#93c5fd'; ctx.fillRect(sx - s * 0.85, by - s * 1.6, s * 1.7, s * 0.28); }
+-    else if (kind === 'worker') { body('#6b7280'); ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.roundRect(sx - s * 0.85, by - s * 3.3, s * 1.7, s * 2.2, s * 0.6); ctx.fill(); ctx.fillStyle = '#e5e7eb'; ctx.fillRect(sx - s * 0.85, by - s * 2.3, s * 1.7, s * 0.2); }
+-    else body(VIS_COLS[seed % VIS_COLS.length]);
+-    head(by - s * 4); if (kind === 'worker') { ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(sx, by - s * 4.05, s * 0.95, Math.PI, 0); ctx.fill(); ctx.fillRect(sx - s * 1.1, by - s * 4.05, s * 2.2, s * 0.18); }
+-    else if (kind === 'nurse') { hair(by - s * 4); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(sx - s * 0.6, by - s * 4.95, s * 1.2, s * 0.5, s * 0.15); ctx.fill(); }
+-    else hair(by - s * 4);
+-    if (kind === 'visitor' && seed % 3 === 0) { ctx.fillStyle = '#7c3aed'; ctx.beginPath(); ctx.roundRect(sx + s * 0.9, by - s * 1.9, s * 0.8, s * 0.9, s * 0.2); ctx.fill(); }
++    drawFigure(DG, { sx, sy, s, now, walk: kind !== 'stand', seed, kind, col: VIS_COLS[seed % VIS_COLS.length] });   // head · torso · arms · legs, outfit by kind (site-deco.js)
+   }
+   let AMB = null; let AMBfor = null;
+   function buildAmbient(L) {
+@@ -1296,8 +1335,7 @@
+       ctx.globalAlpha = 0.9; poly(r.front ? rectPts(r.door[0] - 0.3, r.y0 - 0.02, r.door[0] + 0.3, r.y0 + 0.14) : rectPts(r.door[0] - 0.3, r.y1 - 0.14, r.door[0] + 0.3, r.y1 + 0.02), col); ctx.globalAlpha = 1;
+       items.push({ d: r.c[0] + r.c[1] + 0.02, f: () => { ctx.globalAlpha = st === 'paused' || st === 'idle' ? 0.6 : 1; scaled(k, r.px, r.c[1], () => prop(themes[i], r.px, r.c[1], col, lit && (s.realtime > 0 || s.key === topKey), st, now, i)); ctx.globalAlpha = 1; dotAt(r.px, r.c[1], 0.9 * k + 0.6, STATE_COL[st], lit || st === 'silent', now, i); } });
+       hits.push({ i, d: r.c[0] + r.c[1], ...bbox([...rectPts(r.x0, r.y0, r.x1, r.y1), P(r.x0, r.y0, Z(1.1)), P(r.x1, r.y0, Z(1.1))]) });
+-      const [lx, ly] = r.front ? P(r.c[0], r.y1, 0) : P(r.c[0], r.y0, Z(1.25)); const cnt = st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())}` : STATE_TXT[st];
+-      labels.push({ x: lx, y: r.front ? ly + tw * 0.2 : ly - tw * 0.2, text: `${THEMES[themes[i]].icon} ${short(s.name, 12)} · ${cnt}`, col: !lit ? STATE_COL[st] : busyAt(i, F) ? col : null, sc: 0.9 });
++      { const [px, py] = P(r.c[0], r.y1 - 0.3, 0); PLT.push(plateFor(s.key, i, s, st, col, F, px, py, hov, 0.92, tw * 2.5)); }
+     });
+     if (!er) HOSP_GROUPS.forEach((g, gi) => { const wg = L.wings[gi]; if (!wg || !wg.count) return; const [bx, by] = P((wg.x0 + wg.x1) / 2, L.sy, 0); labels.push({ x: bx, y: by, text: `${g.icon} ปีก${g.name} · ${wg.count} ระบบ`, col: g.col, sc: 1.05 }); });   // wing names stand on the walking street between the two rows — the only band with no room label
+     if (!L.count) { const [bx, by] = P(gx, (yb0 + yf1) / 2, 0); labels.push({ x: bx, y: by, text: 'ยังไม่มีระบบในอาคารนี้', col: B.col, sc: 1 }); }
+@@ -1317,7 +1355,7 @@
+   }
+ 
+   function drawPlan(now) {
+-    const F = planState(t); const items = []; const labels = []; hits = []; whits = []; bhits = []; xhit = null;
++    const F = planState(t); SIGNQ = []; PLT = []; const items = []; const labels = []; hits = []; whits = []; bhits = []; xhit = null;
+     const kit = { ctx, P, Z, get tw() { return tw; }, pal, reduced, box, faceX, faceY, disc, poly, shade };
+     hospitalBase(now); if (!hospOn()) { gatePad('in', now); gatePad('out', now); }
+     if (deptOn()) deptScene(items, labels, F, now, kit); else if (hospOut()) campusScene(items, labels, F, now, kit); else if (hospIn()) interiorScene(items, labels, F, now, kit);
+@@ -1326,12 +1364,12 @@
+     for (const j of jr) {
+       if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
+       const r = planPlace(j, t, F); if (!r) continue; here += 1; if (r.hid || (r.state !== 'walk' && r.rank >= 6)) continue;
+-      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => { ctx.globalAlpha = r.a == null ? 1 : r.a; person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc, j.role); ctx.globalAlpha = 1; } });
++      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => { ctx.globalAlpha = r.a == null ? 1 : r.a; person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc, j.role, j.id, r.state === 'walk'); ctx.globalAlpha = 1; } });
+     }
+     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
+-    labels.forEach((q) => pill(q.text, q.x, q.y, q.col, q.sc));
++    labels.forEach((q) => pill(q.text, q.x, q.y, q.col, q.sc, q.prio));
+     if (!hospOn()) { gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`); }
+-    hud(F, here);
++    flushSigns(now); hud(F, here);
+   }
+ 
+   // ---------- frame state: floor visitors and page journeys are drawn by the same code ----------
+@@ -1366,14 +1404,14 @@
+       const top = ins.top;
+       return ins.units.map((u) => ({ key: u.key, col: roomColor(u.kind), pv: u.pv, lit: u.pv > 0, live: u.pv > 0 && (u.realtime > 0 || u.key === top), alpha: u.pv ? 1 : 0.6, icon: kindMeta(u.kind).icon, name: u.name, top: u.key === top && u.pv > 0,
+         dot: u.realtime > 0 ? STATE_COL.ok : null, dotBlink: true, dotZ: 1.55, lineCol: (F, i) => (F.work[i].length ? roomColor(u.kind) : null),
+-        line: (F, i) => `≈${fmt(F.cum[i] * ins.pf)} ครั้ง${u.realtime ? ` · ออนไลน์ ${fmt(u.realtime)}` : ''}`,
++        line: (F, i) => `≈${fmt(F.cum[i] * ins.pf)} ครั้ง${u.realtime ? ` · ออนไลน์ ${fmt(u.realtime)}` : ''}`, val: (F, i) => F.cum[i] * ins.pf, rt: u.realtime || 0,
+         prop: (g, cx, cy, col, live, now) => drawRoom(g, u.kind, cx, cy, col, live, now) }));
+     }
+     const topKey = sm.top && sm.top.pv > 0 ? sm.top.key : '';
+     return sites.map((s, i) => { const st = stateOf(s); const lit = st === 'ok';
+       return { key: s.key, col: colOf(i), pv: s.pv, lit, live: lit && (s.realtime > 0 || s.key === topKey), alpha: st === 'paused' || st === 'idle' ? 0.6 : 1, icon: THEMES[themes[i]].icon, name: s.name, top: s.key === topKey,
+         dot: STATE_COL[st], dotBlink: lit || st === 'silent', dotZ: themes[i] === 'ems' || themes[i] === 'visit' ? 1.35 : 1.7,
+-        lineCol: (F) => (st === 'ok' ? (F.work[i].length ? colOf(i) : null) : STATE_COL[st]), line: (F) => (st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]),
++        lineCol: (F) => (st === 'ok' ? (F.work[i].length ? colOf(i) : null) : STATE_COL[st]), line: (F) => (st === 'ok' ? `${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(F.cum[i] * pfNow())} ครั้ง${s.realtime ? ` · ออนไลน์ ${fmt(s.realtime)}` : ''}` : STATE_TXT[st]), val: (F) => F.cum[i] * pfNow(), rt: s.realtime || 0,
+         prop: (g, cx, cy, col, live, now) => prop(themes[i], cx, cy, col, live, st, now, i) }; });
+   }
+ 
+@@ -1422,18 +1460,19 @@
+       if (t >= j.enter) { entered += 1; if (j.back) enteredBack += 1; } if (t >= j.exit) left += 1;
+       const r = place(j, t, F); if (!r) continue; here += 1;
+       if (r.state === 'work' && r.rank >= CAP) continue;
+-      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK, !!j.back, now) });
++      items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => person(r.pos[0], r.pos[1], r.state === 'work' ? Zs[r.zone].col : WALK, !!j.back, now, 1, '', j.id, r.state === 'walk') });
+     }
+     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
++    SIGNQ = []; PLT = [];
+     Zs.forEach((z, i) => {
+-      const l = L[i]; const [lx, ly] = l.top ? P(l.c[0], l.c[1] - l.hy, Hz) : P(l.c[0], l.c[1] + l.hy, 0); const sc = ins && L.length > 6 ? 0.82 : 1; const kz = Math.pow(cam.z, -0.6) * sc;
+-      const off = (l.top ? -tw * 0.22 : tw * 0.24) * kz; const hh = Math.max(16, tw * 0.27 * kz);
+-      pill(`${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : 20)}`, lx, ly + off, !ins && z.dot === STATE_COL.silent ? STATE_COL.silent : null, sc);
+-      pill(z.line(F, i), lx, ly + off + hh + 3, z.lineCol(F, i), sc);
++      const l = L[i]; const sc = ins && L.length > 6 ? 0.82 : 1; const [cx2, cy2] = l.c; const rs = ins ? ins.site.name : '';
++      const [px, py] = P(cx2, cy2 + l.hy - 0.34, 0);
++      PLT.push({ key: `ins|${z.key}`, x: px, y: py, name: `${z.icon} ${short(z.name, ins ? (L.length > 6 ? 14 : 18) : 20)}`, sub: ins ? `${short(rs, 14)} · ${HOSPITAL_NAME}` : HOSPITAL_NAME, col: z.pv ? z.col : STATE_COL.idle, hov: hover === i || focus === i, dim: !z.pv, sc, maxW: tw * Math.max(2.4, l.hx * 2 + 0.8),
++        value: z.val(F, i), approx: true, unit: 'ครั้ง', online: z.rt || 0, status: '' });
+     });
+-    lanes.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.8));
++    lanes.forEach((q) => pill(q.text, q.x, q.y, q.col, 0.8, 0));
+     if (!hospOn()) { gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`); }
+-    hud(F, here);
++    flushSigns(now); hud(F, here);
+   }
+   /** Clock, counters, progress bar and the hour strip (once per drawn minute). */
+   function hud(F, here) {
+@@ -1595,6 +1634,7 @@
+       else t = Math.min(range.to, t + (dt / 1000) * speed);
+     }
+     const k = reduced ? 1 : 1 - Math.exp(-dt / 110); cam.z += (cam.tz - cam.z) * k; cam.tx += (cam.ttx - cam.tx) * k; cam.ty += (cam.tty - cam.ty) * k;
++    if (v3) { if (now - v3At > 900) { v3At = now; v3.update(snapshot3d()); } return; }
+     draw(now);
+   }
+   loadCss('site3d').catch(() => {});
+@@ -1604,7 +1644,7 @@
+   const io = typeof IntersectionObserver === 'function' ? new IntersectionObserver((e) => { onScreen = e[e.length - 1].isIntersecting; }) : null; if (io) io.observe(stage);
+   const onVisible = () => { if (document.hidden || S.busy || !S.at || S.source !== 'real') return; if (liveOn && liveUsable()) refreshLive(); else if (Date.now() - S.at > 120000) load(); };
+   document.addEventListener('visibilitychange', onVisible); timer = window.setInterval(onVisible, 15000);
+-  load().then(() => { if (!dead && !reduced && sites.length && !liveOn) play(); });   // starts playing "now" unless the visitor prefers reduced motion
++  load().then(() => { if (!dead && !reduced && sites.length && !liveOn) play(); if (!dead && sites.length && want3d()) toggle3d(true); });   // starts playing "now" unless the visitor prefers reduced motion
+   raf = requestAnimationFrame(loop);
+-  return () => { dead = true; seq += 1; cancelAnimationFrame(raf); clearInterval(timer); ro.disconnect(); mo.disconnect(); if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVisible); document.removeEventListener('keydown', onKey); };
++  return () => { dead = true; seq += 1; close3d(false); cancelAnimationFrame(raf); clearInterval(timer); ro.disconnect(); mo.disconnect(); if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVisible); document.removeEventListener('keydown', onKey); };
+ }
+
+--- a/src/js/modules/site-engine.js
++++ b/src/js/modules/site-engine.js
+@@ -33,10 +33,10 @@
+ export const THEMES = {
+   ems: { icon: '🚑', label: 'ยานพาหนะ / รถพยาบาล' }, hrd: { icon: '🎓', label: 'ห้องอบรมบุคลากร' }, ec: { icon: '🔬', label: 'ห้องวิจัย / จริยธรรมการวิจัย' }, vaccine: { icon: '💉', label: 'ห้องวัคซีน' },
+   dental: { icon: '🦷', label: 'ห้องทันตกรรม' }, pt: { icon: '🩺', label: 'ห้องกายภาพบำบัด' }, plan: { icon: '📊', label: 'ห้องแผนงาน / ยุทธศาสตร์' }, doc: { icon: '🗂️', label: 'ห้องสารบรรณ' },
+-  visit: { icon: '🏠', label: 'เยี่ยมบ้าน / แผนที่' }, fte: { icon: '📈', label: 'ห้องรายงานอัตรากำลัง (FTE)' }, web: { icon: '🌐', label: 'เว็บไซต์ / ระบบทั่วไป' },
++  visit: { icon: '🏠', label: 'เยี่ยมบ้าน / แผนที่' }, eval: { icon: '🏆', label: 'ห้องติดตามประเมินผลงาน (ยื่น อวช.)' }, fte: { icon: '📈', label: 'ห้องรายงานอัตรากำลัง (FTE)' }, web: { icon: '🌐', label: 'เว็บไซต์ / ระบบทั่วไป' },
+ };
+ const RULES = [
+-  ['fte', /\bfte\b|อัตรากำลัง/], ['vaccine', /vaccin|วัคซีน|\bepi\b|immuniz/], ['dental', /dental|ทันต|ฟัน/], ['pt', /physio|กายภาพ|\bpt\b|pt-?station/],
++  ['fte', /\bfte\b|อัตรากำลัง/], ['eval', /อวช|อ\.ว\.ช|ประเมินผลงาน|ติดตามผลงาน|ยื่นผลงาน|portfolio|performance-?(eval|review|track)/], ['vaccine', /vaccin|วัคซีน|\bepi\b|immuniz/], ['dental', /dental|ทันต|ฟัน/], ['pt', /physio|กายภาพ|\bpt\b|pt-?station/],
+   ['ems', /ยานพาหนะ|พาหนะ|ขอใช้รถ|จองรถ|รถพยาบาล|รถ|ambulance|\bems\b|fleet|vehicle|carsystem/], ['hrd', /hrd|อบรม|training|บุคลากร|ทรัพยากรบุคคล/],
+   ['ec', /\bec\b|จริยธรรม|วิจัย|ethic|research|\birb\b/], ['visit', /เยี่ยมบ้าน|home-?visit|แผนที่|\bmap\b/], ['doc', /สารบรรณ|เอกสาร|document|\bdocs?\b/], ['plan', /แผนงาน|ยุทธศาสตร์|strategy|\bplan\b|kpi|ตัวชี้วัด/],
+ ];
+@@ -560,7 +560,7 @@
+ export const HOSP = { X0: 0.4, Y0: 0.4, BLD: 5.2, YARD: 0.8, ROOM_W: 2.0, ROOM_D: 2.0, GAP_X: 0.7, SP: 1.3, AVE: 2.4, AVE_GAP: 0.45, SIDE: 0.4, WALK: 0.4, ROAD: 2.2, MIN_COLS: 2 };
+ export const HOSP_GROUPS = [
+   { id: 'admin', name: 'บริหารทั่วไป', icon: '🏢', col: '#0369a1', side: -1, themes: ['ems', 'fte', 'doc', 'web'] },
+-  { id: 'quality', name: 'พัฒนาคุณภาพ', icon: '🩺', col: '#0f766e', side: 1, themes: ['hrd', 'ec', 'vaccine', 'plan', 'dental', 'pt', 'visit'] },
++  { id: 'quality', name: 'พัฒนาคุณภาพ', icon: '🩺', col: '#0f766e', side: 1, themes: ['hrd', 'ec', 'vaccine', 'plan', 'eval', 'dental', 'pt', 'visit'] },
+ ];
+ /** Which wing a project belongs to: a `group:admin` / `group:quality` tag wins, otherwise its theme (vehicle · FTE · documents · websites → general administration; HRD · EC · vaccine · clinics · plans → quality development). */
+ export function groupOf(s, theme = themeOf(s)) {
+
+--- a/src/css/site3d.css
++++ b/src/css/site3d.css
+@@ -124,3 +124,35 @@
+ .s3-lg i.s3-r-committee { background: #16a34a; }
+ .s3-lg i.s3-r-researcher { background: #db2777; }
+ .s3-lg i.s3-r-user { background: #94a3b8; }
++
++/* ---- rotatable 3D view (site-3d.js) ---------------------------------------------------------------------------------------------------------- */
++.s3-3dbtn { margin-inline-start: .5rem; white-space: nowrap; min-height: 40px; border-radius: 999px; padding-inline: .9rem; font-weight: 700; }
++.s3-3dbtn[aria-pressed="true"] { background: var(--primary); color: var(--primary-contrast); border-color: var(--primary); }
++.s3-stage.is-3d .s3-brand, .s3-stage.is-3d .s3-chip { display: none; }
++.s3-stage.is-3d > .s3-scroll { display: none !important; }   /* the flat canvas keeps its own width otherwise (the `hidden` attribute loses to a display rule) */
++.s3-stage.is-3d { min-width: 0; }
++.s3 { grid-template-columns: minmax(0, 1fr); }   /* an item can never stretch the page column (a wide canvas / 3D box) */
++.s3d-host { position: relative; width: 100%; height: clamp(440px, 76vh, 760px); border-radius: inherit; overflow: hidden; touch-action: none; background: var(--surface-2); }
++.s3d-canvas { position: absolute; inset: 0; display: block; width: 100% !important; height: 100% !important; max-width: none; outline: none; touch-action: none; cursor: grab; } .s3d-canvas:active { cursor: grabbing; } .s3d-canvas:focus-visible { box-shadow: inset 0 0 0 3px var(--focus); }
++.s3d-hud { position: absolute; top: .6rem; right: .6rem; display: flex; flex-direction: column; align-items: flex-end; gap: .45rem; }
++.s3d-ic { font-size: 1.15rem; line-height: 1; } .s3d-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; border-radius: 999px; padding-inline: .9rem; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(6px); box-shadow: 0 2px 10px rgb(0 0 0 / .14); touch-action: manipulation; }
++.s3d-btn[aria-pressed="true"] { background: var(--primary); color: var(--primary-contrast); }
++.s3d-hint { position: absolute; left: 50%; bottom: 4.4rem; transform: translateX(-50%); margin: 0; padding: .45rem .9rem; max-width: calc(100% - 1.4rem); text-align: center; font-size: .82rem; line-height: 1.35; border-radius: 14px; color: var(--text-2); background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(6px); pointer-events: none; }
++.s3d-hint[hidden] { display: none; }
++.s3d-card { position: absolute; z-index: 3; left: .6rem; right: .6rem; bottom: .6rem; display: grid; gap: .35rem; padding: .9rem 1rem calc(.9rem + env(safe-area-inset-bottom, 0px)); border-radius: 18px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 34px rgb(0 0 0 / .26); }
++.s3d-card[hidden] { display: none; }
++.s3d-card-h { display: flex; align-items: center; justify-content: space-between; gap: .6rem; } .s3d-card-h b { font-size: 1.05rem; min-width: 0; overflow-wrap: anywhere; }
++.s3d-x { min-width: 44px; min-height: 44px; padding: 0; flex: none; border-radius: 50%; }
++.s3d-card-b { margin: 0; font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--primary); } .s3d-card small { color: var(--muted); }
++.s3d-card-a { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .25rem; } .s3d-card-a .btn { min-height: 46px; flex: 1 1 10rem; }
++@media (min-width: 761px) { .s3d-card { left: auto; right: .8rem; bottom: .8rem; width: min(360px, calc(100% - 1.6rem)); } .s3d-hint { left: .8rem; transform: none; border-radius: 12px; text-align: left; } }
++@media (max-width: 760px) { .s3d-host { height: clamp(420px, calc(100svh - 230px), 720px); } .s3d-bt { display: none; } .s3d-btn { padding-inline: 0; } .s3d-hud { top: .45rem; right: .45rem; } }
++@media (prefers-reduced-motion: reduce) { .s3d-canvas { cursor: default; } }
++.s3d-list { position: absolute; left: 0; right: 0; bottom: .7rem; display: flex; gap: .45rem; padding: .2rem .7rem; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
++.s3d-list::-webkit-scrollbar { display: none; } .s3d-list[hidden] { display: none; }
++.s3d-chip { flex: none; scroll-snap-align: start; display: inline-flex; align-items: center; gap: .45rem; min-height: 46px; padding: 0 .85rem; border-radius: 999px; border: 1.5px solid var(--c, var(--border)); background: color-mix(in srgb, var(--surface) 94%, transparent); color: var(--text); font: inherit; font-size: .9rem; cursor: pointer; touch-action: manipulation; box-shadow: 0 2px 8px rgb(0 0 0 / .12); }
++.s3d-chip:active { transform: scale(.97); } .s3d-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
++.s3d-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; } .s3d-chip-n { white-space: nowrap; max-width: 15rem; overflow: hidden; text-overflow: ellipsis; } .s3d-chip-v { font-variant-numeric: tabular-nums; color: var(--c); }
++
++.s3-stage.is-3d .s3-clockbox { z-index: 2; padding: .3rem .75rem; border-radius: 14px; background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(6px); pointer-events: none; }
++@media (max-width: 760px) { .s3-stage.is-3d .s3-clockbox small { display: none; } .s3-stage.is-3d .s3-clockbox { top: .45rem; left: .45rem; } }
+
+--- a/src/sw.js
++++ b/src/sw.js
+@@ -6,12 +6,14 @@
+ /* OCR engine for scanned PDFs (src/js/vendor/ocr/, ≈8 MB). Not precached: it is cached the first time OCR is used, in its own cache,
+  * so ordinary visits stay light and a new app version does not make everybody download it again. Bump the suffix after upgrading the files. */
+ const OCR_CACHE = 'ocr-assets-v1';
++/* The rotatable 3D view (src/js/vendor/three/, ≈0.7 MB): same idea — cached the first time someone opens it. Bump the suffix after upgrading the files. */
++const THREE_CACHE = 'three-assets-v1';
+ 
+ self.addEventListener('install', (e) => {
+   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE.map((p) => new Request(p, { cache: 'reload' })))).then(() => self.skipWaiting()));
+ });
+ self.addEventListener('activate', (e) => {
+-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => (k.startsWith('sand-') && k !== CACHE) || (k.startsWith('ocr-assets-') && k !== OCR_CACHE)).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
++  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => (k.startsWith('sand-') && k !== CACHE) || (k.startsWith('ocr-assets-') && k !== OCR_CACHE) || (k.startsWith('three-assets-') && k !== THREE_CACHE)).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+ });
+ self.addEventListener('fetch', (e) => {
+   const req = e.request;
+@@ -19,8 +21,9 @@
+   const url = new URL(req.url);
+   if (url.origin !== self.location.origin) return; // never touch cross-origin traffic
+   if (url.pathname.startsWith('/s/') || url.pathname.startsWith('/api/')) return; // short-link redirects and edge functions always go to the network
+-  if (url.pathname.includes('/js/vendor/ocr/')) { // cache-first, filled on first use
+-    e.respondWith(caches.open(OCR_CACHE).then((c) => c.match(req).then((hit) => hit || fetch(req).then((r) => { if (r.ok && r.status === 200) c.put(req, r.clone()); return r; }))));
++  if (url.pathname.includes('/js/vendor/ocr/') || url.pathname.includes('/js/vendor/three/')) { // cache-first, filled on first use
++    const store = url.pathname.includes('/js/vendor/three/') ? THREE_CACHE : OCR_CACHE;
++    e.respondWith(caches.open(store).then((c) => c.match(req).then((hit) => hit || fetch(req).then((r) => { if (r.ok && r.status === 200) c.put(req, r.clone()); return r; }))));
+     return;
+   }
+   if (url.pathname.endsWith('/config.js')) { // runtime config: network first so changes apply, cache as offline fallback
+
+--- a/scripts/build.mjs
++++ b/scripts/build.mjs
+@@ -27,8 +27,8 @@
+ const version = `${pkg.version}+${build}`;
+ 
+ fs.writeFileSync(path.join(dist, 'config.js'), configJs(process.env, version));
+-// js/vendor/ocr/ (≈8 MB OCR engine for scanned PDFs) is cached by the service worker on first use instead of being precached
+-const precache = files.filter((f) => f !== 'sw.js' && f !== 'config.js' && !f.startsWith('js/vendor/ocr/'));
++// js/vendor/ocr/ (≈8 MB OCR engine for scanned PDFs) is cached by the service worker on first use instead of being precached — same for js/vendor/three/ (the rotatable 3D view)
++const precache = files.filter((f) => f !== 'sw.js' && f !== 'config.js' && !f.startsWith('js/vendor/ocr/') && !f.startsWith('js/vendor/three/'));   // the 3D engine (≈0.7 MB) is cached on first use too
+ const sw = fs.readFileSync(path.join(src, 'sw.js'), 'utf8')
+   .replace('__CACHE_VERSION__', build).replace('__PRECACHE__', JSON.stringify(['./', ...precache], null, 2));
+ fs.writeFileSync(path.join(dist, 'sw.js'), sw);
