@@ -70,7 +70,7 @@ async function readLetter(pdf, originals, onStatus) {
   return { text: plainText(r.markdown), pages: head.total };
 }
 
-/** Receive stamp on page 1 (top right): หน่วยงาน · เลขรับ · วันที่ · เวลา. Returns a new PDF Blob. */
+/** Receive stamp on page 1 (top LEFT, 20 pt from the edges): หน่วยงาน · เลขรับ · วันที่ · เวลา. Returns a new PDF Blob. */
 export async function stampReceive(file, st) {
   const { getPdfLib } = await import('./pdf/engine.js');
   const lib = await getPdfLib(); const doc = await lib.PDFDocument.load(await file.arrayBuffer());
@@ -82,7 +82,7 @@ export async function stampReceive(file, st) {
   g.font = font; g.textBaseline = 'middle'; g.textAlign = 'center'; lines.forEach((l, i) => { if (i === 2) g.font = `700 ${px * 1.15}px "Sarabun","Noto Sans Thai","Tahoma",sans-serif`; else g.font = font; g.fillText(l, w / 2, pad + lh * (i + 0.5)); });
   const png = await new Promise((res) => c.toBlob(res, 'image/png'));
   const img = await doc.embedPng(new Uint8Array(await png.arrayBuffer())); const dw = w / K; const dh = hh / K;
-  page.drawImage(img, { x: size.width - dw - 20, y: size.height - dh - 20, width: dw, height: dh });
+  page.drawImage(img, { x: 20, y: size.height - dh - 20, width: dw, height: dh });
   return new Blob([await doc.save()], { type: 'application/pdf' });
 }
 
