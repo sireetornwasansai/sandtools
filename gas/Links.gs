@@ -33,6 +33,11 @@
  * The same table also stores QR Codes (column 13 "ชนิด"): kind 'link' = plain short link, 'qr' = tracked QR (a QR that encodes the short URL, so scans
  * are counted and the destination can be edited later), 'qrs' = static QR saved in the history (no short link, no statistics). Column 14 holds the QR
  * design / form data as JSON (never a Wi-Fi password).
+ * v1.14.0 — history and statistics are ONE thing for web-address QR codes: every saved QR of type 'url' is created as 'qr' (tracked). A scan goes to
+ * <SHORT_BASE>/s/<code>, the edge function /api/go answers with an immediate 302 to the destination and records the visit — the scanner never opens
+ * the sandtools web app and never signs in. 'qrs' is now only for QR types that carry no web address (text, Wi-Fi, e-mail, phone, SMS, vCard) and for
+ * rows saved before this version. New op "track" {code | all:true, origin?} converts old static URL-QR rows to tracked ones (the old picture still goes
+ * straight to the destination and cannot be counted, so the page tells the user to replace it with the new picture).
  * QR history = every row whose kind is 'qr' or 'qrs' (title = what the QR is for, tags/note/"cat" = category). Statistics of a tracked QR are the visits
  * of its short link (every visit through a tracked QR's short URL is a "scan"; robots are not counted).
  * Uses helpers from Code.gs (requireUser, sheetTab, cell, rateLimit, httpError, prop, intProp, listProp, safeEqual) and Library.gs.
@@ -290,6 +295,7 @@ function links(b) {
     case 'delete': return lnkDelete(sc, u, b);
     case 'stats':  return lnkStats(lnkOwned(sc, b.code), b.days);
     case 'export': return lnkExport(lnkOwned(sc, b.code), b.bots === true);
+    case 'track':  return lnkTrack(sc, u, b);      // turn old static URL-QR rows into tracked ones (history and statistics are one thing)
     case 'saveimg': return lnkSaveImg(sc, u, b);   // keep the QR picture in Drive and record its URL in the Links sheet
     case 'getimg': return lnkGetImg(sc, b);        // the picture as a data: URL (preview of an attached old QR)
     default: throw httpError('UNKNOWN_ACTION', 'ไม่รู้จักคำสั่งนี้');
@@ -332,6 +338,13 @@ function lnkCreateLocked(sc, u, b) {
   var all = lnkAll(), mine = all.filter(function (l) { return l.owner === sc.email && l.status !== 'deleted'; });
   var kind = LNK_KINDS.indexOf(b.kind) >= 0 ? b.kind : 'link';
   var ref = '', refKind = '', url = '', data = '';
+  if (kind === 'qrs' && b.qr && typeof b.qr === 'object' && String(b.qr.t || 'url') === 'url') {
+    // A QR of a web address is always tracked: it encodes the short URL, so the history entry also counts scans (older web pages still send 'qrs').
+    var sf = (b.qr.f && typeof b.qr.f === 'object') ? b.qr.f : {};
+    b.url = String(b.url == null || b.url === '' ? (sf.url || '') : b.url);
+    b.qr = { t: 'url', d: b.qr.d };
+    kind = 'qr';
+  }
   if (kind === 'qrs') {
     data = lnkQrData(b.qr, 'qrs');
     if (!String(b.title || '').trim()) throw httpError('BAD_REQUEST', 'กรุณาตั้งชื่อ QR');
@@ -387,6 +400,36 @@ function lnkUpdateLocked(sc, u, b) {
   lnkUncache(l.code);
   lnkLog(u, 'update', l.code, { status: l.status, kind: l.kind }, l.kind === 'link' ? 'links' : 'qr');
   return { link: lnkPublic(l, null) };
+}
+
+/** Turns one static URL-QR row into a tracked one. Returns true when the row changed. The code stays; the row gets a short link and kind 'qr'. */
+function lnkToTracked(l, origin) {
+  if (l.kind !== 'qrs' || !l.url) return false;
+  var cur = lnkQrParse(l.data) || {};
+  if (cur.t && cur.t !== 'url') return false;
+  l.data = lnkQrData({ t: 'url', d: cur.d }, 'qr');
+  l.kind = 'qr';
+  l.expires = '';
+  l.short = lnkShortFor('qr', l.code, origin);
+  sheetTab('Links', LNK_LINK_HEADERS).getRange(l.row, 1, 1, LNK_COLS).setValues([lnkRowOf(l)]);
+  lnkUncache(l.code);
+  return true;
+}
+/** op "track": {code} converts one row; {all:true} converts the user's own static URL-QR rows (at most 100 per call, "remaining" says how many are left). */
+function lnkTrack(sc, u, b) { return lnkLocked(function () { return lnkTrackLocked(sc, u, b); }); }
+function lnkTrackLocked(sc, u, b) {
+  if (b.all === true) {
+    var todo = lnkAll().filter(function (l) { return l.owner === sc.email && l.kind === 'qrs' && l.url && l.status !== 'deleted' && (lnkQrParse(l.data) || { t: 'url' }).t === 'url'; });
+    var batch = todo.slice(0, 100), done = [];
+    batch.forEach(function (l) { if (lnkToTracked(l, b.origin)) done.push(lnkPublic(l, null)); });
+    lnkLog(u, 'track', 'all', { converted: done.length, remaining: todo.length - batch.length }, 'qr');
+    return { links: done, converted: done.length, remaining: todo.length - batch.length, base: lnkBase() };
+  }
+  var l = lnkOwned(sc, b.code);
+  if (l.kind === 'qr') return { links: [lnkPublic(l, null)], converted: 0, remaining: 0, base: lnkBase() };
+  if (!lnkToTracked(l, b.origin)) throw httpError('BAD_REQUEST', 'นับสถิติได้เฉพาะ QR ชนิดลิงก์ (URL) ที่มีปลายทางเป็นเว็บ');
+  lnkLog(u, 'track', l.code, { kind: l.kind }, 'qr');
+  return { links: [lnkPublic(l, null)], converted: 1, remaining: 0, base: lnkBase() };
 }
 
 /** Soft delete: the row stays (stats are kept and the code can never be re-used for a different target). */

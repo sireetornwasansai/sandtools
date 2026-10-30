@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.location = { origin: 'https://sand.example.go.th' };
-const { savedPayload, savedForm, savedDesign, shortUrl, catLabel, typeLabel } = await import('../../src/js/core/qrsaved.js');
+const { savedPayload, savedForm, savedDesign, shortUrl, catLabel, typeLabel, isStaticUrlQr } = await import('../../src/js/core/qrsaved.js');
 
 test('tracked QR encodes the short URL; static QR is rebuilt from the saved fields', () => {
   assert.equal(savedPayload({ kind: 'qr', code: 'abc2345', qr: { t: 'url' } }, 'https://s.example.go.th/'), 'https://s.example.go.th/s/abc2345');
@@ -21,4 +21,11 @@ test('unknown / missing data never throws', () => {
   assert.deepEqual(savedDesign({}), { size: 512, margin: 4, fg: '#000000', bg: '#ffffff', style: 'square', ec: 'M', cat: 'general', cap: '' });
   assert.equal(savedDesign({ qr: { d: { margin: 0, cat: 'hrd' } } }).margin, 0);
   assert.equal(shortUrl('', 'x1y'), 'https://sand.example.go.th/s/x1y'); assert.equal(catLabel('vaccine'), 'งานวัคซีน'); assert.equal(typeLabel('wifi'), 'Wi-Fi'); assert.equal(catLabel('zzz'), 'ทั่วไป');
+});
+test('isStaticUrlQr: only history-only QR of a web address can be turned into a tracked one', () => {
+  assert.equal(isStaticUrlQr({ kind: 'qrs', url: 'https://a.example', qr: { t: 'url' } }), true);
+  assert.equal(isStaticUrlQr({ kind: 'qrs', url: 'https://a.example' }), true);
+  assert.equal(isStaticUrlQr({ kind: 'qrs', url: '', qr: { t: 'text' } }), false);
+  assert.equal(isStaticUrlQr({ kind: 'qr', url: 'https://a.example', qr: { t: 'url' } }), false);
+  assert.equal(isStaticUrlQr({ kind: 'qrx', url: 'https://a.example' }), false); assert.equal(isStaticUrlQr(null), false);
 });

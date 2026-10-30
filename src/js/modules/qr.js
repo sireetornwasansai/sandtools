@@ -6,7 +6,7 @@ import { record } from '../core/logger.js';
 import { getSession } from '../core/auth.js';
 import { backendConfigured } from '../core/api.js';
 import { notice } from '../core/notices.js';
-import { QR_TYPES, QR_CATS, linksCall, shortUrl, savedForm, savedDesign, fetchSavedItem, uploadQrImage } from '../core/qrsaved.js';
+import { QR_TYPES, QR_CATS, linksCall, shortUrl, savedForm, savedDesign, fetchSavedItem, uploadQrImage, trackQr } from '../core/qrsaved.js';
 import { buildMatrix, PAYLOADS, toSvg, drawToCanvas, byteLength, MAX_BYTES, contrastRatio } from './qr-engine.js';
 
 const TYPES = QR_TYPES;
@@ -170,27 +170,24 @@ export function mount(root, ctx) {
   /* ---------- save to history (backend) ---------- */
   const nameIn = h('input', { type: 'text', maxlength: '120', placeholder: 'เช่น QR ลงทะเบียนวัคซีนไข้หวัดใหญ่ 2569', autocomplete: 'off' });
   const noteIn = h('input', { type: 'text', maxlength: '300', placeholder: 'ใช้ติดที่ไหน / ใครรับผิดชอบ (ไม่บังคับ)', autocomplete: 'off' });
-  const modeStatic = h('input', { type: 'radio', name: 'qr-mode', id: 'qr-mode-static', value: 'qrs', checked: true, onchange: () => syncPanel() });
-  const modeTracked = h('input', { type: 'radio', name: 'qr-mode', id: 'qr-mode-tracked', value: 'qr', onchange: () => syncPanel() });
+  // v1.14.0: history and statistics are ONE thing. A QR of a web address (type "url") is always saved as a tracked QR: it encodes <site>/s/<code>, the edge
+  // function answers with an immediate redirect to the destination and records the scan — nobody opens the SAND Tools app or signs in. Other types are history-only.
   const modeHint = h('p', { class: 'hint', 'aria-live': 'polite' });
   const editBar = h('div', { class: 'notice notice-info', hidden: true, role: 'status' });
   const saveBtn = h('button', { class: 'btn btn-primary', type: 'button', disabled: true, onclick: () => saveQr(false) }, svgIcon(ICONS.save, 18), 'บันทึกลงประวัติ QR');
   const saveNewBtn = h('button', { class: 'btn', type: 'button', hidden: true, onclick: () => saveQr(true) }, 'บันทึกเป็นรายการใหม่');
-  const cancelEditBtn = h('button', { class: 'btn btn-sm', type: 'button', hidden: true, onclick: () => { editing = null; override = null; modeStatic.checked = true; nameIn.value = noteIn.value = ''; syncPanel(); schedule.flush(); } }, 'เลิกแก้ไข');
+  const cancelEditBtn = h('button', { class: 'btn btn-sm', type: 'button', hidden: true, onclick: () => { editing = null; override = null; nameIn.value = noteIn.value = ''; syncPanel(); schedule.flush(); } }, 'เลิกแก้ไข');
   const saveResult = h('div', { class: 'qr-saved', hidden: true, 'aria-live': 'polite' });
   const canSave = () => backendConfigured() && !!getSession();
   function syncPanel() {
     const isUrl = type === 'url';
-    modeTracked.disabled = !isUrl;
-    if (!isUrl && modeTracked.checked) modeStatic.checked = true;
-    const tracked = modeTracked.checked && isUrl;
-    modeHint.textContent = tracked
-      ? 'QR จะชี้ไปที่ลิงก์ย่อของระบบ (…/s/รหัส) ทุกครั้งที่มีคนสแกนจะถูกนับ และแก้ลิงก์ปลายทางทีหลังได้โดยไม่ต้องพิมพ์ QR ใหม่'
-      : isUrl ? 'เก็บ QR และข้อมูลไว้ในประวัติเท่านั้น ไม่นับจำนวนผู้สแกน (QR จะชี้ไปที่ลิงก์เดิมตรง ๆ)' : 'ชนิดนี้เก็บประวัติได้อย่างเดียว — การนับผู้สแกนทำได้เฉพาะ QR ชนิดลิงก์ (URL)';
+    modeHint.textContent = isUrl
+      ? 'QR ชนิดลิงก์เก็บประวัติและนับสถิติรวมเป็นอันเดียว — เมื่อมีคนสแกนจะถูกพาไปยังลิงก์ปลายทางทันที (ไม่ต้องเข้าแอป SAND Tools และไม่ต้องล็อกอิน) พร้อมนับจำนวนสแกน และแก้ลิงก์ปลายทางทีหลังได้โดยไม่ต้องพิมพ์ QR ใหม่'
+      : 'ชนิดนี้ไม่มีลิงก์เว็บ จึงเก็บประวัติได้อย่างเดียว — การนับผู้สแกนทำได้เฉพาะ QR ชนิดลิงก์ (URL)';
     if (editing) {
       editBar.hidden = false; editBar.replaceChildren(svgIcon(ICONS.edit), h('div', null, h('strong', null, 'กำลังแก้ไข QR ที่บันทึกไว้'), h('p', null, `“${editing.title}” — กด “อัปเดต” เพื่อบันทึกทับรายการเดิม หรือ “บันทึกเป็นรายการใหม่”`)));
     } else editBar.hidden = true;
-    const canUpdate = !!editing && (editing.kind === 'qr' ? tracked : !tracked);
+    const canUpdate = !!editing && (isUrl ? (editing.kind === 'qr' || (editing.kind === 'qrs' && editing.t === 'url')) : editing.kind === 'qrs');
     saveBtn.replaceChildren(svgIcon(ICONS.save, 18), canUpdate ? 'อัปเดตรายการเดิม' : 'บันทึกลงประวัติ QR');
     saveBtn.dataset.update = canUpdate ? '1' : '';
     saveNewBtn.hidden = !canUpdate; cancelEditBtn.hidden = !editing;
@@ -204,7 +201,7 @@ export function mount(root, ctx) {
     if (!current) { toast('สร้าง QR ก่อนแล้วจึงบันทึก', 'error'); return; }
     const title = nameIn.value.trim();
     if (!title) { nameIn.focus(); toast('ตั้งชื่อ QR ก่อนบันทึก เพื่อให้รู้ว่าเป็น QR ของอะไร', 'error'); return; }
-    const tracked = modeTracked.checked && type === 'url';
+    const tracked = type === 'url';
     if (!tracked && type === 'wifi' && form.password && form.encryption !== 'nopass') { toast('ไม่บันทึกรหัสผ่าน Wi-Fi ลงในประวัติ — ลบรหัสผ่านออกจากช่องก่อนกดบันทึก (QR ที่ดาวน์โหลดยังมีรหัสผ่านตามปกติ)', 'error', 7000); return; }
     const o = current.opts;
     const d = { fg: o.fg, bg: o.bg, style: o.style, ec: ecIn.value, margin: o.margin, size: o.size, cat: catIn.value, cap: capIn.value.trim() };
@@ -212,8 +209,9 @@ export function mount(root, ctx) {
     const update = !asNew && saveBtn.dataset.update === '1' && editing;
     saveBtn.disabled = true; saveNewBtn.disabled = true;
     try {
-      let link; let base = '';
+      let link; let base = ''; let converted = false;
       if (update) {
+        if (tracked && editing.kind === 'qrs') { await trackQr({ code: editing.code }); converted = true; }   // an older history-only URL QR becomes a tracked one first
         const body = { code: editing.code, title, note: noteIn.value.trim(), qr };
         if (tracked) body.url = PAYLOADS.url(form) || form.url;
         const r = await linksCall('update', body); link = r.link || editing; base = r.base || (await fetchSavedItem(editing.code).catch(() => ({ base: '' }))).base || '';
@@ -222,14 +220,15 @@ export function mount(root, ctx) {
         if (tracked) body.url = PAYLOADS.url(form) || form.url;
         const r = await linksCall('create', body); link = r.link; base = r.base;
       }
-      editing = { code: link.code, kind: link.kind, title: link.title };
+      editing = { code: link.code, kind: link.kind, title: link.title, t: tracked ? 'url' : type };
       const doneMsg = update ? 'อัปเดต QR แล้ว' : 'บันทึก QR ลงประวัติแล้ว';
       if (tracked) {
         override = { payload: shortUrl(base, link.code), forUrl: form.url || '' };
         schedule.flush();
         const full = override.payload;
         saveResult.hidden = false;
-        saveResult.replaceChildren(h('b', null, 'QR นี้นับจำนวนผู้สแกนแล้ว'), h('p', { class: 'muted' }, 'รูป QR ด้านขวาเปลี่ยนเป็นลิงก์ย่อ ', h('code', null, full.replace(/^https?:\/\//, '')), ' — ดาวน์โหลดรูปนี้ไปใช้งาน อย่าใช้รูปที่ดาวน์โหลดก่อนบันทึก'),
+        saveResult.replaceChildren(h('b', null, 'บันทึกประวัติและเริ่มนับสถิติแล้ว'), h('p', { class: 'muted' }, 'รูป QR ด้านขวาเปลี่ยนเป็นลิงก์ย่อ ', h('code', null, full.replace(/^https?:\/\//, '')), ' — ผู้สแกนจะถูกพาไปยังลิงก์ปลายทางทันที ไม่ต้องเข้าแอป SAND Tools · ดาวน์โหลดรูปนี้ไปใช้งาน อย่าใช้รูปที่ดาวน์โหลดก่อนบันทึก'),
+          converted ? h('p', { class: 'hint status-err' }, 'รายการนี้เคยเป็นแบบเก็บประวัติ — รูป QR เก่าที่พิมพ์/แจกไปแล้วยังพาไปปลายทางตรง ๆ และนับไม่ได้ ให้เปลี่ยนไปใช้รูปใหม่นี้') : null,
           h('a', { class: 'btn btn-sm', href: `#/links?stats=${encodeURIComponent(link.code)}` }, 'ดูสถิติ'), ' ', h('a', { class: 'btn btn-sm', href: '#/qrs' }, 'ไปที่ประวัติ QR'));
       } else {
         saveResult.hidden = false;
@@ -258,9 +257,9 @@ export function mount(root, ctx) {
       sizeIn.value = String(dz.size); marginIn.value = String(dz.margin); ecIn.value = dz.ec; fgIn.value = dz.fg; bgIn.value = dz.bg; styleIn.value = dz.style; catIn.value = dz.cat; capIn.value = dz.cap;
       capIn.placeholder = (CATS.find((c) => c[0] === catIn.value) || [])[2] || 'เช่น สแกนเพื่อลงทะเบียน';
       nameIn.value = it.title || ''; noteIn.value = it.note || '';
-      editing = { code: it.code, kind: it.kind || 'qrs', title: it.title || '' };
-      if (editing.kind === 'qr') { modeTracked.checked = true; setType('url'); fillForm({ url: it.url }); override = { payload: shortUrl(base, it.code), forUrl: it.url }; }
-      else { modeStatic.checked = true; setType((it.qr && it.qr.t) || 'url'); fillForm(savedForm(it)); if (type === 'wifi') toast('ไม่ได้เก็บรหัสผ่าน Wi-Fi ไว้ กรุณากรอกรหัสผ่านใหม่ก่อนดาวน์โหลด', 'info', 6000); }
+      editing = { code: it.code, kind: it.kind || 'qrs', title: it.title || '', t: (it.qr && it.qr.t) || 'url' };
+      if (editing.kind === 'qr') { setType('url'); fillForm({ url: it.url }); override = { payload: shortUrl(base, it.code), forUrl: it.url }; }
+      else { setType((it.qr && it.qr.t) || 'url'); fillForm(savedForm(it)); if (type === 'wifi') toast('ไม่ได้เก็บรหัสผ่าน Wi-Fi ไว้ กรุณากรอกรหัสผ่านใหม่ก่อนดาวน์โหลด', 'info', 6000); }
       schedule.flush(); syncPanel(); saveResult.hidden = true;
     } catch (e) {
       editing = null; override = null; syncPanel(); loadErr.hidden = false;
@@ -272,9 +271,6 @@ export function mount(root, ctx) {
   const savePanel = h('div', { class: 'card qr-save' }, h('h2', null, 'บันทึกลงประวัติ QR'),
     canSave() ? h('div', null, editBar,
       field('ชื่อ QR (เป็น QR ของอะไร)', nameIn, 'ใช้ค้นหาในหน้า ประวัติ QR — หมวดงานเลือกจากการ์ดด้านบน').root, field('หมายเหตุ', noteIn).root,
-      h('div', { class: 'qr-modes', role: 'radiogroup', 'aria-label': 'รูปแบบการบันทึก' },
-        h('label', { class: 'qr-mode', for: 'qr-mode-static' }, modeStatic, h('span', null, h('b', null, 'เก็บประวัติอย่างเดียว'), h('small', null, 'ไม่นับผู้สแกน'))),
-        h('label', { class: 'qr-mode', for: 'qr-mode-tracked' }, modeTracked, h('span', null, h('b', null, 'ติดตามสถิติการสแกน'), h('small', null, 'เฉพาะ QR ชนิดลิงก์')))),
       modeHint, h('div', { class: 'btn-row' }, saveBtn, saveNewBtn, cancelEditBtn), saveResult)
       : notice('info', 'เข้าสู่ระบบเพื่อบันทึกประวัติและนับผู้สแกน', backendConfigured() ? 'เมื่อล็อกอินแล้ว ระบบจะเก็บ QR ที่สร้างไว้พร้อมชื่อและหมวดงาน และนับจำนวนผู้สแกนของ QR ชนิดลิงก์ได้' : 'ยังไม่ได้ตั้งค่า Backend (GAS) จึงใช้งานส่วนนี้ไม่ได้'));
 

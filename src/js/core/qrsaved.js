@@ -20,7 +20,7 @@ export const shortUrl = (base, code) => `${String(base || location.origin).repla
 
 /** Call the backend "links" action (which also stores QR history). Signs the user out when the session is no longer valid. */
 export async function linksCall(op, params = {}, timeout = 60000, retry = false) {
-  if (op === 'create' || op === 'update' || op === 'saveimg') params = { origin: location.origin, ...params };   // lets the backend record the short URL when SHORT_BASE is not set
+  if (op === 'create' || op === 'update' || op === 'saveimg' || op === 'track') params = { origin: location.origin, ...params };   // lets the backend record the short URL when SHORT_BASE is not set
   const s = getSession();
   if (!s) { const e = new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่'); /** @type {any} */ (e).code = 'INVALID_SESSION'; throw e; }
   try { return (await (retry ? gasCallRetry : gasCall)('links', { session: s.token, op, ...params }, timeout)).data; } catch (e) {
@@ -137,6 +137,19 @@ export async function uploadQrImage(code, canvas) {
     throw e;
   }
 }
+const NEEDS_DEPLOY_TRACK = 'ฝั่ง Apps Script ยังเป็นเวอร์ชันเก่า (ยังไม่รองรับเปลี่ยนเป็นติดตามสถิติ) — วางไฟล์ Links.gs ใหม่ แล้ว Deploy เวอร์ชันใหม่';
+/**
+ * Turn history-only URL QR rows into tracked ones (history and statistics are one thing). params: {code} for one row, or {all:true} for the user's own rows (100 per call).
+ * Resolves to {links[], converted, remaining, base}.
+ */
+export async function trackQr(params) {
+  try { return await linksCall('track', params, 120000); } catch (e) {
+    if (e && /** @type {any} */ (e).code === 'UNKNOWN_ACTION') e.message = NEEDS_DEPLOY_TRACK;
+    throw e;
+  }
+}
+/** A history-only QR of a web address: its picture goes straight to the destination, so scans cannot be counted until it is turned into a tracked QR. */
+export const isStaticUrlQr = (l) => !!l && l.kind === 'qrs' && !!l.url && (!l.qr || !l.qr.t || l.qr.t === 'url');
 /** The stored picture of a record as a data: URL (preview of an attached old QR). Cached for the session. */
 export async function fetchQrImage(code) {
   if (imgCache.has(code)) return imgCache.get(code);

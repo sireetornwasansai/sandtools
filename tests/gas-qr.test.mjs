@@ -83,8 +83,10 @@ test('every row records its URLs: short URL (SHORT_BASE or the page origin), des
   const e = makeEnv(); const s = e.login('somchai@example.go.th');
   const q = e.post({ action: 'links', session: s, op: 'create', kind: 'qr', title: 'QR สมัคร', url: 'example.com/join', qr: { d: dz } }).data.link;
   assert.equal(q.short, `https://sand.example.go.th/s/${q.code}`); assert.equal(q.url, 'https://example.com/join'); assert.equal(q.origin, 'app'); assert.equal(q.hasImg, false);
+  // v1.14.0: a web-address QR sent as the old history-only kind 'qrs' is saved as a TRACKED QR — history and statistics are one thing
   const st = e.post({ action: 'links', session: s, op: 'create', kind: 'qrs', title: 'QR ลิงก์ตรง', qr: { t: 'url', d: dz, f: { url: 'https://forms.gle/abc' } } }).data.link;
-  assert.equal(st.url, 'https://forms.gle/abc'); assert.equal(st.short, ''); assert.equal(e.get({ action: 'go', c: st.code }).data.reason, 'notfound');
+  assert.equal(st.kind, 'qr'); assert.equal(st.url, 'https://forms.gle/abc'); assert.equal(st.short, `https://sand.example.go.th/s/${st.code}`); assert.equal(e.get({ action: 'go', c: st.code }).data.url, 'https://forms.gle/abc');
+  assert.ok(!('f' in st.qr), 'a tracked QR keeps no form fields: it encodes the short URL');
   assert.equal(e.post({ action: 'links', session: s, op: 'create', kind: 'qrs', title: 'ข้อความ', qr: { t: 'text', d: dz, f: { text: 'สวัสดี' } } }).data.link.url, '');
   const row = e.sheets.Links.rows.find((r) => r[0] === q.code); assert.equal(row[14], 'app'); assert.equal(row[15], q.short); assert.equal(row.length, 18);
   const e2 = makeEnv({ SHORT_BASE: '' }); const s2 = e2.login('somchai@example.go.th');
@@ -149,4 +151,34 @@ test('request size: only a QR picture may be large; everything else keeps the 8 
   assert.equal(e.post({ action: 'links', session: s, op: 'update', code: l.code, note: 'x'.repeat(9000) }).error.code, 'REQUEST_TOO_LARGE');
   assert.equal(e.post({ action: 'links', session: s, op: 'saveimg', code: l.code, data: Buffer.alloc(2000000, 1).toString('base64') }).error.code, 'REQUEST_TOO_LARGE');
   const f = e.get({ action: 'health' }).data.features; assert.ok(f.includes('qrimg') && f.includes('qrx'));
+});
+
+// ---- v1.14.0: history and statistics are ONE thing — a scan goes straight to the embedded link (edge redirect), the sandtools app is never opened ----
+const legacyRow = (e, code, owner, url, t = 'url') => e.sheets.Links.rows.push([code, url, 'QR เก่า ' + code, owner, '2026-01-01 08:00:00', '', 'active', '', '', '', '', '', 'qrs', JSON.stringify({ t, d: dz, f: t === 'url' ? { url } : { text: 'hello' } }), 'app', '', '', '']);
+
+test('a tracked web QR resolves to its destination for the edge redirect and records a scan — no sign-in involved', () => {
+  const e = makeEnv(); const s = e.login('somchai@example.go.th');
+  const q = e.post({ action: 'links', session: s, op: 'create', kind: 'qr', title: 'QR สมัคร', url: 'https://forms.gle/abc', qr: { t: 'url', d: dz } }).data.link;
+  const go = e.get({ action: 'go', c: q.code }); assert.equal(go.success, true); assert.equal(go.data.url, 'https://forms.gle/abc');
+  assert.equal(e.post({ action: 'click', secret: 'edge-secret', code: q.code, country: 'TH', device: 'mobile', browser: 'Chrome', os: 'Android', vid: 'abcdef123456' }).data.ok, true);
+  assert.equal(e.post({ action: 'click', secret: 'wrong', code: q.code }).error.code, 'FORBIDDEN');
+  const st = e.post({ action: 'links', session: s, op: 'stats', code: q.code, days: 7 }).data; assert.equal(st.total, 1); assert.equal(st.unique, 1);
+});
+
+test('op track: old history-only URL QR rows become tracked (one or all), same code, short link and redirect work, owner-only, other types refused', () => {
+  const e = makeEnv(); const s = e.login('somchai@example.go.th'); const other = e.login('other@example.go.th');
+  e.post({ action: 'links', session: s, op: 'list' });   // creates the Links tab
+  legacyRow(e, 'old1abc', 'somchai@example.go.th', 'https://forms.gle/one'); legacyRow(e, 'old2abc', 'somchai@example.go.th', 'https://forms.gle/two'); legacyRow(e, 'old3abc', 'other@example.go.th', 'https://forms.gle/three'); legacyRow(e, 'txt4abc', 'somchai@example.go.th', '', 'text');
+  assert.equal(e.get({ action: 'go', c: 'old1abc' }).data.reason, 'notfound', 'before: a history-only QR has no redirect');
+  assert.equal(e.post({ action: 'links', session: other, op: 'track', code: 'old1abc' }).error.code, 'NOT_FOUND');
+  const one = e.post({ action: 'links', session: s, op: 'track', code: 'old1abc', origin: 'https://sandtools.vercel.app' }); assert.equal(one.success, true, JSON.stringify(one.error));
+  assert.equal(one.data.converted, 1); assert.equal(one.data.links[0].kind, 'qr'); assert.equal(one.data.links[0].code, 'old1abc'); assert.equal(one.data.links[0].short, 'https://sand.example.go.th/s/old1abc');
+  assert.equal(e.get({ action: 'go', c: 'old1abc' }).data.url, 'https://forms.gle/one');
+  const row = e.sheets.Links.rows.find((r) => r[0] === 'old1abc'); assert.equal(row[12], 'qr'); assert.ok(!('f' in JSON.parse(row[13])), 'form copy dropped');
+  assert.equal(e.post({ action: 'links', session: s, op: 'track', code: 'old1abc' }).data.converted, 0, 'again = no change');
+  assert.equal(e.post({ action: 'links', session: s, op: 'track', code: 'txt4abc' }).error.code, 'BAD_REQUEST');
+  const all = e.post({ action: 'links', session: s, op: 'track', all: true }).data; assert.equal(all.converted, 1); assert.equal(all.remaining, 0); assert.equal(all.links[0].code, 'old2abc');
+  assert.equal(e.get({ action: 'go', c: 'old3abc' }).data.reason, 'notfound', "another user's row is untouched");
+  assert.equal(e.sheets.Links.rows.find((r) => r[0] === 'txt4abc')[12], 'qrs', 'a text QR stays history-only');
+  assert.equal(e.post({ action: 'links', session: s, op: 'stats', code: 'old2abc' }).data.total, 0);
 });

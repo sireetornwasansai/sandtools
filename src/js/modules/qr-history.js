@@ -9,7 +9,7 @@ import { modal, confirmBox, closeAllLayers } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
 import { fmt, ago, bkk } from '../core/charts.js';
 import { fmtDate } from '../core/datefield.js';
-import { QR_CATS, QR_TYPES, KIND_LABEL, isQrKind, catLabel, typeLabel, linksCall, shortUrl, savedPayload, savedDesign, cachedLinksList, fetchLinksList, renderSavedCanvas, fetchQrImage } from '../core/qrsaved.js';
+import { QR_CATS, QR_TYPES, KIND_LABEL, isQrKind, isStaticUrlQr, catLabel, typeLabel, linksCall, trackQr, uploadQrImage, shortUrl, savedPayload, savedDesign, cachedLinksList, fetchLinksList, renderSavedCanvas, fetchQrImage } from '../core/qrsaved.js';
 import { attachOldQr, qrThumb, showSavedQr } from '../core/qrold.js';
 import { buildMatrix, toSvg } from './qr-engine.js';
 
@@ -25,7 +25,7 @@ export async function mount(root) {
   const s = getSession();
   const host = h('div');
   root.append(h('div', { class: 'page' }, h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'ประวัติ QR Code'),
-    h('p', null, 'QR ที่คุณสร้างและบันทึกไว้ พร้อมชื่อ หมวดงาน และจำนวนผู้สแกน (เฉพาะ QR ที่เลือก "ติดตามสถิติ") — ไม่เก็บ IP ของผู้สแกน')),
+    h('p', null, 'QR ที่คุณสร้างและบันทึกไว้ พร้อมชื่อ หมวดงาน และจำนวนผู้สแกน — QR ชนิดลิงก์เก็บประวัติและนับสแกนในอันเดียวกัน ผู้สแกนถูกพาไปลิงก์ปลายทางทันที ไม่ต้องเข้าแอป ไม่ต้องล็อกอิน (ไม่เก็บ IP ของผู้สแกน)')),
     h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => attachOldQr({ onDone: () => load(false) }) }, svgIcon(ICONS.upload, 18), 'แนบ QR เดิม'), h('a', { class: 'btn btn-primary', href: '#/qr' }, svgIcon(ICONS.plus, 18), 'สร้าง QR ใหม่'))), host));
   if (!backendConfigured() || !s) { host.append(notice('warn', 'ต้องเข้าสู่ระบบก่อน', 'ประวัติ QR ใช้ได้เฉพาะผู้ที่ล็อกอินแล้ว (ข้อมูลเก็บไว้ในระบบของหน่วยงาน)')); return () => {}; }
 
@@ -38,15 +38,16 @@ export async function mount(root) {
   search.addEventListener('input', debounce(() => { st.q = search.value.trim().toLowerCase(); st.limit = PAGE; draw(); }, 150));
   const sel = (label, key, opts) => h('select', { 'aria-label': label, onchange: (e) => { st[key] = e.target.value; st.limit = PAGE; draw(); } }, opts.map(([v, t]) => h('option', { value: v }, t)));
   const catSel = sel('กรองตามหมวดงาน', 'cat', [['', 'ทุกหมวดงาน'], ...QR_CATS.map((c) => [c[0], c[1]])]);
-  const kindSel = sel('กรองตามรูปแบบ', 'kind', [['', 'ทุกรูปแบบ'], ['qr', 'ติดตามสถิติ'], ['qrs', 'เก็บประวัติอย่างเดียว'], ['qrx', 'QR เดิม (แนบ)']]);
+  const kindSel = sel('กรองตามรูปแบบ', 'kind', [['', 'ทุกรูปแบบ'], ['qr', 'ติดตามสถิติ'], ['qrs', 'เก็บประวัติ (ไม่นับสแกน)'], ['qrx', 'QR เดิม (แนบ)']]);
   const typeSel = sel('กรองตามชนิด', 'type', [['', 'ทุกชนิด'], ...QR_TYPES]);
   const sortSel = sel('เรียงลำดับ', 'sort', [['new', 'ใหม่สุดก่อน'], ['scans', 'สแกนมากสุด'], ['week', 'สแกน 7 วันมากสุด'], ['name', 'ชื่อ ก–ฮ']]);
   const refreshBtn = h('button', { class: 'btn', type: 'button', onclick: () => load(true) }, svgIcon(ICONS.rotate, 18), 'รีเฟรช');
   const csvBtn = h('button', { class: 'btn', type: 'button', onclick: exportCsv }, svgIcon(ICONS.download, 18), 'ส่งออก CSV');
+  const trackAllBtn = h('button', { class: 'btn btn-primary', type: 'button', hidden: true, onclick: convertAll }, 'เปลี่ยนทั้งหมดเป็นติดตามสถิติ');
   const grid = h('div', { class: 'qrh-grid' });
   const moreBtn = h('button', { class: 'btn', type: 'button', hidden: true, onclick: () => { st.limit += PAGE; draw(); } }, 'แสดงเพิ่ม');
   const foot = h('p', { class: 'hint' });
-  host.append(kpi, h('div', { class: 'card' }, h('div', { class: 'hist-tools qrh-tools' }, search, catSel, kindSel, typeSel, sortSel, refreshBtn, csvBtn), grid, h('div', { class: 'btn-row', style: 'justify-content:center' }, moreBtn), foot));
+  host.append(kpi, h('div', { class: 'card' }, h('div', { class: 'hist-tools qrh-tools' }, search, catSel, kindSel, typeSel, sortSel, refreshBtn, csvBtn, trackAllBtn), grid, h('div', { class: 'btn-row', style: 'justify-content:center' }, moreBtn), foot));
 
   async function load(skeleton = true) {
     const my = ++seq;
@@ -86,6 +87,8 @@ export async function mount(root) {
   function draw() {
     if (!st.loaded) return;
     drawKpi();
+    const stat = st.items.filter((l) => isStaticUrlQr(l) && l.owner === me).length;
+    trackAllBtn.hidden = !stat; trackAllBtn.textContent = `เปลี่ยนทั้งหมดเป็นติดตามสถิติ (${fmt(stat)})`;
     const all = filtered(); const shown = all.slice(0, st.limit);
     if (!shown.length) {
       grid.replaceChildren(h('div', { class: 'empty qrh-empty' }, svgIcon(ICONS.qr, 28), h('p', null, st.items.length ? 'ไม่พบ QR ที่ตรงกับเงื่อนไข' : st.others ? `ยังไม่มี QR ของบัญชี ${st.email} (ในระบบมีรายการของบัญชีอื่น ${st.others} รายการ ซึ่งผู้ดูแลระบบเท่านั้นที่เห็น) — ตรวจว่าล็อกอินด้วยบัญชีเดียวกับตอนบันทึก` : 'ยังไม่มี QR ที่บันทึกไว้ — สร้าง QR แล้วกด “บันทึกลงประวัติ QR” ได้ที่หน้า QR Code'),
@@ -119,14 +122,63 @@ export async function mount(root) {
           h('small', { class: 'muted' }, `สร้าง ${dateOf(l.created)}${st.admin && l.owner !== me ? ` · ${l.owner.split('@')[0]}` : ''}${l.imgUrl ? ' · ' : ''}`, l.imgUrl ? h('a', { href: l.imgUrl, target: '_blank', rel: 'noopener noreferrer' }, 'รูปใน Drive') : null))),
       tracked ? statsBtn([h('span', null, h('b', null, fmt(l.clicks)), h('small', null, 'ครั้งที่สแกน')), h('span', null, h('b', null, fmt(l.week)), h('small', null, '7 วันล่าสุด'))], 'ดูสถิติ ›')
         : old ? statsBtn([h('span', { class: 'muted' }, l.project && l.url ? 'นับจำนวนเปิดหน้าปลายทาง (ผ่านตัวนับของโครงการ)' : 'ยังไม่นับสถิติ — แนบโครงการและระบุปลายทาง')], 'ดูสถิติ ›')
-        : h('p', { class: 'qrh-scans qrh-static muted' }, 'ไม่นับผู้สแกน — ต้องการสถิติ ให้เปิดแก้ไขแล้วบันทึกเป็น “ติดตามสถิติ”'),
+        : h('p', { class: 'qrh-scans qrh-static muted' }, isStaticUrlQr(l) ? 'ยังไม่นับผู้สแกน — รูป QR นี้พาไปปลายทางตรง ๆ กด “เปลี่ยนเป็นติดตามสถิติ” แล้วใช้รูปใหม่แทน' : 'ชนิดนี้ไม่มีลิงก์เว็บ จึงเก็บประวัติได้อย่างเดียว (นับสแกนได้เฉพาะ QR ชนิดลิงก์)'),
       h('div', { class: 'qrh-acts' },
         old ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => showSavedQr(l, st.base) }, svgIcon(ICONS.eye, 16), 'ดูรูป') : h('a', { class: 'btn btn-sm btn-primary', href: `#/qr?load=${encodeURIComponent(l.code)}` }, svgIcon(ICONS.edit, 16), 'เปิดแก้ไข'),
         h('button', { class: 'btn btn-sm', type: 'button', onclick: png }, svgIcon(ICONS.download, 16), 'PNG'),
         old ? null : h('button', { class: 'btn btn-sm', type: 'button', onclick: svg }, 'SVG'),
+        isStaticUrlQr(l) ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => convertOne(l) }, 'เปลี่ยนเป็นติดตามสถิติ') : null,
         tracked ? h('button', { class: 'btn btn-sm', type: 'button', onclick: async () => { toast((await copyText(full)) ? 'คัดลอกลิงก์ย่อแล้ว' : 'คัดลอกไม่สำเร็จ', 'info'); } }, svgIcon(ICONS.copy, 16), 'คัดลอกลิงก์') : null,
         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => editInfo(l) }, 'แก้ชื่อ/หมวด'),
         h('button', { class: 'icon-btn qrh-del', type: 'button', 'aria-label': `ลบ ${l.title}`, title: 'ลบ', onclick: () => remove(l) }, svgIcon(ICONS.trash, 18))));
+  }
+
+  /** New picture of a converted QR: kept in Drive (replaces the old one) — failures are reported, never fatal. Resolves to true when stored. */
+  async function refreshPicture(link, base) {
+    try {
+      const c = renderSavedCanvas(link, base, { size: Math.max(savedDesign(link).size, 512), caption: true });
+      if (!c) return false;
+      await uploadQrImage(link.code, c); return true;
+    } catch { return false; }
+  }
+  /** One history-only URL QR → tracked. The old picture still goes straight to the destination, so the dialog hands over the new one. */
+  async function convertOne(l) {
+    try {
+      const r = await trackQr({ code: l.code });
+      const link = (r.links && r.links[0]) || { ...l, kind: 'qr' }; const base = r.base || st.base;
+      const kept = await refreshPicture(link, base);
+      await load(false);
+      const full = link.short || shortUrl(base, link.code); let mm = null;
+      const dl = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => {
+        const c = renderCanvas(link, base, { size: Math.max(savedDesign(link).size, 512), caption: true });
+        if (c) c.toBlob((b) => { if (b) downloadBlob(b, `${safeFileName(l.title, 'qr')}.png`); }, 'image/png');
+      } }, svgIcon(ICONS.download, 16), 'ดาวน์โหลดรูป QR ใหม่');
+      mm = modal('เปลี่ยนเป็นติดตามสถิติแล้ว', [
+        h('p', null, `“${l.title}” นับสถิติแล้ว — เมื่อสแกนจะถูกพาไป ${l.url} ทันที ไม่ต้องเข้าแอป SAND Tools`),
+        h('p', null, 'รูป QR ใหม่ชี้ไปที่ ', h('code', null, full.replace(/^https?:\/\//, ''))),
+        h('p', { class: 'hint status-err' }, 'รูป QR เดิมที่พิมพ์หรือแจกไปแล้ว ยังพาไปปลายทางตรง ๆ และนับไม่ได้ — ต้องเปลี่ยนไปใช้รูปใหม่นี้'),
+        kept ? h('p', { class: 'hint' }, 'เก็บรูปใหม่ไว้ใน Google Drive แล้ว') : h('p', { class: 'hint' }, 'ยังไม่ได้เก็บรูปใหม่ลง Drive — เปิดแก้ไขแล้วกดอัปเดตเพื่อเก็บรูป')],
+      [dl, h('button', { class: 'btn', type: 'button', onclick: () => mm.close() }, 'ปิด')], {});
+    } catch (e) { toast(e.message || 'เปลี่ยนไม่สำเร็จ', 'error', 6000); }
+  }
+  /** Every history-only URL QR of the user → tracked (100 per backend call), then the new pictures are stored in Drive. */
+  async function convertAll() {
+    const mine = st.items.filter((l) => isStaticUrlQr(l) && l.owner === me);
+    if (!mine.length) { toast('ไม่มี QR แบบเก็บประวัติที่ต้องเปลี่ยน', 'info'); return; }
+    if (!(await confirmBox({ title: 'เปลี่ยนทั้งหมดเป็นติดตามสถิติ?', confirm: 'เปลี่ยนทั้งหมด', message: `QR ชนิดลิงก์แบบเก็บประวัติ ${fmt(mine.length)} รายการจะเริ่มนับสถิติ (ผู้สแกนยังถูกพาไปลิงก์เดิมทันที) แต่รูป QR เดิมที่พิมพ์/แจกไปแล้วยังนับไม่ได้ ต้องเปลี่ยนไปใช้รูปใหม่ในแต่ละรายการ` }))) return;
+    trackAllBtn.disabled = true;
+    try {
+      const done = []; let base = st.base;
+      for (let i = 0; i < 30; i += 1) {
+        const r = await trackQr({ all: true }); done.push(...(r.links || [])); base = r.base || base;
+        if (!r.remaining || !r.converted) break;
+      }
+      toast(`เปลี่ยนเป็นติดตามสถิติแล้ว ${fmt(done.length)} รายการ — กำลังเก็บรูปใหม่ลง Drive…`, 'success', 5000);
+      await load(false);
+      let kept = 0; for (const link of done) { if (await refreshPicture(link, base)) kept += 1; }
+      toast(`เก็บรูปใหม่ลง Drive ${fmt(kept)}/${fmt(done.length)} รายการ — ดาวน์โหลดรูปใหม่จากการ์ดแต่ละใบไปใช้แทนรูปเดิม`, kept === done.length ? 'success' : 'info', 8000);
+      await load(false);
+    } catch (e) { toast(e.message || 'เปลี่ยนไม่สำเร็จ', 'error', 6000); await load(false); } finally { trackAllBtn.disabled = false; }
   }
 
   function editInfo(l) {
