@@ -236,6 +236,12 @@ export function buildReceiptHtml({ org, doc }) {
   const at = String(doc.at || ''); const t = /[ T](\d{2}):(\d{2})/.exec(at);
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ตรารับ ${escHtml(doc.reg)}</title><style>@page{size:A5 landscape;margin:10mm}body{font:16px/1.7 "TH Sarabun New","Sarabun",Tahoma,sans-serif}.box{width:9cm;border:2px solid #000;padding:.5cm;margin:1cm auto;text-align:center}.box b{font-size:20px}</style></head><body><div class="box"><b>${escHtml(org)}</b><br>เลขรับ ${escHtml(doc.reg)}<br>วันที่ ${escHtml(thaiDate(at.slice(0, 10)))}${t ? `<br>เวลา ${t[1]}.${t[2]} น.` : ''}</div></body></html>`;
 }
+/** ตรารับหลายฉบับในไฟล์เดียว (เลือกหลายรายการในทะเบียน) — หนึ่งตราต่อหนึ่งหน้า A5 เรียงตามเลขรับ */
+export function buildReceiptsHtml({ org, docs }) {
+  const list = (docs || []).slice().sort((a, c) => (a.year - c.year) || (a.no - c.no));
+  const box = (doc) => { const at = String(doc.at || ''); const t = /[ T](\d{2}):(\d{2})/.exec(at); return `<div class="box"><b>${escHtml(org)}</b><br>เลขรับ ${escHtml(doc.reg)}<br>วันที่ ${escHtml(thaiDate(at.slice(0, 10)))}${t ? `<br>เวลา ${t[1]}.${t[2]} น.` : ''}</div>`; };
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ตรารับ ${list.length} ฉบับ</title><style>@page{size:A5 landscape;margin:10mm}body{font:16px/1.7 "TH Sarabun New","Sarabun",Tahoma,sans-serif;margin:0}.box{width:9cm;border:2px solid #000;padding:.5cm;margin:1cm auto;text-align:center;break-after:page;page-break-after:always}.box:last-child{break-after:auto;page-break-after:auto}.box b{font-size:20px}</style></head><body>${list.map(box).join('')}</body></html>`;
+}
 
 /* ------------------------------ v1.10: analytics helpers (ศูนย์สารบรรณ) ------------------------------ */
 

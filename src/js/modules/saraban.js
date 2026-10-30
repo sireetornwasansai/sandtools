@@ -6,7 +6,7 @@ import { notice } from '../core/notices.js';
 import { toast } from '../core/toast.js';
 import { modal, confirmBox } from '../core/layers.js';
 import { loadCss } from '../core/css.js';
-import { URGENCY, SECRECY, STAGE, TO_STATUS, ACTION, EVENT, MONTHS, MONTH_FULL, WEEKDAY_SHORT, thaiDate, thaiDateTime, thaiDateLong, ageLabel, stageIndex, STAGE_STEPS, buildRegisterHtml, buildReceiptHtml, dueLabel, stageTone, stageLabel, changeLabel, pct, toCsv, fileToBase64 } from './saraban-engine.js';
+import { URGENCY, SECRECY, STAGE, TO_STATUS, ACTION, EVENT, MONTHS, MONTH_FULL, WEEKDAY_SHORT, thaiDate, thaiDateTime, thaiDateLong, ageLabel, stageIndex, STAGE_STEPS, buildRegisterHtml, buildReceiptHtml, buildReceiptsHtml, dueLabel, stageTone, stageLabel, changeLabel, pct, toCsv, fileToBase64 } from './saraban-engine.js';
 import { receiveView, sendView, unitPicker } from './saraban-forms.js';
 
 /**
@@ -315,12 +315,13 @@ export async function mount(root) {
 
   /* ----------------------------- ทะเบียน ----------------------------- */
   async function registerView(el, x, p) {
-    const st = { kind: p.kind || 'in', year: cfg.year, q: '', stage: p.stage && p.stage !== 'registered' ? p.stage : '', urgent: !!p.urgent, from: '', to: '', registry: p.registry || '', offset: 0 };
+    const st = { kind: p.kind || 'in', year: cfg.year, q: '', stage: p.stage && p.stage !== 'registered' ? p.stage : '', urgent: !!p.urgent, from: '', to: '', registry: p.registry || '', offset: 0, total: 0 };
+    const sel = new Map(); let pickMode = false; let shown = []; let lastIdx = -1;   // เลือกหลายรายการ: id → รายการ (เก็บไว้ข้ามการโหลดเพิ่ม/เปลี่ยนตัวกรอง)
     const list = h('div', { class: 'sar-list', 'aria-live': 'polite' }); const info = h('p', { class: 'muted' }); const more = h('button', { class: 'btn', type: 'button', hidden: true }, 'โหลดเพิ่ม');
     const bar = h('div', { class: 'sar-loadbar', hidden: true, 'aria-hidden': 'true' }, h('i'));
-    const kindBar = h('div', { class: 'sar-seg' }, [['in', 'ทะเบียนรับ'], ['out', 'ทะเบียนส่ง']].map(([k, l]) => h('button', { type: 'button', class: st.kind === k ? 'on' : '', onclick: (e) => { st.kind = k; [...kindBar.children].forEach((b) => b.classList.toggle('on', b === e.currentTarget)); stageSel.hidden = k === 'out'; load(true); } }, l)));
+    const kindBar = h('div', { class: 'sar-seg' }, [['in', 'ทะเบียนรับ'], ['out', 'ทะเบียนส่ง']].map(([k, l]) => h('button', { type: 'button', class: st.kind === k ? 'on' : '', onclick: (e) => { st.kind = k; clearSel(); [...kindBar.children].forEach((b) => b.classList.toggle('on', b === e.currentTarget)); stageSel.hidden = k === 'out'; load(true); } }, l)));
     const years = []; for (let y = cfg.year; y >= cfg.year - 4; y -= 1) years.push(y);
-    const yearSel = h('select', { 'aria-label': 'ปี พ.ศ.' }, years.map((y) => opt(String(y), `พ.ศ. ${y}`))); yearSel.addEventListener('change', () => { st.year = Number(yearSel.value); load(true); });
+    const yearSel = h('select', { 'aria-label': 'ปี พ.ศ.' }, years.map((y) => opt(String(y), `พ.ศ. ${y}`))); yearSel.addEventListener('change', () => { st.year = Number(yearSel.value); clearSel(); load(true); });
     /* No "ลงรับแล้ว รอเสนอ" filter: the register is a backup, so an unrouted letter has no known status. */
     const stageSel = h('select', { 'aria-label': 'สถานะการส่งต่อ', hidden: st.kind === 'out' }, opt('', 'ทุกรายการ'), ...['open', 'routed', 'inprogress', 'returned', 'done', 'void'].map((k) => opt(k, k === 'open' ? 'ส่งต่อแล้ว ยังไม่เสร็จ' : STAGE[k])), opt('overdue', 'เลยกำหนด (ที่ส่งต่อแล้ว)')); stageSel.value = st.stage; stageSel.addEventListener('change', () => { st.stage = stageSel.value; load(true); });
     const urg = h('label', { class: 'sar-check' }, h('input', { type: 'checkbox', checked: st.urgent }), h('span', null, 'เฉพาะด่วนมาก/ด่วนที่สุด')); urg.firstChild.addEventListener('change', () => { st.urgent = urg.firstChild.checked; load(true); });
@@ -329,8 +330,89 @@ export async function mount(root) {
     const regSel = regCodes.length ? h('select', { 'aria-label': 'กลุ่มงาน/ทะเบียน' }, opt('', 'ทุกกลุ่มงาน'), opt('central', 'สารบรรณกลาง'), cfg.units.filter((u) => u.registry && u.active).map((u) => opt(u.code, u.name))) : null;
     if (regSel) { regSel.value = st.registry; regSel.addEventListener('change', () => { st.registry = regSel.value; load(true); }); }
     const csv = h('button', { class: 'btn', type: 'button', onclick: () => exportCsv() }, svgIcon(ICONS.download, 18), 'ส่งออก Excel (CSV)');
-    const filters = h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, regSel, yearSel, stageSel, from, to, urg), search, bar, h('div', { class: 'btn-row' }, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)')));
-    el.append(filters, info, list, h('div', { class: 'btn-row' }, more));
+    const pickBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', onclick: () => setPick(!pickMode) }, svgIcon(ICONS.check, 18), 'เลือกหลายรายการ');
+    const filters = h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, regSel, yearSel, stageSel, from, to, urg), search, bar, h('div', { class: 'btn-row' }, pickBtn, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)')));
+
+    /* ---- เลือกหลายรายการ: ติ๊กหลายฉบับ แล้วส่งต่อ / พิมพ์ตรารับ / ส่งออก / พิมพ์ทะเบียน ได้ในครั้งเดียว (Shift = เลือกต่อเนื่อง) ---- */
+    const BULK_MAX = 100;
+    const picked = () => [...sel.values()].sort((a, c) => (a.year - c.year) || (a.no - c.no));
+    const mk = (label, fn, cls = 'btn btn-sm') => h('button', { class: cls, type: 'button', onclick: fn }, label);
+    const selCount = h('span', { class: 'sar-selcount', 'aria-live': 'polite' });
+    const bAll = mk('เลือกทั้งหมดที่แสดง', () => { shown.forEach((d) => { if (d.stage !== 'void') sel.set(d.id, d); }); syncRows(); });
+    const bMatch = mk('เลือกทุกรายการที่ตรงเงื่อนไข', () => selectMatching());
+    const bFwd = mk('ส่งต่อ', () => bulkForward(), 'btn btn-sm btn-primary');
+    const bStamp = mk('พิมพ์ตรารับ', () => bulkStamps());
+    const bCsv = mk('ส่งออก CSV', () => exportCsv(picked()));
+    const bPrint = mk('พิมพ์ทะเบียน', () => printReg(picked()));
+    const bClear = mk('ล้างที่เลือก', () => { sel.clear(); syncRows(); });
+    const selbar = h('div', { class: 'sar-selbar', role: 'region', 'aria-label': 'จัดการรายการที่เลือก', hidden: true }, selCount, bAll, bMatch, bFwd, bStamp, bCsv, bPrint, bClear);
+    function drawBar() {
+      const n = sel.size; const inKind = st.kind === 'in';
+      selbar.hidden = !pickMode;
+      selCount.textContent = n ? `เลือกแล้ว ${n} รายการ` : 'ติ๊กหน้ารายการเพื่อเลือก (กด Shift ค้างเพื่อเลือกต่อเนื่อง)';
+      [bFwd, bStamp, bCsv, bPrint, bClear].forEach((x) => { x.disabled = !n; });
+      bFwd.hidden = !inKind; bStamp.hidden = !inKind; bMatch.hidden = !(st.total > shown.length);
+    }
+    function syncRows() { list.querySelectorAll('.sar-pickrow').forEach((r) => { const on = sel.has(r.dataset.id); r.classList.toggle('on', on); r.querySelector('input').checked = on; }); drawBar(); }
+    function clearSel() { sel.clear(); lastIdx = -1; drawBar(); }
+    function setPick(on) {
+      pickMode = on; pickBtn.setAttribute('aria-pressed', String(on)); pickBtn.classList.toggle('btn-primary', on);
+      if (!on) sel.clear();
+      if (shown.length) list.replaceChildren(...shown.map(pickRow));
+      drawBar();
+    }
+    /** One list row; in tick mode it gets a checkbox beside it (a checkbox cannot live inside the row's <button>). */
+    function pickRow(d) {
+      if (!pickMode) return docRow(d);
+      const cb = h('input', { type: 'checkbox', 'aria-label': `เลือก ${d.reg}`, checked: sel.has(d.id) });
+      cb.addEventListener('click', (e) => {
+        const i = shown.indexOf(d);
+        if (e.shiftKey && lastIdx >= 0 && i >= 0) { const a = Math.min(lastIdx, i); const z = Math.max(lastIdx, i); for (let k = a; k <= z; k += 1) { if (cb.checked) { if (shown[k].stage !== 'void') sel.set(shown[k].id, shown[k]); } else sel.delete(shown[k].id); } }
+        else if (cb.checked) sel.set(d.id, d); else sel.delete(d.id);
+        lastIdx = i; syncRows();
+      });
+      return h('div', { class: `sar-pickrow${sel.has(d.id) ? ' on' : ''}`, dataset: { id: d.id } }, h('label', { class: 'sar-pickbox' }, cb), docRow(d));
+    }
+    async function selectMatching() {
+      const r = await act(() => call('rows', st, 60000)); if (!r) return;
+      r.rows.forEach((d) => { if (d.stage !== 'void') sel.set(d.id, d); });
+      syncRows(); toast(`เลือกแล้ว ${sel.size} รายการ${r.truncated ? ' (ตัดที่ 5,000 รายการ — กรองให้แคบลง)' : ''}`, 'success');
+    }
+    function bulkStamps() {
+      const docs = picked().filter((d) => d.kind === 'in' && d.stage !== 'void' && !d.masked);
+      if (!docs.length) { toast('ไม่มีรายการที่พิมพ์ตรารับได้ (ยกเลิกเลขแล้ว/ชั้นความลับ)', 'info'); return; }
+      if (docs.length < sel.size) toast(`พิมพ์ตรารับ ${docs.length} จาก ${sel.size} รายการ (ข้ามที่ยกเลิกเลข/ชั้นความลับ)`, 'info', 5000);
+      printHtml(buildReceiptsHtml({ org: cfg.org, docs }));
+    }
+    /** ส่งต่อหลายฉบับให้หน่วยงานชุดเดียวกัน: เลือกหน่วยงานครั้งเดียว ระบบส่งต่อทีละฉบับ (ใช้ op "route" เดิม จึงตรวจสิทธิ์ตามเดิมทุกฉบับ) ฉบับที่ไม่สำเร็จเหลือไว้ให้ลองใหม่ */
+    function bulkForward() {
+      const docs = picked().filter((d) => d.kind === 'in' && d.stage !== 'void');
+      if (!docs.length) { toast('ไม่มีรายการที่ส่งต่อได้ (ยกเลิกเลขแล้ว หรือไม่ใช่หนังสือรับ)', 'info'); return; }
+      if (docs.length > BULK_MAX) { toast(`ส่งต่อพร้อมกันได้สูงสุด ${BULK_MAX} ฉบับ — ตอนนี้เลือก ${docs.length} ฉบับ`, 'info', 6000); return; }
+      const ust = {}; const picker = unitPicker(x, ust); const text = h('textarea', { rows: 2, maxlength: 400, placeholder: 'ข้อความถึงผู้รับ (ถ้ามี) — ใช้ร่วมกันทุกฉบับ' });
+      const prog = h('p', { class: 'muted', role: 'status', 'aria-live': 'polite' }); const fails = h('ul', { class: 'sar-fails' });
+      const regs = docs.map((d) => d.reg).join(', ');
+      let m = null; let closed = false; let todo = docs; let sent = 0;
+      const go = h('button', { class: 'btn btn-primary', type: 'button' }, `ส่งต่อ ${docs.length} ฉบับ`);
+      const cancel = h('button', { class: 'btn', type: 'button', onclick: () => m.close() }, 'ยกเลิก');
+      go.addEventListener('click', async () => {
+        const toUnits = ust.pick(); if (!toUnits.length) { toast('เลือกหน่วยงานอย่างน้อย 1 หน่วย', 'info'); return; }
+        go.disabled = true; fails.replaceChildren(); const bad = []; let ok = 0;
+        for (let i = 0; i < todo.length && !closed; i += 1) {
+          prog.textContent = `กำลังส่งต่อ ${i + 1} / ${todo.length} (เลขรับ ${todo[i].reg})…`;
+          try { await call('route', { id: todo[i].id, kind: 'forward', text: text.value, toUnits }, 60000); ok += 1; sent += 1; sel.delete(todo[i].id); } catch (e) {
+            bad.push(todo[i]); fails.append(h('li', null, `${todo[i].reg}: ${errText(e)}`));
+            if (e && (e.code === 'INVALID_SESSION' || e.code === 'DOMAIN_NOT_ALLOWED')) break;
+          }
+        }
+        if (closed) return;
+        todo = bad; prog.textContent = `ส่งต่อสำเร็จ ${ok} ฉบับ${bad.length ? ` · ไม่สำเร็จ ${bad.length} ฉบับ` : ''}`;
+        if (bad.length) { go.disabled = false; go.textContent = `ลองส่งใหม่ ${bad.length} ฉบับที่ไม่สำเร็จ`; cancel.textContent = 'ปิด'; } else { toast(`ส่งต่อแล้ว ${sent} ฉบับ`, 'success'); m.close(); }
+      });
+      m = modal(`ส่งต่อ ${docs.length} ฉบับพร้อมกัน`, [h('p', { class: 'muted' }, `เลขรับ: ${regs.length > 160 ? `${regs.slice(0, 160)}…` : regs}`), field('ข้อความ', text).root, picker, prog, fails], [go, cancel], { wide: true, onClose: () => { closed = true; syncRows(); if (sent) load(true); } });
+    }
+
+    el.append(filters, info, list, h('div', { class: 'btn-row' }, more), selbar);
     let seq = 0;
     /** Every filter change shows the loading state (top bar + placeholder rows); a slower, older answer can never overwrite a newer one. */
     async function load(reset) {
@@ -338,28 +420,29 @@ export async function mount(root) {
       if (reset) { st.offset = 0; more.hidden = true; info.textContent = 'กำลังโหลดทะเบียน…'; list.replaceChildren(...rowSkeletons(5)); } else { more.classList.add('is-loading'); more.disabled = true; }
       try {
         const r = await call('list', { ...st, limit: 40 }); if (my !== seq) return;
-        if (reset) list.replaceChildren();
+        if (reset) { list.replaceChildren(); shown = []; lastIdx = -1; }
+        st.total = r.total;
         info.textContent = `ปี พ.ศ. ${r.year}: ${r.counts.total} ฉบับ (วันนี้ ${r.counts.today}) · เลขล่าสุด ${r.counts.lastNo || '-'} · ยกเลิก ${r.counts.void}${r.total !== r.counts.total ? ` · ตรงเงื่อนไข ${r.total}` : ''}`;
-        r.items.forEach((d) => list.append(docRow(d)));
+        r.items.forEach((d) => { shown.push(d); list.append(pickRow(d)); });
         if (!r.items.length && reset) list.append(empty('ไม่พบหนังสือตามเงื่อนไข'));
-        st.offset += r.items.length; more.hidden = !r.more;
+        st.offset += r.items.length; more.hidden = !r.more; drawBar();
       } catch (e) {
         if (my !== seq) return; if (reset) { list.replaceChildren(); info.textContent = ''; }
         list.append(notice('error', 'โหลดทะเบียนไม่สำเร็จ', errText(e)), h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: () => load(reset) }, 'ลองอีกครั้ง')));
       } finally { if (my === seq) { bar.hidden = true; filters.removeAttribute('aria-busy'); list.removeAttribute('aria-busy'); more.classList.remove('is-loading'); more.disabled = false; } }
     }
     more.addEventListener('click', () => load(false));
-    async function printReg() {
-      const r = await act(() => call('rows', st, 60000)); if (!r) return;
+    async function printReg(only) {
+      const r = only ? { kind: st.kind, year: st.year, rows: only, truncated: false } : await act(() => call('rows', st, 60000)); if (!r) return;
       printHtml(buildRegisterHtml({ org: cfg.org, kind: r.kind, year: r.year, rows: r.rows }));
       if (r.truncated) toast('พิมพ์ได้สูงสุด 5,000 รายการ — กรองช่วงวันที่แล้วพิมพ์ใหม่', 'info', 6000);
     }
-    async function exportCsv() {
-      const r = await act(() => call('rows', st, 60000)); if (!r) return;
+    async function exportCsv(only) {
+      const r = only ? { kind: st.kind, year: st.year, rows: only, truncated: false } : await act(() => call('rows', st, 60000)); if (!r) return;
       const out = r.kind === 'out';
       const head = ['เลข' + (out ? 'ส่ง' : 'รับ'), 'วันที่ลงทะเบียน', 'เลขที่หนังสือ', 'ลงวันที่', out ? 'ถึง' : 'จาก', 'เรื่อง', 'ชั้นความเร็ว', 'ชั้นความลับ', 'สถานะการส่งต่อ', 'การปฏิบัติ', 'หมายเหตุ'];
       const rows = r.rows.map((d) => [d.reg, thaiDateTime(d.at), d.docNo, thaiDate(d.docDate), d.party, d.subject, URGENCY[d.urgency], SECRECY[d.secrecy], stageLabel(d.stage), d.action, d.note]);
-      const blob = new Blob([toCsv(head, rows)], { type: 'text/csv;charset=utf-8' }); const a = h('a', { href: URL.createObjectURL(blob), download: `ทะเบียน${out ? 'ส่ง' : 'รับ'}_${r.year}.csv` }); document.body.append(a); a.click(); a.remove();
+      const blob = new Blob([toCsv(head, rows)], { type: 'text/csv;charset=utf-8' }); const a = h('a', { href: URL.createObjectURL(blob), download: `ทะเบียน${out ? 'ส่ง' : 'รับ'}_${r.year}${only ? '_ที่เลือก' : ''}.csv` }); document.body.append(a); a.click(); a.remove();
       toast(`ส่งออก ${r.rows.length} รายการ${r.truncated ? ' (ตัดที่ 5,000 รายการ — กรองช่วงวันที่แล้วส่งออกใหม่)' : ''}`, 'success');
     }
     await load(true);

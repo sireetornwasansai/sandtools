@@ -255,3 +255,15 @@ div.sar-drop { display: flex; } div.sar-drop:focus-visible { outline: 0; box-sha
 .sar-att-act { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }
 .btn.is-disabled { opacity: .5; pointer-events: none; }
 @media (max-width: 640px) { .sar-att-row { flex-wrap: wrap; } .sar-att-act { width: 100%; justify-content: flex-start; } }
+
+/* v1.15 — เลือกหลายรายการในทะเบียน */
+.sar-pickrow { display: grid; grid-template-columns: auto 1fr; align-items: stretch; gap: .5rem; }
+.sar-pickbox { display: flex; align-items: flex-start; justify-content: center; min-width: 44px; min-height: 44px; padding-top: .85rem; cursor: pointer; }
+.sar-pickbox input { width: 1.3rem; height: 1.3rem; cursor: pointer; accent-color: var(--primary); }
+.sar-pickrow.on .sar-row { border-color: var(--primary); background: var(--primary-soft); }
+.sar-selbar { position: sticky; bottom: .6rem; z-index: 5; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; background: var(--surface); border: 1px solid var(--primary); border-radius: var(--radius); box-shadow: 0 6px 24px rgba(0, 0, 0, .18); padding: .6rem .8rem; margin-top: .6rem; }
+.sar-selbar[hidden] { display: none; }
+.sar-selbar .sar-selcount { font-weight: 700; margin-right: auto; }
+.sar-fails { margin: .4rem 0 0; padding-left: 1.2rem; color: var(--error); font-size: .9rem; }
+.sar-fails:empty { display: none; }
+@media (max-width: 720px) { .sar-selbar .sar-selcount { flex-basis: 100%; } .sar-selbar .btn { flex: 1 1 auto; } }

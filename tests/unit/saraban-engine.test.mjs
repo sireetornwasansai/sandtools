@@ -117,3 +117,15 @@ test('readEnough: OCR may stop once เลขที่ + เรื่อง + �
   assert.equal(readEnough('เรื่อง ขอความอนุเคราะห์\nเรียน ผู้อำนวยการ'), false);
   assert.equal(readEnough(''), false); assert.equal(readEnough(null), false);
 });
+
+/* v1.15 — เลือกหลายรายการ: ตรารับหลายฉบับในไฟล์เดียว */
+import { buildReceiptsHtml } from '../../src/js/modules/saraban-engine.js';
+test('buildReceiptsHtml: หนึ่งตราต่อฉบับ เรียงตามเลขรับ และ escape HTML', () => {
+  const docs = [{ reg: '61/2569', year: 2569, no: 61, at: '2026-10-30 09:05:00' }, { reg: '60/2569', year: 2569, no: 60, at: '2026-10-30 15:27:00' }];
+  const html = buildReceiptsHtml({ org: 'รพ.<สันทราย>', docs });
+  assert.equal((html.match(/class="box"/g) || []).length, 2);
+  assert.ok(html.indexOf('60/2569') < html.indexOf('61/2569'));
+  assert.match(html, /เวลา 15\.27 น\./);
+  assert.ok(!html.includes('<สันทราย>') && html.includes('&lt;สันทราย&gt;'));
+  assert.match(buildReceiptsHtml({ org: 'o', docs: [] }), /<body><\/body>/);
+});
