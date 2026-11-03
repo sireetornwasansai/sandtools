@@ -267,3 +267,9 @@ div.sar-drop { display: flex; } div.sar-drop:focus-visible { outline: 0; box-sha
 .sar-fails { margin: .4rem 0 0; padding-left: 1.2rem; color: var(--error); font-size: .9rem; }
 .sar-fails:empty { display: none; }
 @media (max-width: 720px) { .sar-selbar .sar-selcount { flex-basis: 100%; } .sar-selbar .btn { flex: 1 1 auto; } }
+
+/* edit / ask dialogs: long forms keep the save button in view; server errors show inside the dialog */
+.modal.sar-ask { max-height: 92vh; }
+.modal.sar-ask .modal-actions { position: sticky; bottom: -1.4rem; margin: 1rem -1.4rem -1.4rem; padding: .75rem 1.4rem 1.2rem; background: var(--surface); border-top: 1px solid var(--border); z-index: 2; }
+.sar-formerr { margin-top: .75rem; padding: .6rem .8rem; border-radius: 10px; background: #fdeceb; color: #7f1d1d; border: 1px solid #f5b5b0; font-size: .92rem; }
+:root[data-theme="dark"] .sar-formerr { background: #3b1717; color: #fecaca; border-color: #7f1d1d; }
