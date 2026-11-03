@@ -302,6 +302,27 @@ a { color: var(--primary); text-decoration: none; }
   box-shadow: 0 1px 3px rgba(26,23,20,0.3); z-index: 5;
 }
 .fc-list-event.vacation-event td { background: var(--amber-bg) !important; }
+/* ── ครึ่งวัน: กล่องของปฏิทินต้องไม่เป็นสีเต็มความกว้าง — เห็นเฉพาะแถบ 50% ที่ซีกของมัน (เช้า = ซ้าย · บ่าย = ขวา) ── */
+.fc-daygrid-event.half-day-event { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+.fc-daygrid-event.half-day-event.vacation-event { border: 0 !important; }
+.fc-daygrid-event.half-day-event.vacation-event::before { left: -6px; }
+.fc-daygrid-event.half-day-event.half-pm.vacation-event::before { left: calc(50% - 6px); }
+/* ── ประชุม: ป้ายไอคอนคน + ทรงแคปซูล (ลาพักผ่อนใช้กรอบประ จึงไม่ซ้ำกัน) ── */
+.meet-badge {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 18px; height: 18px; margin-right: 4px; vertical-align: -3px;
+  border-radius: 9px; background: var(--white); color: var(--text);
+}
+.fc-daygrid-event.meeting-event:not(.half-day-event) { border-radius: 12px !important; }
+.fc-list-event.meeting-event .meet-badge { margin-right: 6px; vertical-align: -4px; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 2px 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--text2); }
+.cal-legend li { display: inline-flex; align-items: center; gap: 5px; }
+.cal-legend .meet-badge { margin: 0; background: var(--text2); color: var(--white); }
+.cal-legend .lg-split { width: 20px; height: 12px; border: 1.5px solid var(--text2); border-radius: 3px; box-sizing: border-box; }
+.cal-legend .lg-am { background: linear-gradient(90deg, var(--text2) 50%, transparent 50%); }
+.cal-legend .lg-pm { background: linear-gradient(90deg, transparent 50%, var(--text2) 50%); }
+.cal-legend .lg-vac { font-size: 13px; line-height: 1; }
+
 .fc-list-event.vacation-event .fc-list-event-dot { border-color: var(--amber) !important; }
 .fc-daygrid-event {
   border-radius: 6px !important;

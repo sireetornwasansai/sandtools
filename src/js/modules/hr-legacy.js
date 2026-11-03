@@ -31,6 +31,16 @@ var LEAVE_CATS = [
 var OUT_OF_AREA_TYPES = ["ไปราชการ","อบรม","ประชุม","ประชุม P4P","ประชุม กกบ.","ประชุม HR","ประชุมภาพลักษณ์","ประชุม IRB","ประชุม SMC","ประชุมอื่นๆ","งานภายใน/ภายนอก","Event พิเศษ"];
 // ลาพักผ่อน — ทำกรอบเด่นชัดบนปฏิทิน เพื่อดูง่ายว่าใครไม่อยู่
 var VACATION_TYPES = ["ลาพักผ่อน","ลาพักผ่อนครึ่งวัน"];
+// ประชุมทุกประเภท (ประชุม · ประชุม P4P · ประชุม กกบ. …) — มีป้ายไอคอนคน + ทรงแคปซูลบนปฏิทิน ให้ต่างจากลา/ราชการ/อบรม
+function fcIsMeeting(type) { return String(type || '').indexOf('ประชุม') === 0; }
+// ครึ่งวันบ่าย? — หมายเหตุบอก บ่าย/เช้า ก่อน, ไม่มีก็ดูเวลาเริ่ม (12:00 เป็นต้นไป = บ่าย)  ต้องตรงกับ hrlAfternoon() ใน HrLine.gs
+function fcIsAfternoon(ep) {
+  var note = String((ep && ep.note) || '');
+  if (note.indexOf('บ่าย') >= 0) return true;
+  if (note.indexOf('เช้า') >= 0) return false;
+  return !!(ep && ep.startTime) && String(ep.startTime) >= '12:00';
+}
+var MEET_BADGE = '<span class="meet-badge" title="ประชุม" aria-hidden="true"><svg viewBox="0 0 16 16" width="13" height="13" focusable="false"><circle cx="5.4" cy="5" r="2.1" fill="currentColor"/><circle cx="11.1" cy="5.9" r="1.7" fill="currentColor"/><path d="M1.6 13.2c0-2.5 1.7-4 3.8-4s3.8 1.5 3.8 4M9.9 9.6c.5-.2 1-.3 1.4-.3 1.7 0 3.1 1.2 3.1 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>';
 var THAI_PROVINCES = [
   "กรุงเทพมหานคร","กระบี่","กาญจนบุรี","กาฬสินธุ์","กำแพงเพชร","ขอนแก่น","จันทบุรี","ฉะเชิงเทรา",
   "ชลบุรี","ชัยนาท","ชัยภูมิ","ชุมพร","เชียงราย","เชียงใหม่","ตรัง","ตราด","ตาก","นครนายก",
@@ -389,20 +399,20 @@ function renderCalendar() {
         var es = arg.event.end   ? arg.event.end.toLocaleTimeString('th-TH',fmt)   : '';
         return { html: '<div style="position:relative;padding:3px 4px;font-size:0.8em;line-height:1.25;overflow:hidden;color:#fff;height:100%;display:flex;flex-direction:column;justify-content:center;">' +
           '<div style="font-size:9px;font-weight:700;opacity:0.85;">' + ss + (es ? ' – ' + es : '') + '</div>' +
-          '<div style="font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (name ? name + ' · ' : '') + '<span style="opacity:0.9;font-weight:' + (isVacation?'800':'400') + ';">' + typeLabel + '</span>' + (provinceTag ? '<span style="opacity:0.9;font-weight:400;">' + provinceTag + '</span>' : '') + '</div>' +
+          '<div style="font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (fcIsMeeting(ep && ep.type) ? MEET_BADGE : '') + (name ? name + ' · ' : '') + '<span style="opacity:0.9;font-weight:' + (isVacation?'800':'400') + ';">' + typeLabel + '</span>' + (provinceTag ? '<span style="opacity:0.9;font-weight:400;">' + provinceTag + '</span>' : '') + '</div>' +
           (missionTag ? '<div style="font-size:9px;font-weight:400;opacity:0.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🎯 ' + missionTag + '</div>' : '') +
           '</div>' };
       }
       if (isMonth && !arg.event.allDay) {
-        var isHalf = ep && ep.isHalfDay;
+        var isHalf = ep && ep.isHalfDay, isPM = !!(isHalf && fcIsAfternoon(ep)), isMeet = !!(ep && fcIsMeeting(ep.type));
         var wStyle = isHalf ? 'width:50%;' : 'width:100%;';
-        var mStyle = (isHalf && ep.note && ep.note.toLowerCase().indexOf('บ่าย') >= 0) ? 'margin-left:50%;' : '';
-        var half   = isHalf ? '<span style="font-size:8px;opacity:0.8;margin-left:3px;">½</span>' : '';
+        var mStyle = isPM ? 'margin-left:50%;' : '';
+        var half   = isHalf ? '<span title="' + (isPM ? 'ครึ่งบ่าย' : 'ครึ่งเช้า') + '" style="font-size:11px;opacity:0.9;margin-left:3px;">' + (isPM ? '◑' : '◐') + '</span>' : '';
         var color  = hrSafeColor(arg.event.backgroundColor);
         var vacStyle = isVacation ? 'outline:2px dashed rgba(255,253,249,0.9);outline-offset:-3px;font-weight:800;' : '';
         return { html: '<div style="' + wStyle + mStyle + 'background:' + color +
-          ';color:#fff;border-radius:3px;padding:2px 6px;font-size:14px;font-weight:500;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;box-sizing:border-box;' + vacStyle + '">' +
-          typeLabel + ' · ' + (name||'') + half + provinceTag +
+          ';color:#fff;border-radius:' + (isMeet ? '12px' : '3px') + ';padding:2px ' + (isMeet ? '8px 2px 3px' : '6px') + ';font-size:14px;font-weight:500;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;box-sizing:border-box;' + vacStyle + '">' +
+          (isMeet ? MEET_BADGE : '') + typeLabel + ' · ' + (name||'') + half + provinceTag +
           (missionTag ? '<span style="opacity:0.85;font-weight:400;"> — ' + missionTag + '</span>' : '') + '</div>' };
       }
       return true;
@@ -444,8 +454,16 @@ function renderCalendar() {
           if (titleEl) titleEl.prepend(dot);
         }
       }
-      if (ep && ep.isHalfDay) { info.el.classList.add('half-day-event'); info.el.style.opacity = '0.92'; }
+      if (ep && ep.isHalfDay) {
+        info.el.classList.add('half-day-event'); info.el.style.opacity = '0.92';
+        var pm = fcIsAfternoon(ep); info.el.classList.add(pm ? 'half-pm' : 'half-am');
+        if (info.view.type.indexOf('list') === 0) { var lt = info.el.querySelector('.fc-list-event-title'); if (lt) lt.append(' ' + (pm ? '◑ ครึ่งบ่าย' : '◐ ครึ่งเช้า')); }
+      }
       if (ep && VACATION_TYPES.indexOf(ep.type) >= 0) { info.el.classList.add('vacation-event'); }
+      if (ep && fcIsMeeting(ep.type)) {
+        info.el.classList.add('meeting-event');
+        if (info.view.type.indexOf('list') === 0) { var mt = info.el.querySelector('.fc-list-event-title'); if (mt) mt.insertAdjacentHTML('afterbegin', MEET_BADGE); }
+      }
     },
 
     eventClick: function(info) {

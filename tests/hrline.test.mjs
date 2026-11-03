@@ -70,7 +70,7 @@ test('webhook: wrong secret refused; unknown friend registered but gets nothing;
   hook(ev({ source: { type: 'user', userId: 'Unew' }, text: 'สัปดาห์นี้ใครลา' }));
   let reply = e.pushes().find((f) => f.url.endsWith('/reply')); assert.match(textOf(reply), /ยังไม่ได้รับสิทธิ์/); assert.ok(e.sheets.LineUsers.some((r) => r[0] === 'Unew'));
   e.clear(); hook(ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'สัปดาห์หน้าใครลา' }));
-  reply = e.pushes().find((f) => f.url.endsWith('/reply')); assert.match(textOf(reply), /สัปดาห์หน้า 2–6 พ\.ย\./); assert.ok(reply.body.messages.at(-1).quickReply.items.length === 4);
+  reply = e.pushes().find((f) => f.url.endsWith('/reply')); assert.match(textOf(reply), /สัปดาห์หน้า 2–6 พ\.ย\./); assert.ok(reply.body.messages.at(-1).quickReply.items.length === 5);
   e.clear(); const dup = ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'วันนี้ใครลา' }); hook(dup, dup); assert.equal(e.pushes().filter((f) => f.url.endsWith('/reply')).length, 1);
   e.clear(); hook(ev({ source: { type: 'user', userId: 'Ustaff' }, text: 'สรุปลาเดือนนี้' })); assert.match(textOf(e.pushes()[0]), /เฉพาะแอดมินและหัวหน้า/);
   e.clear(); hook(ev({ source: { type: 'user', userId: 'Uboss' }, text: 'สรุปลาเดือนนี้' })); assert.match(textOf(e.pushes()[0]), /สรุปวันลาประจำเดือน/);

@@ -20,6 +20,9 @@
  *   HR_LINE_QUERY_SCOPE               (optional)  "leave" = the typed keywords list only leave; default "all" (leave + ราชการ + อบรม + ประชุม)
  *   HR_LINE_APP_URL                   (optional)  link added at the bottom of reports, e.g. https://sandtools.vercel.app/#/leave
  *   HR_LINE_LIMIT_PER_MIN             (optional)  webhook requests per minute, default 240
+ *   HR_LINE_ALIASES                   (optional)  one person recorded under two names → shown as one, e.g.  ทวีศักดิ์ สายเขียว=เอ;ชื่ออื่น=ชื่อที่ใช้   (built in: ทวีศักดิ์ สายเขียว = เอ)
+ *   HR_LINE_GROUP_NAMES               (optional)  extra names that are a กลุ่มงาน / คณะกรรมการ, not a person (comma separated). Names starting with "กลุ่มงาน" · "คกก." · "รวมทุกกลุ่มงาน" are always treated so.
+ *   HR_LINE_AUTO_ADMIN                (optional)  "false" = a new friend of the OA gets NO role until an admin sets one (default: friends become แอดมิน)
  *
  * Who receives what (column "บทบาท" of tab LineUsers, set by an HR admin in the page /hr-line or in the sheet)
  *   แอดมิน · หัวหน้า · บุคลากร   — a person with NO role gets nothing and may not ask anything (the OA is public: anybody can add it as a friend)
@@ -29,7 +32,7 @@
  * Privacy: reports never print the NOTE of a leave record (it may name an illness) — only type, dates and, for non-leave records, place / mission.
  */
 
-var HRL_VERSION = '1.0.0';
+var HRL_VERSION = '1.3.0';
 var HRL_TZ = 'Asia/Bangkok';
 var HRL_ROLES = ['แอดมิน', 'หัวหน้า', 'บุคลากร'];
 var HRL_GROUP_WORD = 'กลุ่ม';
@@ -42,7 +45,10 @@ var HRL_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.',
 var HRL_MONTH_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 var HRL_DOW = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
 var HRL_GROUPS = [{ k: 'leave', t: '🌴 ลา' }, { k: 'trip', t: '🚗 ไปราชการ' }, { k: 'train', t: '🎓 อบรม' }, { k: 'meet', t: '👥 ประชุม' }, { k: 'other', t: '📌 อื่นๆ' }];
-var HRL_QUICK = [['ใครลาวันไหน', 'ใครลาวันไหน'], ['สัปดาห์นี้', 'สัปดาห์นี้ใครลา'], ['สัปดาห์หน้า', 'สัปดาห์หน้าใครลา'], ['วันนี้', 'วันนี้ใครลา']];
+var HRL_QUICK = [['ใครลาวันไหน', 'ใครลาวันไหน'], ['สัปดาห์นี้', 'สัปดาห์นี้ใครลา'], ['สัปดาห์หน้า', 'สัปดาห์หน้าใครลา'], ['วันนี้', 'วันนี้ใครลา'], ['ประชุม', 'ประชุมสัปดาห์นี้']];
+var HRL_QUICK_BOSS = [['เดือนหน้า', 'เดือนหน้าใครลา']];                 // only offered to แอดมิน / หัวหน้า (the monthly summary is theirs)
+var HRL_ALIASES = { 'ทวีศักดิ์ สายเขียว': 'เอ' };                       // second name → the one shown
+var HRL_GROUP_NAME_RE = /^(กลุ่มงาน|คกก\.?|รวมทุกกลุ่มงาน)/;             // a กลุ่มงาน / คณะกรรมการ in the Staff tab is a body that holds meetings, not a person
 
 /* ------------------------------- LINE API (token, push, reply) ------------------------------ */
 function hrlProps() { return PropertiesService.getScriptProperties(); }
@@ -94,7 +100,7 @@ function hrlSplit(text, maxLen) {
 }
 function hrlTextMessages(text, quick) {
   var msgs = hrlSplit(text, 4500).slice(0, 5).map(function (t) { return { type: 'text', text: t }; });
-  if (quick && msgs.length) msgs[msgs.length - 1].quickReply = { items: HRL_QUICK.map(function (q) { return { type: 'action', action: { type: 'message', label: q[0], text: q[1] } }; }) };
+  if (quick && msgs.length) msgs[msgs.length - 1].quickReply = { items: (Array.isArray(quick) ? quick : HRL_QUICK.map(function (q) { return { type: 'action', action: { type: 'message', label: q[0], text: q[1] } }; })).slice(0, 13) };
   return msgs;
 }
 
@@ -111,11 +117,20 @@ function hrlUsers() {
   return out;
 }
 function hrlUser(userId) { var us = hrlUsers(); for (var i = 0; i < us.length; i++) if (us[i].userId === userId) return us[i]; return null; }
-/** Adds / refreshes a friend of the OA. Returns true when the person is new. */
-function hrlRegister(userId) {
-  var u = hrlUser(userId), sh = hrTab('LUSERS'), now = hrlNow();
-  if (u) { sh.getRange(u.row, 4, 1, 2).setValues([['active', now]]); if (!u.name) { var n = hrlDisplayName(userId); if (n) sh.getRange(u.row, 2).setValue(cell(n, 80)); } return false; }
-  sh.appendRow([userId, cell(hrlDisplayName(userId), 80), now, 'active', now, '', 'TRUE']);
+/** Everybody who adds the OA as a friend becomes a "แอดมิน" automatically (the owner's decision — it is how the office has been running).
+ *  Script property HR_LINE_AUTO_ADMIN = "false" goes back to manual role assignment (page /hr-line or the sheet). */
+function hrlAutoAdmin() { return prop('HR_LINE_AUTO_ADMIN') !== 'false'; }
+/** Adds / refreshes a friend of the OA. Returns true when the person is new.
+ *  onFollow = true (the "follow" event, i.e. the person just added / unblocked the OA): a friend with no role yet is made แอดมิน too. */
+function hrlRegister(userId, onFollow) {
+  var u = hrlUser(userId), sh = hrTab('LUSERS'), now = hrlNow(), auto = hrlAutoAdmin();
+  if (u) {
+    sh.getRange(u.row, 4, 1, 2).setValues([['active', now]]);
+    if (!u.name) { var n = hrlDisplayName(userId); if (n) sh.getRange(u.row, 2).setValue(cell(n, 80)); }
+    if (auto && onFollow && !u.role) sh.getRange(u.row, 6).setValue('แอดมิน');
+    return false;
+  }
+  sh.appendRow([userId, cell(hrlDisplayName(userId), 80), now, 'active', now, auto ? 'แอดมิน' : '', 'TRUE']);
   return true;
 }
 function hrlSetStatus(userId, status) { var u = hrlUser(userId); if (u) hrTab('LUSERS').getRange(u.row, 4).setValue(status); }
@@ -167,6 +182,27 @@ function hrlHasWorkday(start, end, from, to, holidays) {
   return false;
 }
 
+/* ---------------------------------- names: alias + กลุ่มงาน ≠ คน ---------------------------------- */
+function hrlAliases() {
+  var map = {}, k; for (k in HRL_ALIASES) map[k] = HRL_ALIASES[k];
+  String(prop('HR_LINE_ALIASES') || '').split(/[;\n]+/).forEach(function (pair) { var i = pair.indexOf('='); if (i > 0) { var a = pair.slice(0, i).trim(), b = pair.slice(i + 1).trim(); if (a && b) map[a] = b; } });
+  return map;
+}
+/** The one name a person is shown under (ทวีศักดิ์ สายเขียว → เอ). */
+function hrlCanon(name) { name = String(name == null ? '' : name).trim(); var a = hrlAliases(); return Object.prototype.hasOwnProperty.call(a, name) ? a[name] : name; }
+/** True for a กลุ่มงาน / คกก. / รวมทุกกลุ่มงาน — a body that is recorded in meetings, never counted as a person. */
+function hrlIsGroupName(name) {
+  name = String(name == null ? '' : name).trim(); if (!name) return false;
+  if (HRL_GROUP_NAME_RE.test(name)) return true;
+  return String(prop('HR_LINE_GROUP_NAMES') || '').split(/[,;\n]+/).some(function (g) { return g.trim() && g.trim() === name; });
+}
+/** Half day: the note says บ่าย / เช้า (the phone page writes "(บ่าย) …"), otherwise the start time decides (12:00 or later = afternoon). */
+function hrlAfternoon(half, note, st) {
+  if (!half) return false; note = String(note || '');
+  if (note.indexOf('บ่าย') >= 0) return true; if (note.indexOf('เช้า') >= 0) return false;
+  return !!st && String(st) >= '12:00';
+}
+
 /* ------------------------------------ who is away (data) ------------------------------------ */
 function hrlGroupOf(type) {
   if (HR_LEAVE_CATS.indexOf(type) >= 0) return 'leave';
@@ -185,13 +221,13 @@ function hrlRangeData(pre, from, to, opts) {
   var items = [], names = {}, holidays = [], d, g = 0;
   pre.recs.forEach(function (x) {
     if (!x.name || !x.start || x.end < from || x.start > to) return;
-    var group = hrlGroupOf(x.type);
+    var group = hrlGroupOf(x.type), nm = hrlCanon(x.name);
     if (opts.only && opts.only !== group) return;
     if (group === 'leave' && !hrlHasWorkday(x.start, x.end, from, to, pre.holidays)) return;
     var half = x.type.indexOf('ครึ่งวัน') >= 0;
-    items.push({ name: x.name, dept: x.dept, deptShort: hrlDeptShort(x.dept), type: x.type, group: group, start: x.start, end: x.end, st: x.st, et: x.et, half: half, afternoon: half && x.note.indexOf('บ่าย') >= 0,
+    items.push({ name: nm, isGroup: hrlIsGroupName(nm), dept: x.dept, deptShort: hrlDeptShort(x.dept), type: x.type, group: group, start: x.start, end: x.end, st: x.st, et: x.et, half: half, afternoon: hrlAfternoon(half, x.note, x.st),
       province: x.province, mission: x.mission, note: group === 'leave' ? '' : String(x.note || '').slice(0, 80) });
-    names[x.name] = 1;
+    if (!hrlIsGroupName(nm)) names[nm] = 1;
   });
   var order = {}; HRL_GROUPS.forEach(function (gr, i) { order[gr.k] = i; });
   items.sort(function (a, b) { return order[a.group] - order[b.group] || (a.start < b.start ? -1 : a.start > b.start ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0); });
@@ -207,7 +243,11 @@ function hrlRangeData(pre, from, to, opts) {
 function hrlWeekRange(pre, monday, opts) { return hrlRangeData(pre, monday, hrAddDays(monday, 6), opts); }
 
 /* ------------------------------------ report text (LINE) ------------------------------------ */
-function hrlTypeLabel(it) { return it.type + (it.half ? (it.afternoon ? ' (บ่าย)' : ' (เช้า)') : ''); }
+/** Half day: ◐ (left half filled) = ครึ่งเช้า · ◑ (right half filled) = ครึ่งบ่าย — the circle reads like the day split in two, morning on the left, afternoon on the right. */
+function hrlTypeLabel(it) {
+  if (!it.half) return it.type;
+  return String(it.type).replace('ครึ่งวัน', '').trim() + (it.afternoon ? ' ◑ ครึ่งบ่าย' : ' ◐ ครึ่งเช้า');
+}
 function hrlItemLine(it) {
   var parts = [it.name + (it.deptShort ? ' (' + it.deptShort + ')' : '')];
   if (it.group !== 'trip' && it.group !== 'train') parts.push(hrlTypeLabel(it));
@@ -219,9 +259,10 @@ function hrlItemLine(it) {
 }
 function hrlFooter() { var u = prop('HR_LINE_APP_URL'); return u ? '\n🔗 ' + u : ''; }
 /** title e.g. "สัปดาห์หน้า"; label e.g. "26–30 ต.ค. 2569". */
-function hrlRangeText(data, title, label) {
-  var L = ['📅 ' + title + ' ' + label];
-  if (!data.items.length) { L.push('', '✅ ยังไม่มีผู้บันทึกลา ไปราชการ อบรม หรือประชุมในช่วงนี้'); }
+function hrlRangeText(data, title, label, empty, note) {
+  var L = ['📅 ' + [title, label].filter(Boolean).join(' ')];
+  if (note) L.push(note);
+  if (!data.items.length) { L.push('', empty || '✅ ยังไม่มีผู้บันทึกลา ไปราชการ อบรม หรือประชุมในช่วงนี้'); }
   else L.push('มี ' + data.items.length + ' รายการ · ' + data.people + ' คน');
   if (data.holidays.length) { L.push('', '🎌 วันหยุดราชการ'); data.holidays.forEach(function (h) { L.push('• ' + hrlDW(h.date) + ' — ' + h.name); }); }
   HRL_GROUPS.forEach(function (gr) {
@@ -261,14 +302,15 @@ function hrlByDayText(pre, today, only) {
     });
     if (!rows.length) continue;
     rows.sort(function (a, b) { return order[a.group] - order[b.group] || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0); });
-    rows.forEach(function (it) { names[it.name] = 1; shown++; });
+    rows.forEach(function (it) { if (!it.isGroup) names[it.name] = 1; shown++; });
     days.push({ day: day, rows: rows });
   }
   if (!days.length) L.push('', '✅ ยังไม่มีผู้บันทึกลา ไปราชการ อบรม หรือประชุมในช่วงนี้');
   else L.push('มี ' + Object.keys(names).length + ' คน · ' + data.items.length + ' รายการ');
   if (data.holidays.length) { L.push('', '🎌 วันหยุดราชการ'); data.holidays.forEach(function (h) { L.push('• ' + hrlDW(h.date) + ' — ' + h.name); }); }
   days.forEach(function (x) {
-    L.push('', '🗓 ' + hrlDW(x.day) + (x.day === today ? ' (วันนี้)' : '') + ' — ' + x.rows.length + ' คน');
+    var n = x.rows.filter(function (it) { return !it.isGroup; }).length;
+    L.push('', '🗓 ' + hrlDW(x.day) + (x.day === today ? ' (วันนี้)' : '') + ' — ' + (n || !x.rows.length ? n + ' คน' : x.rows.length + ' รายการ'));
     x.rows.forEach(function (it) { L.push(hrlByDayLine(it, x.day)); });
   });
   if (data.over.length) { L.push('', '⚠️ ผู้ลาครบโควต้า (' + HR_MAX_LEAVE + ' คน/กลุ่มงาน/วัน)'); data.over.forEach(function (o) { L.push('• ' + hrlDW(o.date) + ' — ' + (o.deptShort || 'ทุกกลุ่มงาน') + ' ' + o.n + ' คน'); }); }
@@ -280,14 +322,43 @@ function hrlWeekTextFor(pre, monday, title, opts) {
   return hrlRangeText(data, title, hrlRange(monday, fri) + ' ' + hrlBE(fri));
 }
 
+/* ------------------------------ meetings of one week ------------------------------ */
+/** "ประชุมสัปดาห์นี้": only meetings, the same meeting (type + day + time + topic) merged into one line, day by day, with who attends. กลุ่มงาน / คกก. are the body, not attendees. */
+function hrlMeetText(pre, monday, title) {
+  var fri = hrAddDays(monday, 4), today = hrToday(), data = hrlRangeData(pre, monday, hrAddDays(monday, 6), { only: 'meet' }), by = {}, list = [], L, lastDay = '';
+  data.items.forEach(function (it) {
+    var detail = String(it.mission || it.note || '').slice(0, 60), key = [it.type, it.start, it.end, it.st, it.et, detail].join('|'), m = by[key];
+    if (!m) { m = by[key] = { type: it.type, start: it.start, end: it.end, st: it.st, et: it.et, detail: detail, day: it.start > monday ? it.start : monday, people: [], bodies: [] }; list.push(m); }
+    var to = it.isGroup ? m.bodies : m.people; if (to.indexOf(it.name) < 0) to.push(it.name);
+  });
+  list.sort(function (a, b) { return a.day < b.day ? -1 : a.day > b.day ? 1 : (a.st || '') < (b.st || '') ? -1 : (a.st || '') > (b.st || '') ? 1 : a.type < b.type ? -1 : a.type > b.type ? 1 : 0; });
+  L = ['👥 ' + title + ' ' + hrlRange(monday, fri) + ' ' + hrlBE(fri)];
+  if (!list.length) L.push('', '✅ ยังไม่มีการประชุมที่บันทึกไว้ในช่วงนี้');
+  else L.push('มี ' + list.length + ' การประชุม');
+  if (data.holidays.length) { L.push('', '🎌 วันหยุดราชการ'); data.holidays.forEach(function (h) { L.push('• ' + hrlDW(h.date) + ' — ' + h.name); }); }
+  list.forEach(function (m) {
+    if (m.day !== lastDay) { L.push('', '🗓 ' + hrlDW(m.day) + (m.day === today ? ' (วันนี้)' : '')); lastDay = m.day; }
+    m.people.sort();
+    var who = m.people.length ? ' — ' + m.people.length + ' คน: ' + m.people.slice(0, 6).join(', ') + (m.people.length > 6 ? ' และอีก ' + (m.people.length - 6) + ' คน' : '') : '';
+    L.push('• ' + m.type + (m.bodies.length ? ' (' + m.bodies.join(', ') + ')' : '') + (m.st && m.et ? ' · ' + m.st + '–' + m.et : '') + (m.end > m.start ? ' · ' + hrlRange(m.start, m.end) : '') + who);
+    if (m.detail) L.push('  ↳ ' + m.detail);
+  });
+  return L.join('\n') + hrlFooter();
+}
+
 /* ------------------------------ month summary (per กลุ่มงาน) ------------------------------ */
 var HRL_LEAVE_KEYS = [['ลาป่วย', 'ป่วย'], ['ลากิจ', 'กิจ'], ['ลาพักผ่อน', 'พักผ่อน'], ['ลาไปเรียน', 'เรียน']];
 function hrlMonthData(y, m) {
   var rows = hrMonthlySummary(y, m), staff = hrStaffList(), deptOf = {}, people = {}, order = [];
-  staff.forEach(function (s) { deptOf[s.name] = s.department; people[s.name] = { name: s.name, dept: s.department, parts: {}, leave: 0, trip: 0, train: 0, meet: 0 }; order.push(s.name); });
+  staff.forEach(function (s) {                                       // a กลุ่มงาน / คกก. in the Staff tab is not a person; a second name of one person is merged
+    var n = hrlCanon(s.name); if (hrlIsGroupName(n)) return;
+    if (!deptOf[n]) deptOf[n] = s.department;
+    if (!people[n]) { people[n] = { name: n, dept: s.department, parts: {}, leave: 0, trip: 0, train: 0, meet: 0 }; order.push(n); }
+  });
   rows.forEach(function (r) {
-    var p = people[r.name];
-    if (!p) { p = people[r.name] = { name: r.name, dept: r.department, parts: {}, leave: 0, trip: 0, train: 0, meet: 0 }; order.push(r.name); }
+    var n = hrlCanon(r.name); if (hrlIsGroupName(n)) return;
+    var p = people[n];
+    if (!p) { p = people[n] = { name: n, dept: r.department, parts: {}, leave: 0, trip: 0, train: 0, meet: 0 }; order.push(n); }
     HRL_LEAVE_KEYS.forEach(function (k) { var v = Number(r[k[0]]) || 0; if (v) { p.parts[k[1]] = (p.parts[k[1]] || 0) + v; p.leave += v; } });
     p.trip += Number(r['ไปราชการ']) || 0; p.train += Number(r['อบรม']) || 0;
   });
@@ -299,8 +370,9 @@ function hrlMonthData(y, m) {
     return { dept: d, total: away.reduce(function (s, p) { return s + p.leave; }, 0), headcount: list.length, away: away, none: none };
   }) };
 }
-function hrlMonthText(data) {
+function hrlMonthText(data, note) {
   var L = ['📊 สรุปวันลาประจำเดือน' + HRL_MONTH_FULL[data.month - 1] + ' ' + (data.year + 543), 'นับเฉพาะวันทำการ · ครึ่งวัน = 0.5 วัน'];
+  if (note) L.push(note);
   if (!data.depts.length) L.push('', '✅ ไม่มีบันทึกในเดือนนี้');
   data.depts.forEach(function (d) {
     L.push('', '🏢 ' + (hrlDeptShort(d.dept) ? 'กลุ่มงาน' + hrlDeptShort(d.dept) : d.dept) + ' — ลารวม ' + hrlNum(d.total) + ' วัน (' + d.away.length + ' จาก ' + d.headcount + ' คน)');
@@ -414,36 +486,139 @@ function hrlSeen(id) {
   if (cache.get(key)) return true;
   cache.put(key, '1', 600); return false;
 }
-/** Text typed (or sent by a rich-menu button) → 'byday' | 'thisweek' | 'nextweek' | 'today' | 'month' | 'groupid' | 'help' | ''. */
+/** Valid calendar day in 2020–2100 → 'yyyy-MM-dd', else ''. */
+function hrlValidDay(s) {
+  var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(s || '')); if (!m) return '';
+  var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (y < 2020 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+  var dt = new Date(Date.UTC(y, mo - 1, d)); if (dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return '';
+  return y + '-' + ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2);
+}
+/** Month name (short with/without dots, or full) → 1..12, else 0. */
+function hrlMonthIdx(s) {
+  s = String(s || '').replace(/\./g, '').replace(/^เดือน/, '');
+  for (var i = 0; i < 12; i++) if (s === HRL_MON[i].replace(/\./g, '') || s === HRL_MONTH_FULL[i]) return i + 1;
+  return 0;
+}
+/** d / m / optional year (พ.ศ. or ค.ศ., 2 or 4 digits) → 'yyyy-MM-dd'. No year = this year, or next year when that would be long past. */
+function hrlResolveDay(d, mo, y, today) {
+  var ty = Number(today.slice(0, 4)), c;
+  if (y === undefined || y === null || y === '') {
+    c = hrlValidDay(ty + '-' + mo + '-' + d);
+    if (c && c < hrAddDays(today, -120)) c = hrlValidDay((ty + 1) + '-' + mo + '-' + d);
+    return c;
+  }
+  y = Number(y); if (y < 100) y = y >= 50 ? 1957 + y : 2000 + y; else if (y > 2400) y -= 543;
+  return hrlValidDay(y + '-' + mo + '-' + d);
+}
+var HRL_WD_WORDS = [['วันอาทิตย์', 0], ['จันทร์', 1], ['อังคาร', 2], ['พุธ', 3], ['พฤหัสบดี', 4], ['พฤหัส', 4], ['ศุกร์', 5], ['เสาร์', 6]];
+/** A day named in the (space-free, lower-case) text → 'yyyy-MM-dd' or ''.
+ *  พรุ่งนี้ · มะรืน · เมื่อวาน · วันพุธ (next one; "…หน้า" = that day next week) · 5 พ.ย. · 5 พฤศจิกายน 2569 · 5/11 · 5/11/69 · 2026-11-05 · วันที่ 5 */
+function hrlParseDay(t, today) {
+  t = String(t).replace(/[๐-๙]/g, function (c) { return String('๐๑๒๓๔๕๖๗๘๙'.indexOf(c)); });
+  var m = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  if (m) { var yy = Number(m[1]); return hrlValidDay((yy > 2400 ? yy - 543 : yy) + '-' + m[2] + '-' + m[3]); }
+  if (/มะรืน/.test(t)) return hrAddDays(today, 2);
+  if (/พรุ่ง/.test(t)) return hrAddDays(today, 1);
+  if (/เมื่อวาน/.test(t)) return hrAddDays(today, -1);
+  var names = HRL_MON.map(function (x) { return x.replace(/\./g, '\\.?'); }).concat(HRL_MONTH_FULL).concat(HRL_MON.map(function (x) { return x.replace(/\./g, ''); }));
+  names.sort(function (a, b) { return b.length - a.length; });
+  m = new RegExp('(\\d{1,2})(?:วันที่|เดือน)?(' + names.join('|') + ')(?:พ\\.?ศ\\.?|ค\\.?ศ\\.?|ปี)?(\\d{4}|\\d{2})?(?!\\d)').exec(t);
+  if (m && hrlMonthIdx(m[2].replace(/\\\./g, ''))) return hrlResolveDay(m[1], hrlMonthIdx(m[2]), m[3], today);
+  m = /(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{4}|\d{2}))?(?!\d)/.exec(t);
+  if (m) return hrlResolveDay(m[1], m[2], m[3], today);
+  for (var i = 0; i < HRL_WD_WORDS.length; i++) {
+    if (t.indexOf(HRL_WD_WORDS[i][0]) < 0) continue;
+    var wd = HRL_WD_WORDS[i][1], dw = hrDow(today);
+    if (/(หน้า|ถัดไป|next)/.test(t)) return hrAddDays(hrlMonday(today), 7 + (wd + 6) % 7);
+    return hrAddDays(today, (wd - dw + 7) % 7);
+  }
+  m = /วันที่(\d{1,2})(?!\d)/.exec(t);
+  if (m) return hrlResolveDay(m[1], Number(today.slice(5, 7)), String(today.slice(0, 4)), today);
+  return '';
+}
+/** Text typed (or sent by a rich-menu button) → 'thisweek' | 'nextweek' | 'today' | 'byday' | 'month' | 'dayask' | 'day:yyyy-MM-dd' | 'groupid' | 'help' | ''. */
 function hrlParseText(text) {
   var t = String(text == null ? '' : text).replace(/\s+/g, '').toLowerCase();
   if (!t) return '';
   if (/^(รหัสกลุ่ม|ไอดีกลุ่ม|groupid)$/.test(t)) return 'groupid';
   if (/^(เมนู|คำสั่ง|ช่วยเหลือ|help|วิธีใช้)$/.test(t)) return 'help';
-  if (/วัน(ไหน|ใด)/.test(t) && /(ลา|ราชการ|ใคร|อบรม)/.test(t)) return 'byday';    // rich-menu: "ใครลาวันไหน" (also "ใครไปราชการวันไหน")
-  var week = /(สัปดาห์|อาทิตย์|week)/.test(t);
+  if (/^(ใครลา)?(วันอะไร|วันที่|เลือกวัน|เลือกวันที่)(บ้าง)?$/.test(t)) return 'dayask';
+  if (/(เดือนหน้า|เดือนถัดไป|nextmonth)/.test(t) && /(ลา|ใคร|สรุป)/.test(t)) return 'nextmonth';
+  if (/เดือนนี้/.test(t) && /(ลา|ใคร)/.test(t) && !/ประชุม/.test(t)) return 'month';
+  if (/ประชุม/.test(t) && !/สรุป/.test(t) && (/(สัปดาห์|week)/.test(t) || (/อาทิตย์/.test(t) && !/วันอาทิตย์/.test(t)))) {      // "ประชุมสัปดาห์นี้" · "ประชุมอะไรบ้างในสัปดาห์นี้" · "ประชุมสัปดาห์หน้า"
+    if (/(หน้า|ถัดไป|next)/.test(t)) return 'meetnext'; if (/(นี้|this)/.test(t)) return 'meetweek';
+  }
+  if (/(ใคร|ลา|ราชการ|อบรม|ประชุม|who)/.test(t) && !/(สรุป)/.test(t) && !/(วันนี้|today)/.test(t)) { var day = hrlParseDay(t, hrToday()); if (day) return 'day:' + day; }
+  if (/วัน(ไหน|ใด)/.test(t) && /(ลา|ราชการ|ใคร|อบรม)/.test(t)) return 'byday';    // rich-menu button "ใครลาวันไหน": day-by-day list + date picker
+  var week = /(สัปดาห์|week)/.test(t) || (/อาทิตย์/.test(t) && !/วันอาทิตย์/.test(t));
   if (week && /(หน้า|ถัดไป|next)/.test(t)) return 'nextweek';
   if (week && /(นี้|this)/.test(t)) return 'thisweek';
   if (/(วันนี้|today)/.test(t) && /(ลา|ใคร|who|ราชการ|อบรม)/.test(t)) return 'today';
   if (/สรุป/.test(t) && /ลา/.test(t)) return 'month';
   return '';
 }
-function hrlParsePostback(data) {
-  var m = /(?:^|&)action=([a-z_]+)/.exec(String(data || ''));
-  return !m ? '' : ({ leave_this_week: 'thisweek', leave_next_week: 'nextweek', leave_today: 'today', leave_month: 'month', leave_by_day: 'byday', who_when: 'byday' }[m[1]] || '');
+/** Postback → same command words as hrlParseText. `date` = what the LINE date picker returned (slimmed by /api/line). */
+function hrlParsePostback(data, date) {
+  var s = String(data || ''), m = /(?:^|&)action=([a-z_]+)/.exec(s); if (!m) return '';
+  if (m[1] === 'leave_day') { var dm = /(?:^|&)date=(\d{4}-\d{2}-\d{2})/.exec(s), d = dm ? hrlValidDay(dm[1]) : ''; return d ? 'day:' + d : ''; }
+  if (m[1] === 'leave_pick') { var d2 = hrlValidDay(date); return d2 ? 'day:' + d2 : ''; }
+  return { leave_this_week: 'thisweek', leave_next_week: 'nextweek', leave_today: 'today', leave_month: 'month', leave_next_month: 'nextmonth', meet_this_week: 'meetweek', meet_next_week: 'meetnext', leave_dayask: 'dayask', leave_by_day: 'byday', who_when: 'byday' }[m[1]] || '';
 }
 function hrlHelpText() {
-  return 'พิมพ์หรือกดเมนูได้เลย:\n• ใครลาวันไหน (ลา/ไปราชการ แยกรายวัน)\n• สัปดาห์นี้ใครลา\n• สัปดาห์หน้าใครลา\n• วันนี้ใครลา\n• สรุปลาเดือนนี้ (เฉพาะแอดมิน/หัวหน้า)';
+  return 'พิมพ์หรือกดเมนูได้เลย:\n• สัปดาห์นี้ใครลา\n• สัปดาห์หน้าใครลา\n• วันนี้ใครลา\n• ใครลาวันไหน (ลา/ไปราชการ แยกรายวัน + เลือกวันที่จากปฏิทิน)\n• ใครลา 5 พ.ย. · ใครลาวันพุธ · ใครลาพรุ่งนี้\n• ประชุมสัปดาห์นี้ · ประชุมสัปดาห์หน้า\n• สรุปลาเดือนนี้ · เดือนหน้าใครลา (เฉพาะแอดมิน/หัวหน้า)';
+}
+
+/* ---------------- one day: "ใครลาวันไหน" ---------------- */
+function hrlDayAskText() {
+  return '📅 อยากดูว่าใครลาวันไหน?\n• กดปุ่ม “เลือกวันที่” ด้านล่าง\n• หรือพิมพ์ เช่น “ใครลา 5 พ.ย.” · “ใครลาวันพุธ” · “ใครลาพรุ่งนี้” · “ใครลา 5/11”';
+}
+function hrlDayText(pre, day, today, only) {
+  var rel = day === today ? 'วันนี้' : day === hrAddDays(today, 1) ? 'พรุ่งนี้' : day === hrAddDays(today, 2) ? 'มะรืนนี้' : day === hrAddDays(today, -1) ? 'เมื่อวาน' : '';
+  var note = (hrDow(day) === 0 || hrDow(day) === 6) ? 'ℹ️ วันหยุดสุดสัปดาห์ (การลาไม่นับในวันนี้)' : '';
+  return hrlRangeText(hrlRangeData(pre, day, day, { only: only }), rel, hrlDW(day) + ' ' + hrlBE(day), (only === 'leave' ? '✅ ไม่มีผู้ลาใน' : '✅ ไม่มีผู้ลา ไปราชการ อบรม หรือประชุมใน') + (day === today ? 'วันนี้' : 'วันนั้น'), note);
+}
+/** Next / previous Monday–Friday around `day` (the quick-reply arrows skip weekends). */
+function hrlStepDay(day, dir) { var d = hrAddDays(day, dir), n = 0; while ((hrDow(d) === 0 || hrDow(d) === 6) && n++ < 7) d = hrAddDays(d, dir); return d; }
+function hrlQPost(label, date) { return { type: 'action', action: { type: 'postback', label: String(label).slice(0, 20), data: 'action=leave_day&date=' + date, displayText: 'ใครลา ' + hrlDW(date) } }; }
+function hrlQPick(label, today) { return { type: 'action', action: { type: 'datetimepicker', label: label, data: 'action=leave_pick', mode: 'date', initial: today, min: hrAddDays(today, -400), max: hrAddDays(today, 800) } }; }
+/** Quick-reply buttons under the answer: true = the usual three; a list = buttons for the day questions. */
+/** The usual buttons under an answer; แอดมิน / หัวหน้า also get "เดือนหน้า" (the monthly summary is theirs). */
+function hrlDefaultQuick(role) {
+  return HRL_QUICK.concat(role === 'แอดมิน' || role === 'หัวหน้า' ? HRL_QUICK_BOSS : []).map(function (q) { return { type: 'action', action: { type: 'message', label: q[0], text: q[1] } }; });
+}
+function hrlQuickFor(cmd, today, role) {
+  var items = [];
+  if (cmd === 'dayask' || cmd === 'byday') {
+    items.push(hrlQPick('📅 เลือกวันที่', today), hrlQPost('วันนี้', today), hrlQPost('พรุ่งนี้', hrAddDays(today, 1)));
+    var d = hrAddDays(today, 1), n = 0; while (n < 4) { d = hrlStepDay(d, 1); items.push(hrlQPost(hrlDW(d), d)); n++; }
+    return items;
+  }
+  if (String(cmd).indexOf('day:') === 0) {
+    var day = cmd.slice(4);
+    items.push(hrlQPost('◀ ' + hrlDW(hrlStepDay(day, -1)), hrlStepDay(day, -1)), hrlQPost(hrlDW(hrlStepDay(day, 1)) + ' ▶', hrlStepDay(day, 1)), hrlQPick('📅 เลือกวันอื่น', today));
+    HRL_QUICK.forEach(function (q) { items.push({ type: 'action', action: { type: 'message', label: q[0], text: q[1] } }); });
+    return items;
+  }
+  return hrlDefaultQuick(role);
 }
 function hrlAnswer(cmd, role, inGroup) {
   var pre = hrBundle(), today = hrToday(), only = hrlQueryOnly();
   if (cmd === 'byday') return hrlByDayText(pre, today, only);
+  if (cmd === 'dayask') return hrlDayAskText();
+  if (String(cmd).indexOf('day:') === 0) return hrlDayText(pre, cmd.slice(4), today, only);
   if (cmd === 'thisweek') { var mon = hrlMonday(today); return hrlWeekTextFor(pre, mon, 'สัปดาห์นี้', { only: only }); }
   if (cmd === 'nextweek') return hrlWeekTextFor(pre, hrAddDays(hrlMonday(today), 7), 'สัปดาห์หน้า', { only: only });
   if (cmd === 'today') return hrlRangeText(hrlRangeData(pre, today, today, { only: only }), 'วันนี้', hrlDW(today) + ' ' + hrlBE(today));
-  if (cmd === 'month') {
+  if (cmd === 'meetweek' || cmd === 'meetnext') {
+    if (only === 'leave') return 'ตอนนี้ระบบตอบเฉพาะเรื่องการลา';
+    var mon2 = hrlMonday(today); return cmd === 'meetweek' ? hrlMeetText(pre, mon2, 'ประชุมสัปดาห์นี้') : hrlMeetText(pre, hrAddDays(mon2, 7), 'ประชุมสัปดาห์หน้า');
+  }
+  if (cmd === 'month' || cmd === 'nextmonth') {
     if (inGroup || (role !== 'แอดมิน' && role !== 'หัวหน้า')) return 'สรุปวันลารายเดือนดูได้เฉพาะแอดมินและหัวหน้า (ทางแชตส่วนตัว)';
-    return hrlMonthText(hrlMonthData(Number(today.slice(0, 4)), Number(today.slice(5, 7))));
+    var y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
+    if (cmd === 'nextmonth') { m += 1; if (m > 12) { m = 1; y += 1; } }
+    return hrlMonthText(hrlMonthData(y, m), cmd === 'nextmonth' ? 'ข้อมูลเท่าที่บันทึกไว้ ณ วันนี้ (อาจยังเพิ่มขึ้นได้)' : '');
   }
   return '';
 }
@@ -455,23 +630,23 @@ function hrlHandleEvent(ev) {
   if (ev.type === 'unfollow') { if (userId) hrlSetStatus(userId, 'ยกเลิก'); return true; }
   if (ev.type === 'join' && inGroup) { hrlReply(rt, hrlTextMessages('สวัสดีครับ/ค่ะ 👋 พิมพ์ "รหัสกลุ่ม" เพื่อรับรหัสกลุ่ม ให้แอดมินนำไปตั้งค่าการส่งรายงานอัตโนมัติ', false)); return true; }
   if (ev.type === 'follow' && userId) {
-    var isNew = hrlRegister(userId), u = hrlUser(userId);
-    hrlReply(rt, hrlTextMessages(isNew || !u || !u.role ? '✅ ลงทะเบียนแล้ว\nขั้นต่อไป: รอแอดมินกำหนด "บทบาท" ให้ก่อน จึงจะได้รับรายงานและถามได้' : '👋 ยินดีต้อนรับกลับ\n' + hrlHelpText(), !!(u && u.role)));
+    hrlRegister(userId, true); var u = hrlUser(userId);
+    hrlReply(rt, hrlTextMessages(u && u.role ? '✅ ลงทะเบียนแล้ว — คุณได้รับสิทธิ์ "' + u.role + '"\n' + hrlHelpText() : '✅ ลงทะเบียนแล้ว\nขั้นต่อไป: รอแอดมินกำหนด "บทบาท" ให้ก่อน จึงจะได้รับรายงานและถามได้', !!(u && u.role)));
     return true;
   }
-  var cmd = ev.type === 'postback' ? hrlParsePostback(ev.data) : (ev.type === 'message' ? hrlParseText(ev.text) : '');
+  var cmd = ev.type === 'postback' ? hrlParsePostback(ev.data, ev.date) : (ev.type === 'message' ? hrlParseText(ev.text) : '');
   if (ev.type !== 'message' && ev.type !== 'postback') return false;
   if (cmd === 'groupid' && inGroup) { hrlReply(rt, hrlTextMessages('รหัสกลุ่มนี้:\n' + groupId, false)); return true; }
   if (inGroup) {                                           // groups: only configured groups, only recognised commands, never chatter
     if (!cmd || cmd === 'help' || !hrlIsAllowedGroup(groupId)) return false;
-    hrlReply(rt, hrlTextMessages(hrlAnswer(cmd, '', true), false)); return true;
+    hrlReply(rt, hrlTextMessages(hrlAnswer(cmd, '', true), /^(dayask|byday|day:)/.test(cmd) ? hrlQuickFor(cmd, hrToday()) : false)); return true;
   }
   if (!userId) return false;
   hrlRegister(userId);
   var me = hrlUser(userId), role = me ? me.role : '';
   if (HRL_ROLES.indexOf(role) < 0) { hrlReply(rt, hrlTextMessages('ยังไม่ได้รับสิทธิ์ใช้งาน — แจ้งแอดมินให้กำหนดบทบาทของคุณในระบบ แล้วลองใหม่', false)); return true; }
-  if (!cmd || cmd === 'help' || cmd === 'groupid') { hrlReply(rt, hrlTextMessages(hrlHelpText(), true)); return true; }
-  hrlReply(rt, hrlTextMessages(hrlAnswer(cmd, role, false), true));
+  if (!cmd || cmd === 'help' || cmd === 'groupid') { hrlReply(rt, hrlTextMessages(hrlHelpText(), hrlDefaultQuick(role))); return true; }
+  hrlReply(rt, hrlTextMessages(hrlAnswer(cmd, role, false), hrlQuickFor(cmd, hrToday(), role)));
   return true;
 }
 /** action "line" — called by the Vercel edge function /api/line (which has already checked LINE's X-Line-Signature). */
@@ -496,6 +671,12 @@ function hrlMobileBoot(sc) {
   return { me: { email: sc.email, admin: sc.admin, dev: sc.dev }, today: today, config: { maxLeave: HR_MAX_LEAVE, departments: HR_DEPARTMENTS, realDepartments: HR_REAL_DEPARTMENTS, leaveTypes: HR_LEAVE_TYPES },
     staff: pre.staff.map(function (s) { return { name: s.name, department: s.department }; }), holidays: pre.holidays,
     thisWeek: hrlWeekRange(pre, mon, {}), nextWeek: hrlWeekRange(pre, hrAddDays(mon, 7), {}), mine: mine.slice(0, 25), version: HRL_VERSION };
+}
+/** The phone page "ใครลา ▸ เลือกวัน": one day, same data and grouping as the LINE answer. */
+function hrlMobileWho(day) {
+  var d = hrlValidDay(day); if (!d) throw httpError('BAD_REQUEST', 'วันที่ไม่ถูกต้อง');
+  var pre = hrBundle(), data = hrlRangeData(pre, d, d, {});
+  return { day: d, items: data.items, over: data.over, holiday: pre.holidays[d] || '', weekend: hrDow(d) === 0 || hrDow(d) === 6 };
 }
 function hrlOpStatus() {
   var users = hrlUsers(), byRole = {}; HRL_ROLES.forEach(function (r) { byRole[r] = 0; });

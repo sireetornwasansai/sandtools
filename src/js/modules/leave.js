@@ -266,7 +266,7 @@ export async function mount(root, ctx) {
     const g = rows.filter((x) => x.group === k); if (!g.length) return null;
     return h('section', { class: 'lv-grp' }, h('h3', null, `${title} (${g.length})`), h('ul', null, ...g.map((x) => h('li', null,
       h('div', null, h('b', null, x.name), x.deptShort ? h('small', null, ` · ${x.deptShort}`) : null),
-      h('div', { class: 'lv-li-sub' }, `${x.type}${x.half ? (x.afternoon ? ' (บ่าย)' : ' (เช้า)') : ''} · ${range(x.start, x.end)}${x.st && x.et ? ` ${x.st}–${x.et}` : ''}`,
+      h('div', { class: 'lv-li-sub' }, `${x.half ? `${x.type.replace('ครึ่งวัน', '').trim()} ${x.afternoon ? '◑ ครึ่งบ่าย' : '◐ ครึ่งเช้า'}` : x.type} · ${range(x.start, x.end)}${x.st && x.et ? ` ${x.st}–${x.et}` : ''}`,
         x.group !== 'leave' && (x.province || x.mission) ? ` · ${x.province || x.mission}` : '')))));
   });
   const relLabel = (day) => (day === boot.today ? 'วันนี้' : day === addDays(boot.today, 1) ? 'พรุ่งนี้' : day === addDays(boot.today, 2) ? 'มะรืนนี้' : day === addDays(boot.today, -1) ? 'เมื่อวาน' : '');
