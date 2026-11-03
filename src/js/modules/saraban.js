@@ -154,7 +154,7 @@ export async function mount(root) {
         if (!submit) { finish(v); return; }
         busy = true; ok.disabled = true; cancel.disabled = true; ok.textContent = 'กำลังบันทึก…';
         try { await submit(v); busy = false; finish(v); } catch (e) {
-          busy = false; ok.disabled = false; cancel.disabled = false; ok.textContent = confirm; console.error('ask submit', e); err.textContent = errText(e) || 'บันทึกไม่สำเร็จ'; err.hidden = false;
+          busy = false; ok.disabled = false; cancel.disabled = false; ok.textContent = confirm; console.error('ask submit', e); err.textContent = e && e.code === 'UNKNOWN_ACTION' ? 'Apps Script ที่ Deploy อยู่เป็นเวอร์ชันเก่า (ไม่มีคำสั่งนี้) — วาง Saraban.gs ใหม่ แล้ว Deploy ▸ เวอร์ชันใหม่' : (errText(e) || 'บันทึกไม่สำเร็จ'); err.hidden = false;
         }
       } }, confirm);
       m = modal(title, [intro ? h('p', { class: 'muted' }, intro) : null, ...rows], [err, ok, cancel], { onDismiss: () => { if (!busy) finish(null); }, onClose: () => finish(null) });
