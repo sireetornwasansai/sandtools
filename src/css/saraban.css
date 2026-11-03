@@ -271,5 +271,6 @@ div.sar-drop { display: flex; } div.sar-drop:focus-visible { outline: 0; box-sha
 /* edit / ask dialogs: long forms keep the save button in view; server errors show inside the dialog */
 .modal.sar-ask { max-height: 92vh; }
 .modal.sar-ask .modal-actions { position: sticky; bottom: -1.4rem; margin: 1rem -1.4rem -1.4rem; padding: .75rem 1.4rem 1.2rem; background: var(--surface); border-top: 1px solid var(--border); z-index: 2; }
-.sar-formerr { margin-top: .75rem; padding: .6rem .8rem; border-radius: 10px; background: #fdeceb; color: #7f1d1d; border: 1px solid #f5b5b0; font-size: .92rem; }
+.modal.sar-ask .modal-actions { flex-wrap: wrap; }
+.sar-formerr { flex: 1 1 100%; margin: 0; padding: .6rem .8rem; border-radius: 10px; background: #fdeceb; color: #7f1d1d; border: 1px solid #f5b5b0; font-size: .92rem; }
 :root[data-theme="dark"] .sar-formerr { background: #3b1717; color: #fecaca; border-color: #7f1d1d; }
