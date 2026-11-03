@@ -154,10 +154,10 @@ export async function mount(root) {
         if (!submit) { finish(v); return; }
         busy = true; ok.disabled = true; cancel.disabled = true; ok.textContent = 'กำลังบันทึก…';
         try { await submit(v); busy = false; finish(v); } catch (e) {
-          busy = false; ok.disabled = false; cancel.disabled = false; ok.textContent = confirm; err.textContent = errText(e); err.hidden = false; err.scrollIntoView({ block: 'nearest' });
+          busy = false; ok.disabled = false; cancel.disabled = false; ok.textContent = confirm; console.error('ask submit', e); err.textContent = errText(e) || 'บันทึกไม่สำเร็จ'; err.hidden = false;
         }
       } }, confirm);
-      m = modal(title, [intro ? h('p', { class: 'muted' }, intro) : null, ...rows, err], [ok, cancel], { onDismiss: () => { if (!busy) finish(null); }, onClose: () => finish(null) });
+      m = modal(title, [intro ? h('p', { class: 'muted' }, intro) : null, ...rows], [err, ok, cancel], { onDismiss: () => { if (!busy) finish(null); }, onClose: () => finish(null) });
       m.box.classList.add('sar-ask');
     });
   }
