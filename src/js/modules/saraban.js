@@ -638,7 +638,7 @@ export async function mount(root) {
         { name: 'due', label: 'กำหนดเสร็จ', type: 'date', value: d.due }, { name: 'cat', label: 'หมวดเรื่อง', type: 'select', value: d.cat, options: [['', '— ไม่ระบุ —'], ...cfg.categories] },
         ...(out ? [] : [{ name: 'channel', label: 'ช่องทางที่ได้รับ', type: 'select', value: d.channel || '', options: [['', '— ไม่ระบุ —'], ...cfg.channels] }]),
         { name: 'refs', label: 'อ้างถึง', value: d.refs, max: 400 }, { name: 'encl', label: 'สิ่งที่ส่งมาด้วย', value: d.encl, max: 400 },
-        { name: 'action', label: 'การปฏิบัติ (คอลัมน์ในทะเบียน)', value: d.action, max: 300 }, { name: 'note', label: 'หมายเหตุ', value: d.note, max: 500 }], 'บันทึกการแก้ไข',
+        { name: 'actionText', label: 'การปฏิบัติ (คอลัมน์ในทะเบียน)', value: d.action, max: 300 }, { name: 'note', label: 'หมายเหตุ', value: d.note, max: 500 }], 'บันทึกการแก้ไข',
       { intro: `ทุกการแก้ไขถูกบันทึกในประวัติของหนังสือ (ไม่เก็บค่าเดิมของเรื่องที่เป็นความลับ)${multi ? ' · หนังสือนี้มีผู้รับหลายราย — รายชื่อผู้รับแก้ในหน้านี้ไม่ได้' : ''}`,
         submit: async (a) => { const r = await call('update', { id, ...a }); const n = r && r.changed ? r.changed.length : 0; toast(n ? `บันทึกแล้ว (${r.changed.join(', ')})` : 'ไม่มีการเปลี่ยนแปลง', n ? 'success' : 'info'); reload(); } });
     };
