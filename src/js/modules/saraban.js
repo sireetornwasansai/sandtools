@@ -87,6 +87,7 @@ export async function mount(root) {
   const defaultRegistry = () => { let v = ''; try { v = localStorage.getItem(GKEY) || ''; } catch { v = ''; } return v === 'central' || regCodes.indexOf(v) >= 0 ? v : myReg || 'central'; };
   const X = { call, cfg, openDoc, go, refresh: (t) => go(t || current), me, unitName, defaultRegistry, rememberRegistry };
   function go(tab, params = {}) {
+    X.onChanged = null;   // the register view re-registers its own refresh below
     if (!TABS.some((t) => t[0] === tab)) tab = TABS[0][0];
     if (tab === current && !Object.keys(params).length) memo.clear();   // the open tab clicked again = reload with fresh data
     current = tab; ver += 1; const my = ver;
@@ -126,17 +127,38 @@ export async function mount(root) {
     const at = d.kind === 'out' || d.stage === 'registered' ? -1 : stageIndex(d.stage); if (at < 0) return null;   // no bar for a letter nobody routed here: its real status is unknown
     return h('ol', { class: 'sar-progress', 'aria-label': `ความคืบหน้า: ${STAGE[d.stage] || d.stage}` }, STAGE_STEPS.map(([k, l], i) => h('li', { class: i < at ? 'done' : i === at ? (d.stage === 'returned' ? 'warn' : 'now') : '', 'aria-current': i === at ? 'step' : null }, l)));
   }
-  /** Small generic dialog: fields [{name,label,type,options,value,hint,rows}] → Promise<values|null>. */
-  function ask(title, fields, confirm = 'ตกลง', { danger = false, intro } = {}) {
+  /** Small generic dialog: fields [{name,label,type,options,value,hint,rows,readonly}] → Promise<values|null>.
+   *  With `submit(values)` (async) the dialog stays open while it runs: a server error is shown INSIDE the dialog and nothing the user typed is lost; it closes only after submit succeeds. */
+  function ask(title, fields, confirm = 'ตกลง', { danger = false, intro, submit } = {}) {
     return new Promise((resolve) => {
-      const inputs = {}; let done = false; let m = null;
+      const inputs = {}; let done = false; let m = null; let busy = false;
       const rows = fields.map((f) => {
-        const el = f.type === 'select' ? h('select', null, f.options.map(([v, l]) => opt(v, l, v === f.value))) : f.type === 'textarea' ? h('textarea', { rows: f.rows || 3, maxlength: f.max || 400, value: f.value || '' }) : h('input', { type: f.type || 'text', maxlength: f.max || 300, value: f.value || '', placeholder: f.placeholder || '' });
+        const el = f.type === 'select' ? h('select', { disabled: f.readonly }, f.options.map(([v, l]) => opt(v, l, v === f.value))) : f.type === 'textarea' ? h('textarea', { rows: f.rows || 3, maxlength: f.max || 400, value: f.value || '', readonly: f.readonly }) : h('input', { type: f.type || 'text', maxlength: f.max || 300, value: f.value || '', placeholder: f.placeholder || '', readonly: f.readonly });
         inputs[f.name] = el; return field(f.label, el, f.hint).root;
       });
+      const err = h('div', { class: 'sar-formerr', role: 'alert', hidden: true });
       const finish = (v) => { if (done) return; done = true; resolve(v); if (m) m.close(); };
-      const ok = h('button', { class: `btn ${danger ? 'btn-danger' : 'btn-primary'}`, type: 'button', onclick: () => { const v = {}; for (const f of fields) { v[f.name] = inputs[f.name].value.trim(); if (f.required && !v[f.name]) { inputs[f.name].focus(); toast(`กรุณากรอก “${f.label.replace(/ \*$/, '')}”`, 'info'); return; } if (f.min && v[f.name].length < f.min) { inputs[f.name].focus(); toast(`“${f.label.replace(/ \*$/, '')}” อย่างน้อย ${f.min} ตัวอักษร`, 'info'); return; } } finish(v); } }, confirm);
-      m = modal(title, [intro ? h('p', { class: 'muted' }, intro) : null, ...rows], [ok, h('button', { class: 'btn', type: 'button', onclick: () => finish(null) }, 'ยกเลิก')], { onDismiss: () => finish(null), onClose: () => finish(null) });
+      const collect = () => {
+        const v = {};
+        for (const f of fields) {
+          v[f.name] = inputs[f.name].value.trim(); const lab = f.label.replace(/ \*$/, '');
+          if (f.required && !v[f.name]) { inputs[f.name].focus(); err.textContent = `กรุณากรอก “${lab}”`; err.hidden = false; return null; }
+          if (f.min && v[f.name].length < f.min) { inputs[f.name].focus(); err.textContent = `“${lab}” อย่างน้อย ${f.min} ตัวอักษร`; err.hidden = false; return null; }
+        }
+        return v;
+      };
+      const cancel = h('button', { class: 'btn', type: 'button', onclick: () => { if (!busy) finish(null); } }, 'ยกเลิก');
+      const ok = h('button', { class: `btn ${danger ? 'btn-danger' : 'btn-primary'}`, type: 'button', onclick: async () => {
+        if (busy) return; err.hidden = true;
+        const v = collect(); if (!v) return;
+        if (!submit) { finish(v); return; }
+        busy = true; ok.disabled = true; cancel.disabled = true; ok.textContent = 'กำลังบันทึก…';
+        try { await submit(v); busy = false; finish(v); } catch (e) {
+          busy = false; ok.disabled = false; cancel.disabled = false; ok.textContent = confirm; err.textContent = errText(e); err.hidden = false; err.scrollIntoView({ block: 'nearest' });
+        }
+      } }, confirm);
+      m = modal(title, [intro ? h('p', { class: 'muted' }, intro) : null, ...rows, err], [ok, cancel], { onDismiss: () => { if (!busy) finish(null); }, onClose: () => finish(null) });
+      m.box.classList.add('sar-ask');
     });
   }
   let actN = 0;
@@ -334,6 +356,7 @@ export async function mount(root) {
     const filters = h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, regSel, yearSel, stageSel, from, to, urg), search, bar, h('div', { class: 'btn-row' }, pickBtn, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)')));
 
     /* ---- เลือกหลายรายการ: ติ๊กหลายฉบับ แล้วส่งต่อ / พิมพ์ตรารับ / ส่งออก / พิมพ์ทะเบียน ได้ในครั้งเดียว (Shift = เลือกต่อเนื่อง) ---- */
+    x.onChanged = () => load(true);   // a letter edited / acted on in the detail dialog → the list behind it shows the new data
     const BULK_MAX = 100;
     const picked = () => [...sel.values()].sort((a, c) => (a.year - c.year) || (a.no - c.no));
     const mk = (label, fn, cls = 'btn btn-sm') => h('button', { class: cls, type: 'button', onclick: fn }, label);
@@ -497,15 +520,16 @@ export async function mount(root) {
     function edit(u) {
       const v = u || { code: '', name: '', short: '', type: 'internal', head: '', members: [], delegate: '', delegateUntil: '', prefix: '', active: true, email: '', parent: '', keywords: '', registry: false };
       ask(u ? `แก้ไขหน่วยงาน ${u.code}` : 'เพิ่มหน่วยงาน', [
-        { name: 'code', label: 'รหัส * (a-z 0-9 _ -)', value: v.code, required: true, max: 20, hint: u ? 'รหัสแก้ไม่ได้' : undefined }, { name: 'name', label: 'ชื่อหน่วยงาน *', value: v.name, required: true, max: 120 }, { name: 'short', label: 'ชื่อย่อ', value: v.short, max: 30 },
+        { name: 'code', label: 'รหัส * (a-z 0-9 _ -)', value: v.code, required: true, max: 20, readonly: !!u, hint: u ? 'รหัสแก้ไม่ได้' : undefined }, { name: 'name', label: 'ชื่อหน่วยงาน *', value: v.name, required: true, max: 120 }, { name: 'short', label: 'ชื่อย่อ', value: v.short, max: 30 },
         { name: 'type', label: 'ชนิด', type: 'select', value: v.type, options: [['internal', 'หน่วยงานภายใน'], ['exec', 'ผู้บริหาร (สั่งการ/เห็นทุกเรื่อง)'], ['external', 'หน่วยงานภายนอก (ใช้เป็นผู้รับหนังสือส่ง)']] },
         { name: 'head', label: 'อีเมลหัวหน้า', type: 'email', value: v.head, max: 120 }, { name: 'members', label: 'อีเมลสมาชิก (คั่นด้วย , หรือขึ้นบรรทัดใหม่)', type: 'textarea', value: v.members.join(', '), rows: 3, max: 3000 },
         { name: 'delegate', label: 'ผู้รักษาราชการแทน (อีเมล)', type: 'email', value: v.delegate, max: 120 }, { name: 'delegateUntil', label: 'รักษาราชการแทนถึงวันที่', type: 'date', value: v.delegateUntil }, { name: 'prefix', label: 'คำนำหน้าเลขที่หนังสือส่ง (เช่น สธ 0123.4)', value: v.prefix, max: 60 },
         { name: 'email', label: 'อีเมลหน่วยงาน (ผู้รับภายนอก)', type: 'email', value: v.email, max: 120 }, { name: 'keywords', label: 'คำค้นสำหรับแนะนำหน่วยงาน (คั่นด้วย ,)', value: v.keywords, max: 300 },
-        { name: 'registry', label: 'มีทะเบียนรับ-ส่งของตนเอง', type: 'select', value: v.registry ? '1' : '0', options: [['0', 'ไม่มี (ใช้ทะเบียนกลาง)'], ['1', 'มี']] }, { name: 'active', label: 'สถานะ', type: 'select', value: v.active ? '1' : '0', options: [['1', 'ใช้งาน'], ['0', 'ปิดใช้งาน (ไม่ลบ เพื่อคงประวัติ)']] }], 'บันทึก').then(async (a) => {
-        if (!a) return; if (u) a.code = u.code;
-        if (await act(() => call('unitsave', { ...a, registry: a.registry === '1', active: a.active === '1' }), 'บันทึกหน่วยงานแล้ว')) { Object.assign(cfg, await call('config')); load(); }
-      });
+        { name: 'registry', label: 'มีทะเบียนรับ-ส่งของตนเอง', type: 'select', value: v.registry ? '1' : '0', options: [['0', 'ไม่มี (ใช้ทะเบียนกลาง)'], ['1', 'มี']] }, { name: 'active', label: 'สถานะ', type: 'select', value: v.active ? '1' : '0', options: [['1', 'ใช้งาน'], ['0', 'ปิดใช้งาน (ไม่ลบ เพื่อคงประวัติ)']] }], 'บันทึก', { submit: async (a) => {
+        if (u) a.code = u.code;
+        await call('unitsave', { ...a, registry: a.registry === '1', active: a.active === '1' });
+        toast('บันทึกหน่วยงานแล้ว', 'success'); Object.assign(cfg, await call('config')); load();
+      } });
     }
     await load();
   }
@@ -585,7 +609,7 @@ export async function mount(root) {
     stop();
     if (closeDetail) closeDetail(); const d = r.doc; const out = d.kind === 'out';
     const row = (k, v) => (v ? h('div', { class: 'sar-kv' }, h('span', null, k), h('div', null, v)) : null);
-    const reload = () => { openDoc(id); };
+    const reload = () => { if (X.onChanged) X.onChanged(); openDoc(id); };
     const btn = (label, fn, cls = 'btn') => h('button', { class: cls, type: 'button', onclick: fn }, label);
     const recv = (r.to || []).map((t) => h('div', { class: `sar-recv st-${t.status}` }, h('div', { class: 'sar-recv-h' }, h('strong', null, t.name), badge(ACTION[t.action]), badge(TO_STATUS[t.status], t.status === 'done' ? 'ok' : t.status === 'pending' ? 'warn' : t.status === 'returned' ? 'bad' : 'info'), t.due ? badge(`กำหนด ${dueLabel(t.due, cfg.today, t.status === 'done')}`, t.due < cfg.today && t.status !== 'done' ? 'bad' : 'muted') : null),
       t.people.length ? h('div', { class: 'muted' }, `ผู้รับผิดชอบ: ${t.people.join(', ')}`) : null, t.note ? h('div', { class: 'muted' }, `หมายเหตุ: ${t.note}`) : null,
@@ -603,13 +627,20 @@ export async function mount(root) {
       const st = {}; let m = null; const picker = unitPicker(X, st); const text = h('textarea', { rows: 2, maxlength: 400, placeholder: command ? 'ข้อสั่งการ *' : 'ข้อความถึงผู้รับ (ถ้ามี)' });
       m = modal(command ? 'สั่งการ' : 'ส่งต่อหนังสือ', [field(command ? 'ข้อสั่งการ' : 'ข้อความ', text).root, picker], [btn(command ? 'บันทึกข้อสั่งการ' : 'ส่งต่อ', async () => { const toUnits = st.pick(); if (!toUnits.length) { toast('เลือกหน่วยงานอย่างน้อย 1 หน่วย', 'info'); return; } if (command && !text.value.trim()) { text.focus(); return; } if (await act(() => call('route', { id, kind: command ? 'command' : 'forward', text: text.value, toUnits }), 'ส่งต่อแล้ว')) { m.close(); reload(); } }, 'btn btn-primary'), btn('ยกเลิก', () => m.close())], { wide: true });
     };
-    const editDlg = async () => {
-      const a = await ask('แก้ไขข้อมูลหนังสือ', [{ name: 'subject', label: 'เรื่อง *', value: d.subject, type: 'textarea', rows: 2, required: true }, ...(out ? [] : [{ name: 'docNo', label: 'เลขที่หนังสือ', value: d.docNo }, { name: 'party', label: 'จาก *', value: d.party, required: true }]),
-        { name: 'docDate', label: 'ลงวันที่', type: 'date', value: d.docDate }, { name: 'salut', label: 'เรียน', value: d.salut }, { name: 'urgency', label: 'ชั้นความเร็ว', type: 'select', value: d.urgency, options: Object.entries(URGENCY) },
+    const editDlg = () => {
+      const multi = out && (d.parties || []).length > 1;   // several recipients: kept as they are (each has its own channel / tracking no.)
+      return ask('แก้ไขข้อมูลหนังสือ', [
+        { name: 'subject', label: 'เรื่อง *', value: d.subject, type: 'textarea', rows: 2, required: true, max: 300 },
+        { name: 'docNo', label: out ? 'เลขที่หนังสือ *' : 'เลขที่หนังสือ', value: d.docNo, max: 80, required: out },
+        ...(multi ? [] : [{ name: 'party', label: out ? 'ถึง *' : 'จาก *', value: d.party, required: true, max: 160 }]),
+        { name: 'docDate', label: 'ลงวันที่', type: 'date', value: d.docDate }, { name: 'salut', label: 'เรียน', value: d.salut, max: 160 }, { name: 'urgency', label: 'ชั้นความเร็ว', type: 'select', value: d.urgency, options: Object.entries(URGENCY) },
         ...(me.admin || me.clear ? [{ name: 'secrecy', label: 'ชั้นความลับ', type: 'select', value: d.secrecy, options: Object.entries(SECRECY), hint: me.admin ? '' : 'ปรับเพิ่มได้เท่านั้น — ลดชั้นความลับต้องเป็นผู้ดูแลระบบ' }] : []),
-        { name: 'due', label: 'กำหนดเสร็จ', type: 'date', value: d.due }, { name: 'cat', label: 'หมวดเรื่อง', type: 'select', value: d.cat, options: [['', '— ไม่ระบุ —'], ...cfg.categories] }, { name: 'refs', label: 'อ้างถึง', value: d.refs }, { name: 'encl', label: 'สิ่งที่ส่งมาด้วย', value: d.encl },
-        { name: 'action', label: 'การปฏิบัติ (คอลัมน์ในทะเบียน)', value: d.action, max: 300 }, { name: 'note', label: 'หมายเหตุ', value: d.note, max: 500 }], 'บันทึกการแก้ไข', { intro: 'ทุกการแก้ไขถูกบันทึกในประวัติของหนังสือ (ไม่เก็บค่าเดิมของเรื่องที่เป็นความลับ)' });
-      if (a && await act(() => call('update', { id, ...a }), 'บันทึกแล้ว')) reload();
+        { name: 'due', label: 'กำหนดเสร็จ', type: 'date', value: d.due }, { name: 'cat', label: 'หมวดเรื่อง', type: 'select', value: d.cat, options: [['', '— ไม่ระบุ —'], ...cfg.categories] },
+        ...(out ? [] : [{ name: 'channel', label: 'ช่องทางที่ได้รับ', type: 'select', value: d.channel || '', options: [['', '— ไม่ระบุ —'], ...cfg.channels] }]),
+        { name: 'refs', label: 'อ้างถึง', value: d.refs, max: 400 }, { name: 'encl', label: 'สิ่งที่ส่งมาด้วย', value: d.encl, max: 400 },
+        { name: 'action', label: 'การปฏิบัติ (คอลัมน์ในทะเบียน)', value: d.action, max: 300 }, { name: 'note', label: 'หมายเหตุ', value: d.note, max: 500 }], 'บันทึกการแก้ไข',
+      { intro: `ทุกการแก้ไขถูกบันทึกในประวัติของหนังสือ (ไม่เก็บค่าเดิมของเรื่องที่เป็นความลับ)${multi ? ' · หนังสือนี้มีผู้รับหลายราย — รายชื่อผู้รับแก้ในหน้านี้ไม่ได้' : ''}`,
+        submit: async (a) => { const r = await call('update', { id, ...a }); const n = r && r.changed ? r.changed.length : 0; toast(n ? `บันทึกแล้ว (${r.changed.join(', ')})` : 'ไม่มีการเปลี่ยนแปลง', n ? 'success' : 'info'); reload(); } });
     };
     const attach = h('input', { type: 'file', hidden: true, accept: 'application/pdf,image/*,.docx,.xlsx,.pptx' });
     attach.addEventListener('change', async () => { const f = attach.files && attach.files[0]; attach.value = ''; if (!f) return; if (f.size > 10 * 1048576) { toast('ไฟล์ใหญ่เกิน 10 MB', 'error'); return; } if (await act(async () => call('upload', { name: f.name, data: await fileToBase64(f), kind: d.kind, docId: id, label: 'แนบเพิ่ม' }, 120000), 'แนบไฟล์แล้ว')) reload(); });
