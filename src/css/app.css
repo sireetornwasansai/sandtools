@@ -153,7 +153,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; accent-
 .notice-success { background: var(--success-bg); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); } .notice-success .icon { color: var(--success); }
 details.tech { margin-top: .5rem; } details.tech pre { white-space: pre-wrap; font-size: .8rem; background: var(--surface-2); padding: .6rem; border-radius: 8px; }
 details.card > summary { cursor: pointer; font-weight: 600; }
-.toast-region { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; z-index: 600; }
+.toast-region { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; z-index: 900; pointer-events: none; } .toast-region > * { pointer-events: auto; }   /* above modals (700): an error raised inside a dialog used to be hidden behind it */
 .toast { padding: .7rem 1.05rem; border-radius: 12px; background: #111827; color: #fff; box-shadow: var(--shadow-lg); max-width: 380px; border-left: 4px solid #6b8bff; animation: toast-in .25s var(--ease) both; }
 .toast-error { background: #7f1d1d; border-left-color: #f87171; } .toast-success { background: #14532d; border-left-color: #4ade80; color: #fff; }
 :root[data-theme="dark"] .toast { background: #1f2937; border: 1px solid var(--border-strong); border-left-width: 4px; }
