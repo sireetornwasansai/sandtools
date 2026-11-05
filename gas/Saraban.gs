@@ -7,6 +7,7 @@
  *
  *   POST {action:"saraban", session, op: ...}
  *     everyone signed in : config | dash | analytics (staff/exec) | my | get | ack | assign | done | return        (only what concerns their unit)
+ *     v1.17              : list/rows accept `origin` (issuer code | _unknown | _none) · issuers (list) · issuersave (clerks: add/rename/remove an issuer code) · partyfix (clerks: unify misspelt sender names)
  *     clerks (staff)     : queue | reject | dup | upload | discard | receive | send | reserve | cancelno | route | update | note |
  *                          list | rows | track | numbers | parties
  *     admins             : units | unitsave | unitdel   (units list is readable by every signed-in user, without e-mails)
@@ -25,7 +26,7 @@
  */
 
 var SAR_TZ = 'Asia/Bangkok';
-var SAR_TAB = 'Saraban', SAR_TO = 'SarTo', SAR_EV = 'SarTrack', SAR_UN = 'SarUnits', SAR_CNT = 'SarNo';
+var SAR_TAB = 'Saraban', SAR_TO = 'SarTo', SAR_EV = 'SarTrack', SAR_UN = 'SarUnits', SAR_CNT = 'SarNo', SAR_ISS = 'SarIssuers';
 var SAR_HEADERS = ['รหัส', 'ประเภท', 'ปี พ.ศ.', 'ลำดับ', 'เลขทะเบียน', 'ทะเบียน', 'สถานะ', 'ลงทะเบียนเมื่อ', 'เลขที่หนังสือ', 'ลงวันที่ (หนังสือ)', 'เรื่อง', 'จาก / ถึง', 'ชั้นความเร็ว', 'ชั้นความลับ', 'กำหนดเสร็จ', 'หมวด', 'ช่องทาง', 'ไฟล์ (Drive)', 'อ้างถึง', 'สิ่งที่ส่งมาด้วย', 'หมายเหตุ', 'การปฏิบัติ', 'ผู้ลงทะเบียน', 'รหัสตรวจสอบ', 'รหัสคิว (Inbox)', 'dedup', 'เหตุผลยกเลิก', 'เรียน', 'รายละเอียดเพิ่มเติม (JSON)', 'แก้ไขล่าสุด'];
 var SAR_COLS = 30;
 var C = { id: 0, kind: 1, year: 2, no: 3, reg: 4, registry: 5, status: 6, at: 7, docNo: 8, docDate: 9, subject: 10, party: 11, urgency: 12, secrecy: 13, due: 14, cat: 15, channel: 16, files: 17, refs: 18, encl: 19, note: 20, action: 21, by: 22, verify: 23, inbox: 24, dedup: 25, voidWhy: 26, salut: 27, extra: 28, upd: 29 };
@@ -36,6 +37,8 @@ var EV_COLS = 7;
 var UN_HEADERS = ['รหัส', 'ชื่อหน่วยงาน', 'ชื่อย่อ', 'ชนิด', 'หัวหน้า (อีเมล)', 'สมาชิก (อีเมล)', 'ผู้รักษาราชการแทน', 'แทนถึงวันที่', 'คำนำหน้าเลขที่หนังสือ', 'ใช้งาน', 'อีเมลหน่วย', 'สังกัด', 'คำค้นแนะนำ', 'มีทะเบียนของตนเอง'];
 var UN_COLS = 14;
 var CNT_HEADERS = ['key', 'ล่าสุด', 'อัปเดตเมื่อ', 'หมายเหตุ'];
+var ISS_HEADERS = ['รหัสหน้าเลขที่หนังสือ', 'ชื่อหน่วยงาน', 'บันทึกโดย', 'อัปเดตเมื่อ'];   // v1.17: the clerks' own list of issuer codes (added on top of SAR_ISSUERS)
+var ISS_COLS = 4;
 
 var SAR_SCAN = 9000, SAR_SCAN_TO = 24000, SAR_SCAN_EV = 6000, SAR_LIST_MAX = 100, SAR_ROWS_MAX = 5000;
 var SAR_FILE_MAX = 10 * 1024 * 1024;
@@ -79,6 +82,19 @@ function sarDateOk(v, label) {
   var iso = m ? sarIso(m[1], m[2], m[3]) : '';
   if (!iso) throw httpError('BAD_REQUEST', (label || 'วันที่') + 'ไม่ถูกต้อง (รูปแบบ ปปปป-ดด-วว)');
   return iso;
+}
+/** A date cell → yyyy-MM-dd. A cell typed by hand in Sheets comes back as a Date (or text like 7/1/2569); the register itself stores text. '' when unreadable. */
+function sarCellDate(v) {
+  if (v == null || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    if (isNaN(v.getTime())) return '';
+    var t = new Date(v.getTime() + 25200000);
+    return sarIso(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+  }
+  var s = sarDigits(String(v)).trim(), m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return sarIso(m[1], m[2], m[3]);
+  m = /^(\d{1,2})\s*[\/.\-]\s*(\d{1,2})\s*[\/.\-]\s*(\d{4})/.exec(s);
+  return m ? sarIso(m[3], m[2], m[1]) : '';
 }
 function sarDayMs(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : NaN; }
 function sarDaysBetween(a, b) { return Math.round((sarDayMs(b) - sarDayMs(a)) / 86400000); }   // b - a, in calendar days
@@ -137,7 +153,7 @@ function sarSuggestUnits(subject, units) {
 /* ------------------------------------- sheets + rows ------------------------------------- */
 
 function sarTab(name) {
-  var h = name === SAR_TAB ? SAR_HEADERS : name === SAR_TO ? TO_HEADERS : name === SAR_EV ? EV_HEADERS : name === SAR_UN ? UN_HEADERS : CNT_HEADERS;
+  var h = name === SAR_TAB ? SAR_HEADERS : name === SAR_TO ? TO_HEADERS : name === SAR_EV ? EV_HEADERS : name === SAR_UN ? UN_HEADERS : name === SAR_ISS ? ISS_HEADERS : CNT_HEADERS;
   return sheetTab(name, h);
 }
 function sarPut(sh, row, vals) { sarMemoDrop(); var rg = sh.getRange(row, 1, 1, vals.length); rg.setNumberFormat('@'); rg.setValues([vals]); }
@@ -173,8 +189,8 @@ function sarLog(email, op, id, extra) {
 function sarExtra(s) { try { var o = JSON.parse(String(s || '{}')); return o && typeof o === 'object' ? o : {}; } catch (x) { return {}; } }
 function sarObj(r, row) {
   var o = { row: row, id: String(r[C.id] || ''), kind: String(r[C.kind]) === 'out' ? 'out' : 'in', year: Number(r[C.year]) || 0, no: Number(r[C.no]) || 0, reg: String(r[C.reg] || ''), registry: String(r[C.registry] || 'central'),
-    status: String(r[C.status] || 'registered'), at: String(r[C.at] || ''), docNo: sarUn(r[C.docNo]), docDate: String(r[C.docDate] || ''), subject: sarUn(r[C.subject]), party: sarUn(r[C.party]),
-    urgency: sarEnum(r[C.urgency], SAR_URGENCY, 'normal'), secrecy: sarEnum(r[C.secrecy], SAR_SECRECY, 'normal'), due: String(r[C.due] || ''), cat: String(r[C.cat] || ''), channel: String(r[C.channel] || ''),
+    status: String(r[C.status] || 'registered'), at: String(r[C.at] || ''), docNo: sarUn(r[C.docNo]), docDate: sarCellDate(r[C.docDate]), subject: sarUn(r[C.subject]), party: sarUn(r[C.party]),
+    urgency: sarEnum(r[C.urgency], SAR_URGENCY, 'normal'), secrecy: sarEnum(r[C.secrecy], SAR_SECRECY, 'normal'), due: sarCellDate(r[C.due]), cat: String(r[C.cat] || ''), channel: String(r[C.channel] || ''),
     files: String(r[C.files] || '').split(/\n/).filter(Boolean), refs: sarUn(r[C.refs]), encl: sarUn(r[C.encl]), note: sarUn(r[C.note]), action: sarUn(r[C.action]), by: String(r[C.by] || ''), verify: String(r[C.verify] || ''),
     inbox: String(r[C.inbox] || ''), dedup: String(r[C.dedup] || ''), voidWhy: sarUn(r[C.voidWhy]), salut: sarUn(r[C.salut]), upd: String(r[C.upd] || '') };
   var raw = r[C.extra], cached;
@@ -210,8 +226,12 @@ function sarFind(sh, id) {
   id = String(id || '');
   var last = sh.getLastRow();
   if (last < 2 || !/^s[a-z0-9]{6,12}$/.test(id)) throw httpError('NOT_FOUND', 'ไม่พบหนังสือนี้');
-  var from = Math.max(2, last - SAR_SCAN + 1), ids = sh.getRange(from, 1, last - from + 1, 1).getValues();
-  for (var i = ids.length - 1; i >= 0; i--) if (String(ids[i][0]) === id) return sarObj(sh.getRange(from + i, 1, 1, SAR_COLS).getValues()[0], from + i);
+  var from = Math.max(2, last - SAR_SCAN + 1), ids = sh.getRange(from, 1, last - from + 1, 1).getValues(), i;
+  for (i = ids.length - 1; i >= 0; i--) if (String(ids[i][0]) === id) return sarObj(sh.getRange(from + i, 1, 1, SAR_COLS).getValues()[0], from + i);
+  if (from > 2) {   // older rows (an imported history is bigger than the window the lists read): the id column alone is cheap to scan
+    ids = sh.getRange(2, 1, from - 2, 1).getValues();
+    for (i = ids.length - 1; i >= 0; i--) if (String(ids[i][0]) === id) return sarObj(sh.getRange(2 + i, 1, 1, SAR_COLS).getValues()[0], 2 + i);
+  }
   throw httpError('NOT_FOUND', 'ไม่พบหนังสือนี้');
 }
 function sarNewId(taken) {
@@ -327,6 +347,7 @@ function sarPublic(sc, o, tos, access) {
     due: o.due, cat: o.cat, channel: o.channel, legacy: !!o.imp, masked: !full, overdue: sarOverdueDays(sc, o, stage, tos), voidWhy: full ? o.voidWhy : '' };
   pub.subject = full ? o.subject : SAR_MASK_SUBJECT; pub.party = full ? o.party : ''; pub.action = full ? o.action : ''; pub.note = full ? o.note : ''; pub.by = o.by;
   pub.units = (tos || []).map(function (t) { return { unit: t.unit, status: t.status, action: t.action }; });
+  if (o.kind === 'in' && full) { var ic = sarIssuer(o.docNo); if (ic) { var ii = sarIssuerInfo(sarIssuerMap(sc), ic); pub.issuer = ic; pub.issuerName = ii.name; pub.issuerKnown = ii.known; } }   // v1.17: where the letter came from (from the letter number)
   return pub;
 }
 
@@ -783,6 +804,11 @@ function sarCloseReturned_(sc, o, routed) {
   });
   sc.memo.tos = null;
 }
+/** What this person may do to ONE unit's share of a letter (the same rules sarUnitAction enforces) — used by the detail dialog and by "งานของฉัน" (bulk actions). */
+function sarToCan(sc, u, t) {
+  var isPerson = !!(u && sarPeople(u, sc.today).indexOf(sc.email) >= 0), isHead = !!(u && sarHeads(u, sc.today).indexOf(sc.email) >= 0), live = t.status === 'received' || t.status === 'assigned' || t.status === 'pending';
+  return { ack: !!(isPerson || sc.admin) && t.status === 'pending', assign: !!(isHead || sc.admin) && live, done: !!(isPerson || t.people.indexOf(sc.email) >= 0 || sc.admin) && live, ret: !!(isPerson || sc.admin) && t.status !== 'done' && t.status !== 'returned' };
+}
 function sarMyTo(sc, o, tos, unit) {
   var t = null; tos.forEach(function (x) { if (x.unit === unit) t = x; });
   if (!t) throw httpError('NOT_FOUND', 'หนังสือนี้ไม่ได้ส่งถึงหน่วยงานนี้');
@@ -823,30 +849,62 @@ function sarUnitAction(sc, b, kind) {
     return { status: t.status, _grants: grants };
   });
 }
+/** Row of an outgoing letter that already carries this book number (void and `exceptRow` ignored), or 0. */
+function sarOutDocNoRow(sh, docNo, exceptRow) {
+  var n = sarNorm(docNo), last = sh.getLastRow(), hit = 0;
+  if (!n || last < 2) return 0;
+  sh.getRange(2, 2, last - 1, 8).getValues().forEach(function (r, ix) { if (String(r[0]) === 'out' && String(r[5]) !== 'void' && sarNorm(sarUn(r[7])) === n && ix + 2 !== exceptRow) hit = ix + 2; });
+  return hit;
+}
 function sarUpdate(sc, b) {
   sarNeedStaff(sc);
   return sarLocked(function () {
     sc.memo.tos = null;
-    var d = sarLoadDoc(sc, b.id, true), o = d.o, changed = [];
-    function set(key, val, label) { if (String(o[key]) !== String(val)) { changed.push(label); o[key] = val; } }
+    var d = sarLoadDoc(sc, b.id, true), o = d.o, changed = [], out = o.kind === 'out', touchedDate = false;
+    if (o.status === 'reserved') throw httpError('LOCKED', 'เลขนี้ยังเป็นเลขที่จองไว้ — ออกหนังสือที่เมนู “ส่งออก” ก่อนจึงจะแก้ไขข้อมูลได้');
+    function set(key, val, label) { if (String(o[key]) !== String(val)) { changed.push(label); o[key] = val; return true; } return false; }
     if (b.subject !== undefined) { var s = sarOneLine(b.subject, 300); if (!s) throw httpError('BAD_REQUEST', 'เรื่องต้องไม่ว่าง'); set('subject', s, 'เรื่อง'); }
-    if (b.docNo !== undefined && o.kind === 'in') set('docNo', sarOneLine(b.docNo, 80), 'เลขที่หนังสือ');
-    if (b.docDate !== undefined) set('docDate', sarDateOk(b.docDate, 'วันที่หนังสือ'), 'ลงวันที่');
-    if (b.party !== undefined && o.kind === 'in') { var p = sarOneLine(b.party, 160); if (!p) throw httpError('BAD_REQUEST', 'ผู้ส่งต้องไม่ว่าง'); set('party', p, 'จาก'); }
+    if (b.docNo !== undefined) {
+      var dn = sarOneLine(b.docNo, 80);
+      if (out) {   // an outgoing book number must exist and may not be issued twice
+        if (!dn) throw httpError('BAD_REQUEST', 'เลขที่หนังสือส่งต้องไม่ว่าง');
+        var dupRow = dn !== o.docNo ? sarOutDocNoRow(d.sh, dn, o.row) : 0;
+        if (dupRow) throw httpError('DUPLICATE', 'เลขที่หนังสือ “' + dn + '” ถูกใช้แล้ว (แถว ' + dupRow + ' ในทะเบียน)');
+      }
+      set('docNo', dn, 'เลขที่หนังสือ');
+    }
+    if (b.docDate !== undefined && set('docDate', sarDateOk(b.docDate, 'วันที่หนังสือ'), 'ลงวันที่')) touchedDate = true;
+    if (b.party !== undefined) {
+      var p = sarOneLine(b.party, 160);
+      if (!out) { if (!p) throw httpError('BAD_REQUEST', 'ผู้ส่งต้องไม่ว่าง'); set('party', p, 'จาก'); }
+      else {
+        var pts = Array.isArray(o.extra.parties) ? o.extra.parties : [];
+        if (pts.length <= 1) {   // several recipients (each with its own channel / tracking no.) are not edited as one line
+          if (!p) throw httpError('BAD_REQUEST', 'ผู้รับต้องไม่ว่าง');
+          if (p !== o.party || (pts[0] && pts[0].name !== p)) {
+            var np = {}; if (pts[0]) Object.keys(pts[0]).forEach(function (k) { np[k] = pts[0][k]; });
+            np.name = p; if (!np.channel) np.channel = o.channel || 'hand';
+            o.extra.parties = [np]; o.party = p; changed.push('ถึง');
+          }
+        }
+      }
+    }
     if (b.urgency !== undefined) set('urgency', sarEnum(b.urgency, SAR_URGENCY, o.urgency), 'ชั้นความเร็ว');
-    if (b.due !== undefined) set('due', sarDateOk(b.due, 'กำหนดเสร็จ'), 'กำหนดเสร็จ');
+    if (b.due !== undefined && set('due', sarDateOk(b.due, 'กำหนดเสร็จ'), 'กำหนดเสร็จ')) touchedDate = true;
     if (b.cat !== undefined) set('cat', sarEnum(String(b.cat), SAR_CATEGORIES.map(function (x) { return x[0]; }), ''), 'หมวด');
+    if (b.channel !== undefined && !out) set('channel', sarEnum(String(b.channel), SAR_CHANNELS.map(function (x) { return x[0]; }), o.channel), 'ช่องทาง');   // '' / unknown = leave as it is
     if (b.salut !== undefined) set('salut', sarOneLine(b.salut, 160), 'เรียน');
     if (b.refs !== undefined) set('refs', sarClean(b.refs, 400), 'อ้างถึง');
     if (b.encl !== undefined) set('encl', sarClean(b.encl, 400), 'สิ่งที่ส่งมาด้วย');
     if (b.note !== undefined) set('note', sarClean(b.note, 500), 'หมายเหตุ');
-    if (b.action !== undefined) set('action', sarClean(b.action, 300), 'การปฏิบัติ');
+    if (b.actionText !== undefined) set('action', sarClean(b.actionText, 300), 'การปฏิบัติ');   // NOT b.action: that key is the request's own routing word ("saraban")
     if (b.secrecy !== undefined && sarEnum(b.secrecy, SAR_SECRECY, o.secrecy) !== o.secrecy) {
       var ns = sarEnum(b.secrecy, SAR_SECRECY, o.secrecy), raise = SAR_SECRECY.indexOf(ns) > SAR_SECRECY.indexOf(o.secrecy);
       if (!(sc.admin || (raise && sc.clear))) throw httpError('FORBIDDEN', 'การเปลี่ยนชั้นความลับทำได้เฉพาะผู้ดูแลระบบ (ปรับเพิ่มได้โดยผู้ที่ได้รับอนุญาต)');
       set('secrecy', ns, 'ชั้นความลับ');
     }
-    if (o.due && o.docDate && o.due < o.docDate) throw httpError('BAD_REQUEST', 'กำหนดเสร็จต้องไม่เร็วกว่าวันที่หนังสือ');
+    // only a date edited NOW is checked: an old / imported row may already hold dates in the "wrong" order and its other fields must still be editable
+    if (touchedDate && o.due && o.docDate && o.due < o.docDate) throw httpError('BAD_REQUEST', 'กำหนดเสร็จต้องไม่เร็วกว่าวันที่หนังสือ');
     if (!changed.length) return { doc: sarPublic(sc, o, d.tos, 'full'), changed: [] };
     o.upd = sarNowStamp(); sarPut(d.sh, o.row, sarRow(o));
     sarEvent(o.id, 'edit', sc.email, '', 'แก้ไข: ' + changed.join(', '), { fields: changed });
@@ -866,6 +924,7 @@ function sarTerms(q) { return String(q || '').trim().slice(0, 80).split(/\s+/).m
 function sarFilterRows(sc, b, rows, tosBy, forExport) {
   var kind = b.kind === 'out' ? 'out' : 'in', year = parseInt(b.year, 10) || sarYearBE(), registry = String(b.registry || ''), terms = sarTerms(b.q);
   var from = String(b.from || '').slice(0, 10), to = String(b.to || '').slice(0, 10), st = String(b.stage || ''), urg = b.urgent === true;
+  var origin = kind === 'in' ? sarOneLine(b.origin, 20) : '', imap = kind === 'in' ? sarIssuerMap(sc) : null, orig = Object.create(null), oUnknown = 0, oNone = 0;
   var out = [], stats = { total: 0, today: 0, last: 0, void: 0 };
   rows.forEach(function (o) {
     if (o.kind !== kind || o.year !== year || (registry && o.registry !== registry)) return;
@@ -873,9 +932,15 @@ function sarFilterRows(sc, b, rows, tosBy, forExport) {
     if (acc === 'none') return;
     if (o.status === 'void') stats.void++; else { stats.total++; if (String(o.at).slice(0, 10) === sc.today) stats.today++; }
     if (o.no > stats.last) stats.last = o.no;
+    if (kind === 'in' && o.status !== 'void' && acc === 'full') { var tc = sarIssuer(o.docNo); if (!tc) oNone++; else { orig[tc] = (orig[tc] || 0) + 1; if (!imap[tc]) oUnknown++; } }   // the origin drop-down counts the whole year/registry, whatever the other filters say
     var day = String(o.at).slice(0, 10);
     if ((from && day < from) || (to && day > to)) return;
     if (!sarMatchQ(acc === 'full' ? o : { reg: o.reg, no: o.no, docNo: o.docNo, subject: '', party: '', note: '', action: '', verify: '' }, terms)) return;
+    if (origin) {   // v1.17: filter by where the letter came from — a code, "_unknown" (code the system does not recognise) or "_none" (no code in the letter number)
+      if (acc !== 'full') return;
+      var oc = sarIssuer(o.docNo);
+      if (origin === '_none' ? !!oc : origin === '_unknown' ? (!oc || !!imap[oc]) : oc !== sarIssuerKey(origin)) return;
+    }
     var pub = sarPublic(sc, o, tos, acc);
     if (st === 'overdue') { if (!pub.overdue) return; } else if (st === 'open') { if (pub.stage !== 'routed' && pub.stage !== 'inprogress') return; } else if (st && pub.stage !== st) return;   // 'open' = forwarded and not finished
     if (urg && !(o.urgency === 'most' || o.urgency === 'very')) return;
@@ -883,18 +948,20 @@ function sarFilterRows(sc, b, rows, tosBy, forExport) {
     out.push(pub);
   });
   out.sort(function (a, c) { return b.order === 'asc' ? a.no - c.no : c.no - a.no; });
-  return { items: out, stats: stats, kind: kind, year: year };
+  var origins = null;
+  if (kind === 'in') origins = { list: Object.keys(orig).map(function (k) { var i = sarIssuerInfo(imap, k); return { key: k, name: i.name, n: orig[k], known: i.known }; }).sort(function (a, c) { return c.n - a.n; }).slice(0, 60), unknown: oUnknown, none: oNone };
+  return { items: out, stats: stats, kind: kind, year: year, origins: origins };
 }
 function sarList(sc, b) {
   sarNeedReader(sc);
   var rows = sarAll(sarTab(SAR_TAB)), r = sarFilterRows(sc, b, rows, sarToAll(sc).by, false);
   var off = Math.max(parseInt(b.offset, 10) || 0, 0), lim = Math.min(Math.max(parseInt(b.limit, 10) || 50, 1), SAR_LIST_MAX);
-  return { year: r.year, kind: r.kind, total: r.items.length, items: r.items.slice(off, off + lim), more: r.items.length > off + lim, counts: { total: r.stats.total, today: r.stats.today, lastNo: r.stats.last, nextNo: r.stats.last + 1, void: r.stats.void } };
+  return { year: r.year, kind: r.kind, total: r.items.length, items: r.items.slice(off, off + lim), more: r.items.length > off + lim, counts: { total: r.stats.total, today: r.stats.today, lastNo: r.stats.last, nextNo: r.stats.last + 1, void: r.stats.void }, origins: r.origins };
 }
 function sarNeedReader(sc) { if (!(sc.staff || sc.exec)) throw httpError('FORBIDDEN', 'ทะเบียนเปิดให้เจ้าหน้าที่สารบรรณและผู้บริหาร — บุคลากรทั่วไปดูได้เฉพาะ “งานของฉัน”'); }
 function sarRowsOp(sc, b) {
   sarNeedReader(sc);
-  var rows = sarAll(sarTab(SAR_TAB)), r = sarFilterRows(sc, { kind: b.kind, year: b.year, registry: b.registry, q: b.q, from: b.from, to: b.to, stage: b.stage, order: 'asc' }, rows, sarToAll(sc).by, true);
+  var rows = sarAll(sarTab(SAR_TAB)), r = sarFilterRows(sc, { kind: b.kind, year: b.year, registry: b.registry, q: b.q, from: b.from, to: b.to, stage: b.stage, origin: b.origin, order: 'asc' }, rows, sarToAll(sc).by, true);
   sarLog(sc.email, 'export', r.kind + ':' + r.year, { n: r.items.length });
   return { year: r.year, kind: r.kind, org: sarOrg(), registry: sarRegistryName(sc, String(b.registry || 'central')), rows: r.items.slice(0, SAR_ROWS_MAX), truncated: r.items.length > SAR_ROWS_MAX };
 }
@@ -910,7 +977,7 @@ function sarGet(sc, b) {
   out.to = tos.map(function (t) {
     var u = sarUnitBy(sc, t.unit), isHead = u && sarHeads(u, sc.today).indexOf(sc.email) >= 0, isPerson = u && sarPeople(u, sc.today).indexOf(sc.email) >= 0;
     return { unit: t.unit, name: u ? u.name : t.unit, short: u ? u.short : t.unit, action: t.action, status: t.status, due: t.due, people: full ? t.people : [], note: full ? t.note : '', upd: t.upd, by: t.by,
-      can: { ack: !!(isPerson || sc.admin) && t.status === 'pending', assign: !!(isHead || sc.admin) && (t.status === 'received' || t.status === 'assigned' || t.status === 'pending'), done: !!(isPerson || t.people.indexOf(sc.email) >= 0 || sc.admin) && (t.status === 'received' || t.status === 'assigned' || t.status === 'pending'), ret: !!(isPerson || sc.admin) && t.status !== 'done' && t.status !== 'returned' },
+      can: sarToCan(sc, u, t),
       pool: (isHead || sc.admin) && full && u ? sarPeople(u, sc.today) : [] };
   });
   var evs = [], es = sarTab(SAR_EV), last = es.getLastRow();
@@ -921,7 +988,7 @@ function sarGet(sc, b) {
   return out;
 }
 function sarMy(sc) {
-  var rows = sarAll(sarTab(SAR_TAB)), by = Object.create(null), tosAll = sarToAll(sc), items = [];
+  var rows = sarAll(sarTab(SAR_TAB)), by = Object.create(null), tosAll = sarToAll(sc), items = [], pools = {};
   rows.forEach(function (o) { by[o.id] = o; });
   tosAll.list.forEach(function (t) {
     var o = by[t.docId]; if (!o || o.status === 'void') return;
@@ -929,13 +996,14 @@ function sarMy(sc) {
     if (!mineUnit && !named) return;
     var acc = sarAccess(sc, o, tosAll.by[o.id]); if (acc === 'none') return;
     if (t.status === 'done' && sarDaysBetween(String(t.upd).slice(0, 10), sc.today) > 14) return;
-    var pub = sarPublic(sc, o, tosAll.by[o.id], acc);
-    items.push({ id: o.id, reg: o.reg, docNo: pub.docNo, subject: pub.subject, party: pub.party, urgency: o.urgency, secrecy: o.secrecy, masked: pub.masked, unit: t.unit, unitName: u ? u.short || u.name : t.unit, action: t.action, status: t.status, due: t.due || sarDueFor(o.due, o.urgency, String(o.at).slice(0, 10), sc.sla, sc.holidays), mine: named, at: o.at, note: pub.masked ? '' : t.note });
+    var pub = sarPublic(sc, o, tosAll.by[o.id], acc), can = sarToCan(sc, u, t);
+    if (can.assign && acc === 'full' && !pools[t.unit]) pools[t.unit] = sarPeople(u, sc.today);   // who the head can hand the work to (bulk "มอบหมาย")
+    items.push({ id: o.id, reg: o.reg, docNo: pub.docNo, subject: pub.subject, party: pub.party, urgency: o.urgency, secrecy: o.secrecy, masked: pub.masked, unit: t.unit, unitName: u ? u.short || u.name : t.unit, action: t.action, status: t.status, due: t.due || sarDueFor(o.due, o.urgency, String(o.at).slice(0, 10), sc.sla, sc.holidays), mine: named, at: o.at, note: pub.masked ? '' : t.note, can: can, issuer: pub.issuer || '', issuerName: pub.issuerName || '', issuerKnown: !!pub.issuerKnown });
   });
   var rank = { pending: 0, received: 1, assigned: 1, returned: 2, done: 3 };
   items.sort(function (a, c) { return (rank[a.status] - rank[c.status]) || (a.due < c.due ? -1 : a.due > c.due ? 1 : 0); });
   var open = items.filter(function (x) { return x.status === 'pending' || x.status === 'received' || x.status === 'assigned'; });
-  return { items: items.slice(0, 200), open: open.length, overdue: open.filter(function (x) { return x.due && x.due < sc.today; }).length, today: sc.today };
+  return { items: items.slice(0, 200), open: open.length, overdue: open.filter(function (x) { return x.due && x.due < sc.today; }).length, today: sc.today, pools: pools };
 }
 function sarTrack(sc, b) {
   var q = sarClean(b.q, 80); if (q.length < 2 && !/^\d+$/.test(q)) throw httpError('BAD_REQUEST', 'พิมพ์เลขรับ เลขที่หนังสือ รหัสตรวจสอบ หรือชื่อเรื่องอย่างน้อย 2 ตัวอักษร');
@@ -1082,7 +1150,42 @@ var SAR_ISSUERS = { 'สธ': 'กระทรวงสาธารณสุข'
 var SAR_CAT_WORDS = [['13', /ประชุม|การประชุม/], ['9', /อบรม|หลักสูตร|สัมมนา|ศึกษาดูงาน|ทุนการศึกษา|พัฒนาศักยภาพ|พัฒนาบุคลากร/], ['15', /\bHA\b|รับรองคุณภาพ|มาตรฐาน|สรพ|คุณภาพ/i], ['3', /งบประมาณ|จัดสรร|แผนการใช้จ่าย/], ['4', /การเงิน|เบิกจ่าย|บัญชี|ค่าตอบแทน/], ['5', /จัดซื้อ|จัดจ้าง|พัสดุ|ครุภัณฑ์|ประกวดราคา/], ['6', /บรรจุ|แต่งตั้ง|เลื่อนระดับ|ประเมินผลงาน|ลาศึกษา|โอนย้าย|อัตรากำลัง|บุคลากร/], ['8', /โรค|วัคซีน|ระบาด|ควบคุมโรค|ไข้หวัด|โควิด|ฝุ่น/], ['10', /สารสนเทศ|ไซเบอร์|ดิจิทัล|ระบบ|PDPA|ข้อมูลส่วนบุคคล/i], ['17', /ยา|เวชภัณฑ์|เภสัช/], ['2', /ยุทธศาสตร์|แผนปฏิบัติ|ตัวชี้วัด|นโยบาย|KPI/i], ['14', /ภัยพิบัติ|อัคคีภัย|ความปลอดภัย|ซ้อมแผน/], ['11', /กฎหมาย|วินัย|คดี|ระเบียบ|ข้อบังคับ/], ['12', /ตรวจสอบภายใน|ควบคุมภายใน/], ['18', /ร้องเรียน|สิทธิผู้ป่วย|ร้องทุกข์/], ['7', /ผู้ป่วย|การแพทย์|พยาบาล|ส่งต่อ|บริการ/], ['16', /ประชาสัมพันธ์|เชิญชวน|เผยแพร่/]];
 function sarGuessCat(subject) { var t = String(subject || ''); for (var i = 0; i < SAR_CAT_WORDS.length; i++) if (SAR_CAT_WORDS[i][1].test(t)) return SAR_CAT_WORDS[i][0]; return ''; }
 function sarCatName(k) { for (var i = 0; i < SAR_CATEGORIES.length; i++) if (SAR_CATEGORIES[i][0] === k) return SAR_CATEGORIES[i][1]; return 'ไม่ระบุหมวด'; }
-function sarIssuer(docNo) { var m = /^\s*([\u0E01-\u0E4E]{1,6}|[A-Za-z]{2,6})\s*[-.]?\s*\d/.exec(String(docNo || '')); return m ? m[1] : ''; }
+/** Latin codes are upper-cased ("or" = "OR"); Thai codes stay as typed. */
+function sarIssuerKey(code) { code = String(code == null ? '' : code).trim(); return /^[A-Za-z]+$/.test(code) ? code.toUpperCase() : code; }
+/** The code printed in front of the letter number: "ที่ สธ 0201.02/ว123" → "สธ". A leading "ที่", Thai digits and a space before the number are tolerated.
+ *  "ที่ 1234/2569" has NO code → '' (it used to be counted as an agency called "ที่"). */
+function sarIssuer(docNo) {
+  var s = sarDigits(docNo).replace(/^\s*ที่\s*[:.]?\s*/, ''), m = /^\s*([\u0E01-\u0E4E]{1,6}|[A-Za-z]{2,6})\s*[-.]?\s*\d/.exec(s);
+  return m ? sarIssuerKey(m[1]) : '';
+}
+/** v1.17 — the codes the system RECOGNISES: the built-in SAR_ISSUERS plus the rows clerks add on the page (tab SarIssuers; a row with the same code renames the built-in one). */
+function sarIssuerMap(sc) {
+  if (sc.memo.iss) return sc.memo.iss;
+  var map = Object.create(null), k;
+  for (k in SAR_ISSUERS) map[sarIssuerKey(k)] = { name: SAR_ISSUERS[k], custom: false };
+  try {
+    var sh = sarTab(SAR_ISS), last = sh.getLastRow();
+    if (last >= 2) sh.getRange(2, 1, last - 1, ISS_COLS).getValues().forEach(function (r) { var c = sarIssuerKey(sarUn(r[0])), n = sarOneLine(sarUn(r[1]), 80); if (c && n) map[c] = { name: n, custom: true }; });
+  } catch (x) { console.error('sarIssuerMap ' + x); }
+  return (sc.memo.iss = map);
+}
+/** True when a and b differ by one typed character (one wrong / missing / extra letter, or two letters swapped). Both must have ≥ 2 characters. */
+function sarNear(a, b) {
+  var la = a.length, lb = b.length, i = 0;
+  if (a === b || la < 2 || lb < 2 || Math.abs(la - lb) > 1) return false;
+  while (i < la && i < lb && a.charAt(i) === b.charAt(i)) i++;
+  if (la === lb) return a.slice(i + 1) === b.slice(i + 1) || (a.charAt(i) === b.charAt(i + 1) && a.charAt(i + 1) === b.charAt(i) && a.slice(i + 2) === b.slice(i + 2));
+  return la > lb ? a.slice(i + 1) === b.slice(i) : b.slice(i + 1) === a.slice(i);
+}
+/** One code → { code, name, known, suggest, suggestName }. An unknown code gets a suggestion only when exactly ONE known code is a single typo away. */
+function sarIssuerInfo(map, code) {
+  if (!code) return { code: '', name: '', known: false, suggest: '', suggestName: '' };
+  if (map[code]) return { code: code, name: map[code].name, known: true, suggest: '', suggestName: '' };
+  var hits = Object.keys(map).filter(function (k) { return sarNear(code, k); });
+  return { code: code, name: code, known: false, suggest: hits.length === 1 ? hits[0] : '', suggestName: hits.length === 1 ? map[hits[0]].name : '' };
+}
+/** Sender names that are the same agency typed differently ("เขตสุขภาพที่ 1" / "เขตสุขภาพที่1", an extra space, a swapped letter). Key = the name without spaces / marks. */
+function sarPartyKey(name) { return sarNorm(name).replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E.\-_/\\|]/g, ''); }
 function sarIsCircular(docNo) { return /\/\s*ว\s*\.?\s*\d|^\s*ว\s*\.?\s*\d/.test(String(docNo || '')); }
 function sarTop(map, n, label) { return Object.keys(map).map(function (k) { return { key: k, name: label ? label(k) : k, n: map[k] }; }).sort(function (a, b) { return b.n - a.n; }).slice(0, n); }
 function sarPct(a, b) { return b ? Math.round(a * 100 / b) : 0; }
@@ -1096,12 +1199,13 @@ function sarAnalytics(sc, b) {
 function sarAnalyticsRun_(sc, year, registry) {
   var rows = sarAll(sarTab(SAR_TAB)), tosBy = sarToAll(sc).by, i;
   var out = { year: year, registry: registry, registryName: registry ? sarRegistryName(sc, registry) : 'ทุกกลุ่มงาน', years: [], total: { in: 0, out: 0, void: 0, prevIn: 0, prevOut: 0 },
-    months: [], weekday: [0, 0, 0, 0, 0, 0, 0], urgency: { normal: 0, urgent: 0, very: 0, most: 0 }, bookType: { circular: 0, normal: 0 }, senders: [], issuers: [], recipients: [], unspecifiedOut: 0,
-    cats: { in: [], out: [] }, lag: { n: 0, avg: 0, max: 0 }, quality: { n: 0, docDate: 0, party: 0, channel: 0, file: 0, cat: 0 }, seq: { in: { last: 0, used: 0, gaps: 0 }, out: { last: 0, used: 0, gaps: 0 } },
+    months: [], weekday: [0, 0, 0, 0, 0, 0, 0], urgency: { normal: 0, urgent: 0, very: 0, most: 0 }, bookType: { circular: 0, normal: 0 }, senders: [], issuers: [], issuerStats: { known: 0, unknown: 0, none: 0 }, issuerReview: [], issuerNone: { n: 0, examples: [] }, senderReview: [], senderSimilar: [], recipients: [], unspecifiedOut: 0,
+    cats: { in: [], out: [] }, lag: { n: 0, avg: 0, max: 0 }, quality: { n: 0, docDate: 0, party: 0, channel: 0, file: 0, cat: 0, issuer: 0 }, seq: { in: { last: 0, used: 0, gaps: 0 }, out: { last: 0, used: 0, gaps: 0 } },
     forwarded: 0, units: [], imported: 0, masked: 0, busiestMonth: null, busiestWeekday: null };
   for (i = 0; i < 12; i++) out.months.push({ m: i + 1, in: 0, out: 0 });
   var years = Object.create(null), snd = Object.create(null), iss = Object.create(null), rcp = Object.create(null), unitN = Object.create(null);
   var catIn = Object.create(null), catOut = Object.create(null), seqSet = { in: Object.create(null), out: Object.create(null) }, lagSum = 0;
+  var imap = sarIssuerMap(sc), issEx = Object.create(null), sndRaw = Object.create(null);
   rows.forEach(function (o) {
     if (o.year) years[o.year] = true;
     if (registry && o.registry !== registry) return;
@@ -1120,8 +1224,10 @@ function sarAnalyticsRun_(sc, year, registry) {
       out.urgency[o.urgency] = (out.urgency[o.urgency] || 0) + 1;
       if (sarIsCircular(o.docNo)) out.bookType.circular++; else out.bookType.normal++;
       var pn = String(o.party || '').replace(/\s+/g, ' ').trim(), named = pn && !/^ไม่ระบุ/.test(pn);
-      if (named) snd[pn] = (snd[pn] || 0) + 1;
-      var ic = sarIssuer(o.docNo); if (ic) iss[ic] = (iss[ic] || 0) + 1;
+      if (named) { var pk = sarPartyKey(pn); snd[pk] = (snd[pk] || 0) + 1; var sr = (sndRaw[pk] = sndRaw[pk] || {}); sr[pn] = (sr[pn] || 0) + 1; }   // spelling variants of one name are counted together (shown as ONE bar, flagged)
+      var ic = sarIssuer(o.docNo), ex = { id: o.id, reg: o.reg, docNo: o.docNo };
+      if (ic) { iss[ic] = (iss[ic] || 0) + 1; if (!imap[ic]) { var el = (issEx[ic] = issEx[ic] || []); if (el.length < 3) el.push(ex); } else out.quality.issuer++; }
+      else { out.issuerNone.n++; if (out.issuerNone.examples.length < 3) out.issuerNone.examples.push(ex); }
       if (o.docDate && /^\d{4}-\d{2}-\d{2}$/.test(o.docDate)) { var lag = sarDaysBetween(o.docDate, day); if (lag >= 0 && lag <= 180) { out.lag.n++; lagSum += lag; if (lag > out.lag.max) out.lag.max = lag; } }
       out.quality.n++; if (o.docDate) out.quality.docDate++; if (named) out.quality.party++; if (o.channel) out.quality.channel++; if (o.files.length) out.quality.file++; if (o.cat) out.quality.cat++;
       if (tos.length) { out.forwarded++; tos.forEach(function (t) { unitN[t.unit] = (unitN[t.unit] || 0) + 1; }); }
@@ -1132,13 +1238,23 @@ function sarAnalyticsRun_(sc, year, registry) {
   });
   ['in', 'out'].forEach(function (k) { var n = 0; Object.keys(seqSet[k]).forEach(function () { n++; }); out.seq[k].used = n; out.seq[k].gaps = Math.max(0, out.seq[k].last - n); });
   out.years = Object.keys(years).map(Number).sort(function (a, c) { return c - a; });
-  out.senders = sarTop(snd, 8); out.issuers = sarTop(iss, 8, function (k) { return SAR_ISSUERS[k] || k; }); out.recipients = sarTop(rcp, 8);
+  out.issuers = Object.keys(iss).map(function (k) { var i = sarIssuerInfo(imap, k); return { key: k, name: i.name, n: iss[k], known: i.known, suggest: i.suggest, suggestName: i.suggestName }; }).sort(function (a, c) { return c.n - a.n; }).slice(0, 12);
+  Object.keys(iss).forEach(function (k) { if (imap[k]) out.issuerStats.known += iss[k]; else out.issuerStats.unknown += iss[k]; });
+  out.issuerStats.none = out.issuerNone.n;
+  out.issuerReview = Object.keys(iss).filter(function (k) { return !imap[k]; }).map(function (k) { var i = sarIssuerInfo(imap, k); return { key: k, n: iss[k], suggest: i.suggest, suggestName: i.suggestName, examples: issEx[k] || [] }; }).sort(function (a, c) { return c.n - a.n; }).slice(0, 20);
+  var sk = Object.keys(snd), sname = {};
+  sk.forEach(function (k) { var best = '', bn = -1; Object.keys(sndRaw[k]).forEach(function (v) { if (sndRaw[k][v] > bn) { bn = sndRaw[k][v]; best = v; } }); sname[k] = best; });
+  out.senders = sk.map(function (k) { var vs = Object.keys(sndRaw[k]); return { key: sname[k], name: sname[k], n: snd[k], variants: vs.length > 1 ? vs.slice(0, 6) : [] }; }).sort(function (a, c) { return c.n - a.n; });
+  var sim = []; for (var x = 0; x < sk.length && sk.length < 400; x++) for (var y = x + 1; y < sk.length; y++) if (sk[x].length >= 6 && sk[y].length >= 6 && Math.abs(sk[x].length - sk[y].length) <= 1 && sarNear(sk[x], sk[y])) sim.push({ a: sname[sk[x]], an: snd[sk[x]], b: sname[sk[y]], bn: snd[sk[y]] });
+  out.senderReview = out.senders.filter(function (r) { return r.variants.length; }).slice(0, 10).map(function (r) { return { name: r.name, variants: r.variants, n: r.n }; });
+  out.senderSimilar = sim.sort(function (p, q) { return (q.an + q.bn) - (p.an + p.bn); }).slice(0, 10);
+  out.senders = out.senders.slice(0, 8); out.recipients = sarTop(rcp, 8);
   out.units = sarTop(unitN, 8, function (k) { var u = sarUnitBy(sc, k); return u ? u.short || u.name : k; });
   out.cats.in = sarTop(catIn, 8, function (k) { return k ? sarCatName(k) : 'ไม่ระบุหมวด'; }); out.cats.out = sarTop(catOut, 8, function (k) { return k ? sarCatName(k) : 'ไม่ระบุหมวด'; });
   out.lag.avg = out.lag.n ? Math.round(lagSum * 10 / out.lag.n) / 10 : 0;
   var bm = null; out.months.forEach(function (m) { var t = m.in + m.out; if (t && (!bm || t > bm.n)) bm = { m: m.m, n: t }; }); out.busiestMonth = bm;
   var bw = null; out.weekday.forEach(function (n, d) { if (n && (!bw || n > bw.n)) bw = { d: d, n: n }; }); out.busiestWeekday = bw;
-  out.quality.pct = { docDate: sarPct(out.quality.docDate, out.quality.n), party: sarPct(out.quality.party, out.quality.n), channel: sarPct(out.quality.channel, out.quality.n), file: sarPct(out.quality.file, out.quality.n), cat: sarPct(out.quality.cat, out.quality.n) };
+  out.quality.pct = { docDate: sarPct(out.quality.docDate, out.quality.n), party: sarPct(out.quality.party, out.quality.n), channel: sarPct(out.quality.channel, out.quality.n), file: sarPct(out.quality.file, out.quality.n), cat: sarPct(out.quality.cat, out.quality.n), issuer: sarPct(out.quality.issuer, out.quality.n) };
   return out;
 }
 
@@ -1158,6 +1274,48 @@ function sarConfig(sc) {
 
 /* ------------------------------------- units (admin) ------------------------------------- */
 
+/* ------------------------------------- issuer codes + sender names (clerks) — v1.17 ------------------------------------- */
+
+function sarIssuersOp(sc) {
+  sarNeedReader(sc);
+  var m = sarIssuerMap(sc);
+  return { items: Object.keys(m).map(function (k) { return { code: k, name: m[k].name, custom: m[k].custom }; }).sort(function (a, c) { return a.code < c.code ? -1 : a.code > c.code ? 1 : 0; }) };
+}
+/** Add / rename an issuer code. An empty name removes the clerks' row (a built-in code then falls back to its built-in name). */
+function sarIssuerSave(sc, b) {
+  sarNeedStaff(sc);
+  var code = sarIssuerKey(sarOneLine(sarDigits(b.code), 12)), name = sarOneLine(b.name, 80);
+  if (!/^([\u0E01-\u0E4E]{1,6}|[A-Za-z]{2,6})$/.test(code)) throw httpError('BAD_REQUEST', 'รหัสต้องเป็นตัวอักษรไทย 1–6 ตัว หรือ A–Z 2–6 ตัว (เช่น สธ, ชม, MOPH) — ไม่ใส่ตัวเลข');
+  return sarLocked(function () {
+    var sh = sarTab(SAR_ISS), last = sh.getLastRow(), row = 0;
+    if (last >= 2) sh.getRange(2, 1, last - 1, 1).getValues().forEach(function (r, i) { if (sarIssuerKey(sarUn(r[0])) === code) row = i + 2; });
+    sc.memo.iss = null;
+    if (!name) { if (row) sarPut(sh, row, ['', '', '', '']); sarLog(sc.email, 'issuerdel', code, {}); return { ok: true, removed: !!row }; }
+    var vals = [code, cell(name, 80), sc.email, sarNowStamp()];
+    if (row) sarPut(sh, row, vals); else sarAppend(sh, vals);
+    sarLog(sc.email, 'issuersave', code, {}); return { ok: true, created: !row };
+  });
+}
+/** Unify a misspelt sender: every received letter of that year (and registry) whose "จาก" is one of `from` (or only spelt differently: spaces, marks) gets the name `to`. Each letter gets its own "แก้ไข" entry in its history. Secret letters the caller cannot read are skipped. */
+function sarPartyFix(sc, b) {
+  sarNeedStaff(sc);
+  var to = sarOneLine(b.to, 160), year = parseInt(b.year, 10) || sarYearBE(), registry = String(b.registry || '').slice(0, 20);
+  var from = (Array.isArray(b.from) ? b.from : []).slice(0, 12).map(function (x) { return sarOneLine(x, 160); }).filter(Boolean), fk = from.map(sarPartyKey);
+  if (!to || !from.length) throw httpError('BAD_REQUEST', 'ระบุชื่อที่ถูกต้อง และชื่อที่ต้องการแก้อย่างน้อย 1 ชื่อ');
+  return sarLocked(function () {
+    var sh = sarTab(SAR_TAB), tosBy = sarToAll(sc).by, n = 0, skipped = 0;
+    sarAll(sh).forEach(function (o) {
+      if (o.kind !== 'in' || o.year !== year || o.status === 'void' || o.status === 'reserved' || (registry && o.registry !== registry) || o.party === to || fk.indexOf(sarPartyKey(o.party)) < 0) return;
+      if (n >= 300) { skipped++; return; }
+      if (sarAccess(sc, o, tosBy[o.id] || []) !== 'full') { skipped++; return; }
+      var was = o.party; o.party = to; o.upd = sarNowStamp(); sarPut(sh, o.row, sarRow(o));
+      sarEvent(o.id, 'edit', sc.email, '', 'แก้ไข: จาก (รวมชื่อผู้ส่ง)', { fields: ['จาก'], from: was }); n++;
+    });
+    sarLog(sc.email, 'partyfix', year + ':' + to, { n: n, skipped: skipped });
+    return { changed: n, skipped: skipped };
+  });
+}
+
 function sarUnitsOp(sc) {
   var list = sarUnits(sc).map(function (u) {
     var base = { code: u.code, name: u.name, short: u.short, type: u.type, active: u.active, registry: u.registry, parent: u.parent, prefix: u.prefix, keywords: sc.admin ? u.keywords : '', email: sc.staff ? u.email : '' };
@@ -1171,17 +1329,35 @@ function sarUnitSave(sc, b) {
   var code = String(b.code || '').trim();
   if (!/^[A-Za-z0-9_-]{2,20}$/.test(code) || code === 'central') throw httpError('BAD_REQUEST', 'รหัสหน่วยงานใช้ได้เฉพาะ a-z 0-9 _ - ยาว 2–20 ตัว (และห้ามใช้ central)');
   var name = sarOneLine(b.name, 120); if (!name) throw httpError('BAD_REQUEST', 'กรุณาระบุชื่อหน่วยงาน');
-  var type = sarEnum(b.type, ['internal', 'exec', 'external'], 'internal');
-  var u = { code: code, name: name, short: sarOneLine(b.short, 30) || name.slice(0, 20), type: type, head: sarEmail(b.head), members: sarEmails(b.members, 80), delegate: sarEmail(b.delegate), delegateUntil: sarDateOk(b.delegateUntil, 'วันที่สิ้นสุดการรักษาราชการแทน'),
-    prefix: sarOneLine(b.prefix, 60), active: b.active !== false, email: sarEmail(b.email), parent: sarClean(b.parent, 20), keywords: sarOneLine(b.keywords, 300), registry: b.registry === true && type !== 'external' };
-  if (String(b.head || '').trim() && !u.head) throw httpError('BAD_REQUEST', 'อีเมลหัวหน้าไม่ถูกต้อง');
-  if (u.delegate && !u.delegateUntil) throw httpError('BAD_REQUEST', 'ผู้รักษาราชการแทนต้องระบุวันที่สิ้นสุด');
-  if (u.delegate && u.delegateUntil < sc.today) throw httpError('BAD_REQUEST', 'วันที่สิ้นสุดการรักษาราชการแทนผ่านมาแล้ว');
   return sarLocked(function () {
-    var sh = sarTab(SAR_UN), last = sh.getLastRow(), row = 0;
-    if (last >= 2) sh.getRange(2, 1, last - 1, 1).getValues().forEach(function (r, i) { if (String(r[0]) === code) row = i + 2; });
+    var sh = sarTab(SAR_UN), last = sh.getLastRow(), row = 0, old = null, all = [];
+    if (last >= 2) sh.getRange(2, 1, last - 1, UN_COLS).getValues().forEach(function (r, i) { if (r[0]) { var x = sarUnitObj(r, i + 2); all.push(x); if (x.code === code) { row = i + 2; old = x; } } });
+    // a field the page did not send keeps its stored value (the edit dialog has no "parent" box — saving must not wipe it)
+    function has(k) { return b[k] !== undefined; }
+    function mail(k, label) { var raw = String(b[k] == null ? '' : b[k]).trim(), e = sarEmail(raw); if (raw && !e) throw httpError('BAD_REQUEST', 'อีเมล' + label + 'ไม่ถูกต้อง'); return e; }
+    var type = has('type') ? sarEnum(b.type, ['internal', 'exec', 'external'], 'internal') : (old ? old.type : 'internal');
+    var members = old ? old.members : [];
+    if (has('members')) {
+      var toks = (Array.isArray(b.members) ? b.members : String(b.members || '').split(/[,\s;]+/)).map(function (x) { return String(x).trim(); }).filter(Boolean);
+      members = sarEmails(toks, 80);
+      var bad = toks.filter(function (t) { return !sarEmail(t); });
+      if (bad.length) throw httpError('BAD_REQUEST', 'อีเมลสมาชิกไม่ถูกต้อง: ' + bad.slice(0, 3).join(', '));
+    }
+    var u = { code: code, name: name, short: has('short') ? (sarOneLine(b.short, 30) || name.slice(0, 20)) : (old ? old.short : name.slice(0, 20)), type: type,
+      head: has('head') ? mail('head', 'หัวหน้า') : (old ? old.head : ''), members: members,
+      delegate: has('delegate') ? mail('delegate', 'ผู้รักษาราชการแทน') : (old ? old.delegate : ''), delegateUntil: has('delegateUntil') ? sarDateOk(b.delegateUntil, 'วันที่สิ้นสุดการรักษาราชการแทน') : (has('delegate') ? '' : (old ? old.delegateUntil : '')),
+      prefix: has('prefix') ? sarOneLine(b.prefix, 60) : (old ? old.prefix : ''), active: has('active') ? b.active !== false : (old ? old.active : true), email: has('email') ? mail('email', 'หน่วยงาน') : (old ? old.email : ''),
+      parent: has('parent') ? sarClean(b.parent, 20) : (old ? old.parent : ''), keywords: has('keywords') ? sarOneLine(b.keywords, 300) : (old ? old.keywords : ''), registry: false };
+    u.registry = (has('registry') ? b.registry === true : (old ? old.registry : false)) && type !== 'external';
+    if (!u.delegate) u.delegateUntil = '';
+    if (u.delegate && !u.delegateUntil) throw httpError('BAD_REQUEST', 'ผู้รักษาราชการแทนต้องระบุวันที่สิ้นสุด');
+    // an already-expired delegation that was not touched must not block editing the rest of the unit
+    var delegationChanged = !old || u.delegate !== old.delegate || u.delegateUntil !== old.delegateUntil;
+    if (delegationChanged && u.delegate && u.delegateUntil < sc.today) throw httpError('BAD_REQUEST', 'วันที่สิ้นสุดการรักษาราชการแทนผ่านมาแล้ว');
     if (u.parent && u.parent === code) throw httpError('BAD_REQUEST', 'หน่วยงานเป็นสังกัดของตัวเองไม่ได้');
+    if (u.parent && !all.some(function (x) { return x.code === u.parent; })) throw httpError('BAD_REQUEST', 'ไม่พบหน่วยงานต้นสังกัด “' + u.parent + '”');
     if (row) sarPut(sh, row, sarUnitRow(u)); else sarAppend(sh, sarUnitRow(u));
+    sc.memo.units = null;
     sarLog(sc.email, row ? 'unitedit' : 'unitadd', code, { type: type });
     return { ok: true, created: !row };
   });
@@ -1228,6 +1404,9 @@ function sarabanOp(u, op, b) {
     case 'nextno':   return sarNextNo(sc, b);
     case 'parties':  return sarParties(sc, b);
     case 'unitsave': return sarUnitSave(sc, b);
+    case 'issuers':  return sarIssuersOp(sc);
+    case 'issuersave': return sarIssuerSave(sc, b);
+    case 'partyfix': return sarPartyFix(sc, b);
     case 'impscan':  return sarImpScan(sc, b);     // SarImport.gs (admin)
     case 'import':   return sarImpRun(sc, b);
     case 'impsync':  return sarImpSync(sc, b);
@@ -1241,7 +1420,7 @@ function sarabanOp(u, op, b) {
 function setupSaraban() {
   var tabs = [[SAR_TAB, SAR_HEADERS, [90, 60, 70, 60, 100, 90, 90, 150, 150, 110, 340, 220, 80, 80, 100, 60, 90, 300, 200, 200, 220, 220, 200, 100, 90, 200, 220, 160, 300, 150], '#0f5c9e'],
     [SAR_TO, TO_HEADERS, [90, 90, 90, 90, 100, 220, 260, 150, 200, 150, 140], '#0b7a7c'], [SAR_EV, EV_HEADERS, [150, 90, 90, 200, 90, 420, 300], '#6d28d9'],
-    [SAR_UN, UN_HEADERS, [90, 260, 120, 80, 200, 320, 200, 100, 160, 60, 200, 90, 320, 100], '#b45309'], [SAR_CNT, CNT_HEADERS, [160, 80, 150, 200], '#64748b']];
+    [SAR_UN, UN_HEADERS, [90, 260, 120, 80, 200, 320, 200, 100, 160, 60, 200, 90, 320, 100], '#b45309'], [SAR_CNT, CNT_HEADERS, [160, 80, 150, 200], '#64748b'], [SAR_ISS, ISS_HEADERS, [160, 320, 200, 150], '#0f766e']];
   tabs.forEach(function (t) {
     var sh = sarTab(t[0]);
     sh.getRange(1, 1, 1, t[1].length).setValues([t[1]]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e');

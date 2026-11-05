@@ -19,6 +19,8 @@ const errText = (e) => (e && e.message) || 'ทำรายการไม่ส
 const safeUrl = (u) => (/^https:\/\//i.test(u) ? u : '#');
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'ไฟล์'; } };
 const badge = (text, tone = 'muted') => h('span', { class: `sar-badge sar-${tone}` }, text);
+/** Where a received letter came from (read from the code in front of its number). A code the system does not recognise is shown as a warning: it is probably misspelt. */
+const originBadge = (d) => badge(d.issuerKnown ? d.issuerName : `⚠ รหัสต้นทาง ${d.issuer} (ไม่รู้จัก)`, d.issuerKnown ? 'muted' : 'warn');
 
 /** Placeholder shapes shown while a sub-menu loads (CSS shimmer; static when the user prefers reduced motion). */
 const sk = (cls) => h('i', { class: `sar-sk ${cls || ''}`, 'aria-hidden': 'true' });
@@ -113,7 +115,7 @@ export async function mount(root) {
     return h('button', { class: `sar-row tone-${stageTone(d.stage, d.overdue)}`, type: 'button', onclick: (e) => openDoc(d.id, e.currentTarget) },
       h('div', { class: 'sar-no' }, h('strong', null, d.reg), h('span', null, out ? 'เลขส่ง' : 'เลขรับ')),
       h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, d.subject || '(ไม่มีเรื่อง)'), h('div', { class: 'muted sar-sub' }, [d.docNo, d.party, d.at ? thaiDate(String(d.at).slice(0, 10)) : ''].filter(Boolean).join(' · ')),
-        h('div', { class: 'sar-badges' }, regCodes.length && d.registry ? badge(d.registry === 'central' ? 'สารบรรณกลาง' : unitName(d.registry), 'info') : null, d.urgency !== 'normal' ? badge(URGENCY[d.urgency], d.urgency === 'urgent' ? 'warn' : 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, stageLabel(d.stage) ? badge(stageLabel(d.stage), stageTone(d.stage, 0)) : null, d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null, ...(extra || []))));
+        h('div', { class: 'sar-badges' }, regCodes.length && d.registry ? badge(d.registry === 'central' ? 'สารบรรณกลาง' : unitName(d.registry), 'info') : null, d.issuer ? originBadge(d) : null, d.urgency !== 'normal' ? badge(URGENCY[d.urgency], d.urgency === 'urgent' ? 'warn' : 'bad') : null, d.secrecy !== 'normal' ? badge(SECRECY[d.secrecy], 'bad') : null, stageLabel(d.stage) ? badge(stageLabel(d.stage), stageTone(d.stage, 0)) : null, d.overdue ? badge(`เลยกำหนด ${d.overdue} วัน`, 'bad') : null, ...(extra || []))));
   }
   function empty(text) { return h('p', { class: 'muted sar-empty' }, text); }
   /** Print a finished HTML sheet (register / received stamp) from a new tab — no inline scripts needed. */
@@ -207,11 +209,15 @@ export async function mount(root) {
   /* ----------------------------- ศูนย์สารบรรณ: ทะเบียนรับ-ส่ง + วิเคราะห์ข้อมูล ----------------------------- */
   const miniRows = (n) => Array.from({ length: n }, () => h('div', { class: 'sar-mini sar-skel-card', 'aria-hidden': 'true' }, sk('num s'), h('div', { class: 'sar-mini-main' }, sk('line l'), sk('line m'))));
   const retryBox = (title, e, again) => h('div', null, notice('error', title, errText(e)), h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: again }, 'ลองอีกครั้ง')));
-  /** Horizontal bars: [{name, n}] → label · bar · number. */
-  function hbars(items, { total, tone = 'in', emptyText = 'ยังไม่มีข้อมูล' } = {}) {
+  /** Horizontal bars: [{name, n, hint?, tone?}] → label · bar · number. With `onPick` every bar is a button (drill down into the register). */
+  function hbars(items, { total, tone = 'in', emptyText = 'ยังไม่มีข้อมูล', onPick } = {}) {
     if (!items || !items.length) return empty(emptyText);
     const max = Math.max(1, ...items.map((i) => i.n)); const sum = total || items.reduce((a, i) => a + i.n, 0);
-    return h('div', { class: 'sar-hbars' }, items.map((i) => h('div', { class: 'sar-hbar', title: `${i.name}: ${i.n} ฉบับ (${pct(i.n, sum)}%)` }, h('span', { class: 'sar-hbar-l' }, i.name), h('span', { class: 'sar-hbar-t' }, h('i', { class: tone, style: `width:${Math.max(3, Math.round((i.n / max) * 100))}%` })), h('strong', null, String(i.n)))));
+    return h('div', { class: 'sar-hbars' }, items.map((i) => {
+      const inner = [h('span', { class: 'sar-hbar-l' }, i.name, i.hint ? h('small', { class: 'sar-hbar-hint' }, i.hint) : null), h('span', { class: 'sar-hbar-t' }, h('i', { class: i.tone || tone, style: `width:${Math.max(3, Math.round((i.n / max) * 100))}%` })), h('strong', null, String(i.n))];
+      const attrs = { class: `sar-hbar${onPick ? ' is-link' : ''}`, title: `${i.name}: ${i.n} ฉบับ (${pct(i.n, sum)}%)${onPick ? ' — กดเพื่อดูในทะเบียน' : ''}` };
+      return onPick ? h('button', { ...attrs, type: 'button', onclick: () => onPick(i) }, inner) : h('div', attrs, inner);
+    }));
   }
   const tile = (label, value, sub, tone) => h('div', { class: `sar-tile${tone ? ` tone-${tone}` : ''}` }, h('span', null, label), h('strong', null, String(value)), sub ? h('em', null, sub) : null);
 
@@ -237,10 +243,67 @@ export async function mount(root) {
     load(); return card;
   }
 
+  /** รายชื่อรหัสหน่วยงานต้นทางที่ระบบรู้จัก (ค่าเริ่มต้น + ที่เจ้าหน้าที่เพิ่ม). Clerks can add / rename / remove their own rows. */
+  async function issuerList(reload) {
+    let r; try { r = await call('issuers'); } catch (e) { toast(errText(e), 'error', 6000); return; }
+    let m = null;
+    const edit = async (code, name) => {
+      const v = await ask(code ? `แก้ชื่อรหัส ${code}` : 'เพิ่มรหัสหน่วยงานต้นทาง', [{ name: 'code', label: 'รหัสหน้าเลขที่หนังสือ *', value: code || '', readonly: !!code, required: true, max: 12, placeholder: 'เช่น สธ  ชม  MOPH', hint: code ? '' : 'ตัวอักษรไทย 1–6 ตัว หรือ A–Z 2–6 ตัว (ไม่ใส่ตัวเลข)' }, { name: 'name', label: 'ชื่อหน่วยงาน *', value: name || '', required: true, max: 80 }], 'บันทึก', { submit: (x) => call('issuersave', { code: x.code, name: x.name }) });
+      if (v) { toast('บันทึกแล้ว', 'success'); m.close(); reload(); issuerList(reload); }
+    };
+    const rows = r.items.map((i) => h('div', { class: 'sar-line' }, h('div', null, h('strong', null, i.code), ` — ${i.name}`, ' ', badge(i.custom ? 'เพิ่มโดยเจ้าหน้าที่' : 'ค่าเริ่มต้น', i.custom ? 'info' : 'muted')),
+      staff ? h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => edit(i.code, i.name) }, 'แก้ชื่อ'), i.custom ? h('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: async () => { if (await act(() => call('issuersave', { code: i.code, name: '' }), 'ลบแล้ว')) { m.close(); reload(); issuerList(reload); } } }, 'ลบ') : null) : null));
+    m = modal('รหัสหน่วยงานต้นทางที่ระบบรู้จัก', [h('p', { class: 'muted' }, 'ระบบเทียบ “รหัสหน้าเลขที่หนังสือ” (เช่น สธ 0201.02/ว123 → สธ) กับรายการนี้ รหัสที่ไม่อยู่ในรายการจะถูกเตือนว่าอาจพิมพ์ผิด'), h('div', { class: 'sar-issuer-list' }, rows)], [staff ? h('button', { class: 'btn btn-primary', type: 'button', onclick: () => edit('', '') }, 'เพิ่มรหัสใหม่') : null, h('button', { class: 'btn', type: 'button', onclick: () => m.close() }, 'ปิด')], { wide: true });
+  }
+  /** ตรวจชื่อต้นทาง: (1) รหัสหน้าเลขที่หนังสือที่ระบบไม่รู้จัก (2) หนังสือที่ไม่มีรหัส (3) ชื่อผู้ส่งเดียวกันที่พิมพ์ต่างกัน/คล้ายกัน — แล้วแก้/สอนระบบได้จากที่นี่. */
+  function originReview(a, reg, H, reload) {
+    let m = null; const body = [];
+    const sec = (title, hint) => [h('h3', { class: 'sar-h3' }, title), hint ? h('p', { class: 'hint' }, hint) : null];
+    const toReg = (params) => { m.close(); go('register', { kind: 'in', registry: reg, year: H.year, ...params }); };
+    const openEx = (e) => h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { m.close(); openDoc(e.id); } }, `${e.reg} · ${e.docNo || '-'}`);
+    const teach = async (code) => {
+      const v = await ask('เพิ่มรหัสหน่วยงานต้นทาง', [{ name: 'code', label: 'รหัสหน้าเลขที่หนังสือ', value: code, readonly: true }, { name: 'name', label: 'ชื่อหน่วยงาน *', required: true, max: 80, placeholder: 'เช่น โรงพยาบาลสวนปรุง', hint: 'บันทึกแล้ว หนังสือทุกฉบับที่ใช้รหัสนี้จะนับเป็นหน่วยงานนี้' }], 'บันทึก', { submit: (x) => call('issuersave', { code: x.code, name: x.name }) });
+      if (v) { toast('เพิ่มรหัสหน่วยงานแล้ว', 'success'); m.close(); reload(); }
+    };
+    const unify = async (variants, name) => {
+      const v = await ask('รวมชื่อผู้ส่งให้เป็นชื่อเดียว', [{ name: 'to', label: 'ชื่อที่ถูกต้อง *', value: name, required: true, max: 160, hint: `จะแก้ชื่อ “จาก” ในหนังสือรับ พ.ศ. ${H.year}${reg ? '' : ' (ทุกกลุ่มงาน)'} จาก: ${variants.join(' | ')} — การแก้ทุกฉบับถูกบันทึกในประวัติของหนังสือ` }], 'รวมชื่อ', { submit: async (x) => { const rr = await call('partyfix', { year: H.year, registry: reg, from: variants, to: x.to }); toast(`แก้ชื่อผู้ส่งแล้ว ${rr.changed} ฉบับ${rr.skipped ? ` (ข้าม ${rr.skipped} ฉบับที่ไม่มีสิทธิ์/เกินจำนวน)` : ''}`, 'success'); } });
+      if (v) { m.close(); reload(); }
+    };
+    const st = a.issuerStats || { unknown: 0, none: 0 }; const unk = a.issuerReview || [];
+    body.push(...sec(`1) รหัสต้นทางที่ระบบไม่รู้จัก (${st.unknown} ฉบับ)`, 'ถ้าพิมพ์รหัสผิด ให้เปิดหนังสือ → “แก้ไขข้อมูล” ที่เลขที่หนังสือ · ถ้าเป็นหน่วยงานที่ถูกต้องแต่ระบบยังไม่รู้จัก กด “เพิ่มรหัสนี้”'));
+    if (!unk.length) body.push(h('p', { class: 'muted' }, 'ไม่มี — ทุกรหัสอยู่ในรายชื่อที่ระบบรู้จัก'));
+    unk.forEach((u) => body.push(h('div', { class: 'sar-review-row' }, h('div', null, h('strong', null, u.key), ` · ${u.n} ฉบับ`, u.suggest ? h('div', { class: 'sar-sug' }, `ใกล้กับ “${u.suggest}” (${u.suggestName}) — อาจพิมพ์ผิด`) : null, h('div', { class: 'btn-row' }, u.examples.map(openEx))),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => toReg({ origin: u.key }) }, 'ดูทั้งหมด'), staff ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => teach(u.key) }, 'เพิ่มรหัสนี้') : null))));
+    body.push(...sec(`2) หนังสือที่ไม่มีรหัสหน้าเลขที่ (${st.none} ฉบับ)`, 'เลขที่หนังสือไม่ขึ้นต้นด้วยรหัสหน่วยงาน (เช่น “ที่ 123/2569” หรือเว้นว่าง) — ระบบจึงบอกต้นทางไม่ได้'));
+    if (!st.none) body.push(h('p', { class: 'muted' }, 'ไม่มี'));
+    else body.push(h('div', { class: 'sar-review-row' }, h('div', null, h('div', { class: 'btn-row' }, ((a.issuerNone && a.issuerNone.examples) || []).map(openEx))), h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => toReg({ origin: '_none' }) }, 'ดูทั้งหมด'))));
+    const sv = a.senderReview || []; const sim = a.senderSimilar || [];
+    body.push(...sec(`3) ชื่อผู้ส่งที่พิมพ์ต่างกัน (${sv.length + sim.length} จุด)`, 'ระบบนับชื่อที่ต่างกันแค่ช่องว่าง/วรรณยุกต์เป็นชื่อเดียวกันอยู่แล้ว · ชื่อที่ผิดตัวอักษรเดียวอาจเป็นคนละหน่วยงาน (เช่น เขตสุขภาพที่ 1 กับ 2) จึงต้องให้คนตัดสิน'));
+    if (!sv.length && !sim.length) body.push(h('p', { class: 'muted' }, 'ไม่พบ'));
+    sv.forEach((r) => body.push(h('div', { class: 'sar-review-row' }, h('div', null, h('strong', null, r.name), ` · ${r.n} ฉบับ`, h('div', { class: 'muted sar-sub' }, `พิมพ์ ${r.variants.length} แบบ: ${r.variants.join(' | ')}`)), staff ? h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => unify(r.variants, r.name) }, 'รวมเป็นชื่อเดียว')) : null)));
+    sim.forEach((p) => body.push(h('div', { class: 'sar-review-row' }, h('div', null, h('div', null, `“${p.a}” (${p.an}) ≈ “${p.b}” (${p.bn})`), h('div', { class: 'muted sar-sub' }, 'ต่างกันตัวอักษรเดียว — ถ้าเป็นคนละหน่วยงานไม่ต้องทำอะไร')), staff ? h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => unify([p.b], p.a) }, `รวมเป็น “${p.a.length > 18 ? `${p.a.slice(0, 18)}…` : p.a}”`), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => unify([p.a], p.b) }, `รวมเป็น “${p.b.length > 18 ? `${p.b.slice(0, 18)}…` : p.b}”`)) : null)));
+    m = modal(`ตรวจชื่อต้นทาง พ.ศ. ${H.year}`, body, [h('button', { class: 'btn', type: 'button', onclick: () => issuerList(reload) }, 'รายชื่อรหัสที่ระบบรู้จัก'), h('button', { class: 'btn btn-primary', type: 'button', onclick: () => m.close() }, 'ปิด')], { wide: true });
+  }
+
   /** The analytics block: everything comes from ONE backend call (`analytics`) that reads the register once. */
   function analyticsBlock(H, reg) {
     const box = h('div', { class: 'sar-an', 'aria-live': 'polite' }); let seq = 0;
     const skel = () => h('div', { class: 'sar-skel', role: 'status', 'aria-label': 'กำลังวิเคราะห์ข้อมูล' }, h('span', { class: 'sar-sr' }, 'กำลังวิเคราะห์ข้อมูล…'), h('div', { class: 'sar-tiles' }, ...[1, 2, 3, 4].map(() => h('div', { class: 'sar-tile sar-skel-card' }, sk('line xs'), sk('num')))), h('div', { class: 'card' }, sk('line m'), sk('chart')));
+    /** "หนังสือรับ: หน่วยงานต้นทาง": the bars are clickable (→ the register filtered to that origin); a code the system does not know is flagged and can be reviewed / taught. */
+    function originCard(a) {
+      const st = a.issuerStats || { known: 0, unknown: 0, none: 0 }; const tot = st.known + st.unknown + st.none;
+      const items = a.issuers.map((i) => ({ key: i.key, n: i.n, name: i.known ? i.name : `⚠ ${i.key}`, hint: i.known ? '' : i.suggest ? `ไม่รู้จักรหัสนี้ — หมายถึง “${i.suggest}” หรือไม่?` : 'ไม่รู้จักรหัสนี้', tone: i.known ? 'in' : 'warn' }));
+      const send = a.senders.map((s) => ({ key: s.name, n: s.n, name: s.name, hint: s.variants && s.variants.length ? `พิมพ์ต่างกัน ${s.variants.length} แบบ` : '', tone: s.variants && s.variants.length ? 'warn' : 'in' }));
+      const todo = (a.issuerReview || []).length + (st.none ? 1 : 0) + (a.senderReview || []).length + (a.senderSimilar || []).length;
+      const pick = (extra) => go('register', { kind: 'in', registry: reg, year: H.year, ...extra });
+      return h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'หนังสือรับ: หน่วยงานต้นทาง'),
+        tot ? h('div', null, h('div', { class: 'sar-split', role: 'img', 'aria-label': `รู้จัก ${st.known} ไม่รู้จัก ${st.unknown} ไม่มีรหัส ${st.none} ฉบับ` }, st.known ? h('i', { class: 'k', style: `width:${pct(st.known, tot)}%` }) : null, st.unknown ? h('i', { class: 'u', style: `width:${pct(st.unknown, tot)}%` }) : null, st.none ? h('i', { class: 'n', style: `width:${pct(st.none, tot)}%` }) : null),
+          h('p', { class: 'muted sar-sub' }, h('span', { class: 'sar-dot k' }), `รู้จัก ${st.known} `, h('span', { class: 'sar-dot u' }), `รหัสไม่รู้จัก ${st.unknown} `, h('span', { class: 'sar-dot n' }), `ไม่มีรหัส ${st.none}`)) : null,
+        hbars(items, { total: tot, emptyText: 'ยังไม่มีเลขที่หนังสือให้วิเคราะห์', onPick: (i) => pick({ origin: i.key }) }),
+        h('p', { class: 'hint' }, 'นับจากรหัสหน้าเลขที่หนังสือ (สธ · ชม · อว …) แล้วเทียบกับรายชื่อหน่วยงานที่ระบบรู้จัก — ระบบไม่ได้อ่าน “ชื่อ” หน่วยงาน จึงเตือนเมื่อพบรหัสที่ไม่อยู่ในรายชื่อ (มักพิมพ์ผิดหรือเป็นหน่วยงานใหม่) · กดแท่งเพื่อดูหนังสือของต้นทางนั้น'),
+        h('div', { class: 'btn-row' }, todo ? h('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => originReview(a, reg, H, load) }, `ตรวจชื่อต้นทาง (${todo} จุดที่ควรดู)`) : h('span', { class: 'sar-ok-t' }, '✓ รหัสต้นทางและชื่อผู้ส่งไม่พบจุดผิดปกติ'), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => issuerList(load) }, 'รายชื่อรหัสที่ระบบรู้จัก')),
+        a.senders.length ? h('div', null, h('h4', { class: 'sar-h4' }, 'ผู้ส่งที่ระบุชื่อ'), hbars(send, { onPick: (i) => pick({ q: i.key }) })) : null);
+    }
     function paint(a) {
       const hasData = a.total.in + a.total.out + a.total.void > 0;
       const head = h('div', { class: 'sar-qhead' }, h('h3', { class: 'sar-h3' }, `วิเคราะห์ข้อมูลทะเบียน พ.ศ. ${a.year} · ${a.registryName}`));
@@ -255,13 +318,13 @@ export async function mount(root) {
       const urg = Object.entries(a.urgency).filter(([, n]) => n).map(([k, n]) => ({ name: URGENCY[k], n }));
       const typeSum = a.bookType.circular + a.bookType.normal;
       const cards = h('div', { class: 'sar-two' },
-        h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'หนังสือรับ: หน่วยงานต้นทาง'), hbars(a.issuers, { emptyText: 'ยังไม่มีเลขที่หนังสือให้วิเคราะห์' }), h('p', { class: 'hint' }, 'นับจากรหัสหน้าเลขที่หนังสือ เช่น สธ · ชม · อว'), a.senders.length ? h('div', null, h('h4', { class: 'sar-h4' }, 'ผู้ส่งที่ระบุชื่อ'), hbars(a.senders)) : null),
+        originCard(a),
         h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'หนังสือส่ง: ส่งถึง'), hbars(a.recipients, { tone: 'out', emptyText: 'ยังไม่ได้ระบุผู้รับในทะเบียนส่ง' }), a.unspecifiedOut ? h('p', { class: 'hint' }, `ไม่ได้ระบุผู้รับ ${a.unspecifiedOut} ฉบับ`) : null),
         h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'เรื่องที่รับเข้า (ประมาณจากคำในหัวเรื่อง)'), hbars(a.cats.in, { emptyText: 'ยังไม่มีข้อมูล' }), h('p', { class: 'hint' }, 'ใช้หมวดที่เจ้าหน้าที่เลือกไว้ ถ้าไม่ได้เลือกจะเดาจากคำในเรื่อง')),
         h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ประเภทและความเร่งด่วนของหนังสือรับ'), typeSum ? h('div', null, h('div', { class: 'sar-split', role: 'img', 'aria-label': `หนังสือเวียน ${a.bookType.circular} ฉบับ ปกติ ${a.bookType.normal} ฉบับ` }, a.bookType.circular ? h('i', { class: 'a', style: `width:${pct(a.bookType.circular, typeSum)}%` }) : null, a.bookType.normal ? h('i', { class: 'b', style: `width:${pct(a.bookType.normal, typeSum)}%` }) : null), h('p', { class: 'muted sar-sub' }, h('span', { class: 'sar-dot a' }), `หนังสือเวียน (ว) ${a.bookType.circular} (${pct(a.bookType.circular, typeSum)}%) `, h('span', { class: 'sar-dot b' }), `หนังสือทั่วไป ${a.bookType.normal}`)) : null, hbars(urg, { tone: 'warn', emptyText: 'ยังไม่มีข้อมูล' })),
         h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'วันที่ลงทะเบียน (ตามวันในสัปดาห์)'), h('div', { class: 'sar-wbars', role: 'img', 'aria-label': 'จำนวนหนังสือตามวันในสัปดาห์' }, a.weekday.map((n, i) => h('div', { class: 'sar-wbar', title: `${WEEKDAY_SHORT[i]} ${n} ฉบับ` }, h('i', { style: `height:${Math.round((n / wmax) * 100)}%` }), h('b', null, n ? String(n) : ''), h('span', null, WEEKDAY_SHORT[i]))))),
         h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ส่งต่อไปยังหน่วยงาน'), a.units.length ? hbars(a.units, { tone: 'info' }) : empty('ยังไม่มีการส่งต่อในระบบนี้'), a.forwarded ? h('p', { class: 'hint' }, `ส่งต่อแล้ว ${a.forwarded} จาก ${a.total.in} ฉบับ`) : h('p', { class: 'hint' }, 'ทะเบียนเดิมไม่มีข้อมูลการส่งต่อ — ข้อมูลจะเริ่มสะสมเมื่อใช้ขั้นตอน “รับหนังสือ → ส่งต่อ”')));
-      const q = a.quality; const qrows = [['วันที่ลงหนังสือ', q.pct.docDate], ['ผู้ส่ง (จาก)', q.pct.party], ['ช่องทางที่ได้รับ', q.pct.channel], ['ไฟล์ต้นฉบับ', q.pct.file], ['หมวดเรื่อง', q.pct.cat]];
+      const q = a.quality; const qrows = [['วันที่ลงหนังสือ', q.pct.docDate], ['ผู้ส่ง (จาก)', q.pct.party], ['ช่องทางที่ได้รับ', q.pct.channel], ['ไฟล์ต้นฉบับ', q.pct.file], ['หมวดเรื่อง', q.pct.cat]].concat(q.pct.issuer != null ? [['รหัสต้นทางที่ระบบรู้จัก', q.pct.issuer]] : []);
       const quality = h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ความครบถ้วนของข้อมูลหนังสือรับ'), h('div', { class: 'sar-hbars' }, qrows.map(([l, v]) => h('div', { class: 'sar-hbar', title: `${l}: ${v}%` }, h('span', { class: 'sar-hbar-l' }, l), h('span', { class: 'sar-hbar-t' }, h('i', { class: v >= 80 ? 'ok' : v >= 40 ? 'warn' : 'bad', style: `width:${Math.max(3, v)}%` })), h('strong', null, `${v}%`)))), h('p', { class: 'hint' }, 'ยิ่งครบ การวิเคราะห์ยิ่งแม่นยำ — เติมข้อมูลได้ที่ “รายละเอียดหนังสือ → แก้ไขข้อมูล” หรือแนบไฟล์ต้นฉบับ'));
       const gap = (k, l) => h('div', { class: 'sar-line' }, h('span', null, l), h('strong', { class: a.seq[k].gaps ? 'sar-bad-t' : '' }, `ล่าสุด ${a.seq[k].last || '-'} · ใช้ ${a.seq[k].used}${a.seq[k].gaps ? ` · เลขขาด ${a.seq[k].gaps}` : ' · ต่อเนื่อง'}`));
       const seqCard = h('div', { class: 'card' }, h('h3', { class: 'sar-h3' }, 'ความต่อเนื่องของเลขทะเบียน'), gap('in', 'ทะเบียนรับ'), gap('out', 'ทะเบียนส่ง'), (a.seq.in.gaps || a.seq.out.gaps) && staff ? h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => go('numbers', { registry: reg }) }, 'ดูเลขที่ขาด')) : null);
@@ -322,38 +385,166 @@ export async function mount(root) {
   }
 
   /* ----------------------------- งานของฉัน ----------------------------- */
-  async function myView(el) {
-    const r = await call('my');
+  /** What was routed to my unit(s). v1.17: filters (status · origin · unit · text) and "เลือกหลายรายการ" with the same four commands as the detail dialog
+   *  (รับทราบ/รับเรื่อง · มอบหมายผู้รับผิดชอบ · ดำเนินการแล้ว · ส่งคืน). Each letter is sent through the SAME single-letter command, so every permission check stays as it was. */
+  async function myView(el, x) {
+    let r = await call('my');
     if (!r.items.length) { el.append(h('div', { class: 'card' }, empty(me.units.length ? 'ยังไม่มีหนังสือส่งถึงหน่วยงานของคุณ' : 'บัญชีของคุณยังไม่ได้ถูกกำหนดเป็นสมาชิกของหน่วยงานใด — ติดต่อผู้ดูแลระบบเพื่อเพิ่มอีเมลในหน้า “หน่วยงาน”'))); return; }
-    el.append(h('p', { class: 'muted' }, `ค้างดำเนินการ ${r.open} เรื่อง${r.overdue ? ` · เลยกำหนด ${r.overdue} เรื่อง` : ''}`));
-    r.items.forEach((i) => {
+    const st = { q: '', origin: '', status: '', unit: '' }; const sel = new Map(); let pickMode = false; let shown = []; let lastIdx = -1; let terms = [];
+    const keyOf = (i) => `${i.id}|${i.unit}`;   // the same letter can sit in two of my units
+    const isOpen = (i) => i.status === 'pending' || i.status === 'received' || i.status === 'assigned';
+    const info = h('p', { class: 'muted' }); const list = h('div', { class: 'sar-list', 'aria-live': 'polite' });
+    const statusSel = h('select', { 'aria-label': 'สถานะงาน' }, [['', 'ทุกสถานะ'], ['open', 'ค้างดำเนินการ'], ['pending', 'รอรับเรื่อง'], ['progress', 'กำลังดำเนินการ'], ['late', 'เลยกำหนด'], ['mine', 'มอบหมายให้ฉัน'], ['returned', 'ส่งคืนแล้ว'], ['done', 'เสร็จสิ้น']].map(([v, l]) => opt(v, l)));
+    const originSel = h('select', { 'aria-label': 'ต้นทางของหนังสือ (มาจากหน่วยงานไหน)' }); const unitSel = h('select', { 'aria-label': 'หน่วยงานที่รับ' });
+    const search = h('input', { type: 'search', placeholder: 'ค้นหาเลขรับ เลขที่หนังสือ เรื่อง ผู้ส่ง…', 'aria-label': 'ค้นหา' });
+    const pickBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', onclick: () => setPick(!pickMode) }, svgIcon(ICONS.check, 18), 'เลือกหลายรายการ');
+    statusSel.addEventListener('change', () => { st.status = statusSel.value; draw(); }); originSel.addEventListener('change', () => { st.origin = originSel.value; draw(); }); unitSel.addEventListener('change', () => { st.unit = unitSel.value; draw(); });
+    search.addEventListener('input', debounce(() => { st.q = search.value.trim(); draw(); }, 250));
+
+    /** Origin / unit options come from what is in my list (with counts). */
+    function fillFilters() {
+      const og = new Map(); let unk = 0; let none = 0;
+      r.items.forEach((i) => { if (!i.issuer) { none += 1; return; } const e = og.get(i.issuer) || { key: i.issuer, name: i.issuerName, known: i.issuerKnown, n: 0 }; e.n += 1; og.set(i.issuer, e); if (!i.issuerKnown) unk += 1; });
+      const ops = [opt('', 'ทุกต้นทาง'), ...[...og.values()].sort((a, b) => b.n - a.n).map((e) => opt(e.key, `${e.known ? e.name : `⚠ ${e.key} (ไม่รู้จัก)`} · ${e.n}`))];
+      if (unk) ops.push(opt('_unknown', `⚠ ทุกรหัสที่ไม่รู้จัก · ${unk}`)); if (none) ops.push(opt('_none', `ไม่มีรหัส/ไม่ทราบต้นทาง · ${none}`));
+      originSel.replaceChildren(...ops); if (!ops.some((o) => o.value === st.origin)) st.origin = ''; originSel.value = st.origin; originSel.hidden = !og.size;
+      const us = new Map(); r.items.forEach((i) => us.set(i.unit, i.unitName));
+      unitSel.replaceChildren(opt('', 'ทุกหน่วยงาน'), ...[...us].map(([c, n]) => opt(c, n))); if (!us.has(st.unit)) st.unit = ''; unitSel.value = st.unit; unitSel.hidden = us.size < 2;
+    }
+    function matches(i) {
+      if (st.unit && i.unit !== st.unit) return false;
+      const late = isOpen(i) && i.due && i.due < r.today;
+      if (st.status === 'open' && !isOpen(i)) return false; if (st.status === 'pending' && i.status !== 'pending') return false; if (st.status === 'progress' && !(i.status === 'received' || i.status === 'assigned')) return false;
+      if (st.status === 'late' && !late) return false; if (st.status === 'mine' && !i.mine) return false; if (st.status === 'returned' && i.status !== 'returned') return false; if (st.status === 'done' && i.status !== 'done') return false;
+      if (st.origin === '_none' ? !!i.issuer : st.origin === '_unknown' ? !(i.issuer && !i.issuerKnown) : st.origin ? i.issuer !== st.origin : false) return false;
+      if (terms.length) { const hay = [i.reg, i.docNo, i.subject, i.party, i.unitName, i.issuerName].join(' ').toLowerCase(); if (!terms.every((t) => hay.indexOf(t) >= 0)) return false; }
+      return true;
+    }
+    function myRow(i) {
       const closed = i.status === 'done'; const late = !closed && i.due && i.due < r.today;
-      el.append(h('button', { class: `sar-row tone-${late ? 'bad' : closed ? 'ok' : i.status === 'pending' ? 'warn' : 'info'}`, type: 'button', onclick: (e) => openDoc(i.id, e.currentTarget) },
+      return h('button', { class: `sar-row tone-${late ? 'bad' : closed ? 'ok' : i.status === 'pending' ? 'warn' : 'info'}`, type: 'button', onclick: (e) => openDoc(i.id, e.currentTarget) },
         h('div', { class: 'sar-no' }, h('strong', null, i.reg), h('span', null, i.unitName)),
         h('div', { class: 'sar-main' }, h('div', { class: 'sar-subject' }, i.subject), h('div', { class: 'muted sar-sub' }, [i.docNo, i.party].filter(Boolean).join(' · ')),
-          h('div', { class: 'sar-badges' }, i.urgency !== 'normal' ? badge(URGENCY[i.urgency], 'bad') : null, i.secrecy !== 'normal' ? badge(SECRECY[i.secrecy], 'bad') : null, badge(ACTION[i.action]), badge(TO_STATUS[i.status], closed ? 'ok' : i.status === 'pending' ? 'warn' : 'info'), i.mine ? badge('มอบหมายให้ฉัน', 'info') : null, i.due ? badge(`กำหนด ${dueLabel(i.due, r.today, closed)}`, late ? 'bad' : 'muted') : null))));
-    });
+          h('div', { class: 'sar-badges' }, i.issuer ? originBadge(i) : null, i.urgency !== 'normal' ? badge(URGENCY[i.urgency], 'bad') : null, i.secrecy !== 'normal' ? badge(SECRECY[i.secrecy], 'bad') : null, badge(ACTION[i.action]), badge(TO_STATUS[i.status], closed ? 'ok' : i.status === 'pending' ? 'warn' : 'info'), i.mine ? badge('มอบหมายให้ฉัน', 'info') : null, i.due ? badge(`กำหนด ${dueLabel(i.due, r.today, closed)}`, late ? 'bad' : 'muted') : null)));
+    }
+    function pickRow(i) {
+      if (!pickMode) return myRow(i);
+      const k = keyOf(i); const cb = h('input', { type: 'checkbox', 'aria-label': `เลือก ${i.reg} (${i.unitName})`, checked: sel.has(k) });
+      cb.addEventListener('click', (e) => {
+        const at = shown.indexOf(i);
+        if (e.shiftKey && lastIdx >= 0 && at >= 0) { const a = Math.min(lastIdx, at); const z = Math.max(lastIdx, at); for (let n = a; n <= z; n += 1) { if (cb.checked) sel.set(keyOf(shown[n]), shown[n]); else sel.delete(keyOf(shown[n])); } }
+        else if (cb.checked) sel.set(k, i); else sel.delete(k);
+        lastIdx = at; syncRows();
+      });
+      return h('div', { class: `sar-pickrow${sel.has(k) ? ' on' : ''}`, dataset: { id: k } }, h('label', { class: 'sar-pickbox' }, cb), myRow(i));
+    }
+    function draw() {
+      terms = st.q.toLowerCase().split(/\s+/).filter(Boolean); shown = r.items.filter(matches); lastIdx = -1;
+      info.textContent = `ค้างดำเนินการ ${r.open} เรื่อง${r.overdue ? ` · เลยกำหนด ${r.overdue} เรื่อง` : ''}${shown.length !== r.items.length ? ` · ตรงเงื่อนไข ${shown.length} จาก ${r.items.length}` : ''}${r.items.length >= 200 ? ' · แสดง 200 รายการแรก' : ''}`;
+      list.replaceChildren(...(shown.length ? shown.map(pickRow) : [empty('ไม่พบรายการตามเงื่อนไข')])); drawBar();
+    }
+
+    /* ---- เลือกหลายรายการ + คำสั่งเดียวกับในหน้าต่างรายละเอียด ---- */
+    const picked = () => [...sel.values()];
+    const elig = (k) => picked().filter((i) => i.can && i.can[k]);
+    const mk = (label, fn, cls = 'btn btn-sm') => h('button', { class: cls, type: 'button', onclick: fn }, label);
+    const ACTS = [{ k: 'ack', label: 'รับทราบ/รับเรื่อง', cls: 'btn btn-sm btn-primary' }, { k: 'assign', label: 'มอบหมายผู้รับผิดชอบ', cls: 'btn btn-sm' }, { k: 'done', label: 'ดำเนินการแล้ว', cls: 'btn btn-sm' }, { k: 'ret', label: 'ส่งคืน', cls: 'btn btn-sm btn-danger' }];
+    ACTS.forEach((a) => { a.btn = mk(a.label, () => bulk(a.k), a.cls); });
+    const selCount = h('span', { class: 'sar-selcount', 'aria-live': 'polite' });
+    const bAll = mk('เลือกทั้งหมดที่แสดง', () => { shown.forEach((i) => sel.set(keyOf(i), i)); syncRows(); }); const bClear = mk('ล้างที่เลือก', () => { sel.clear(); syncRows(); });
+    const selbar = h('div', { class: 'sar-selbar', role: 'region', 'aria-label': 'จัดการรายการที่เลือก', hidden: true }, selCount, bAll, ...ACTS.map((a) => a.btn), bClear);
+    function drawBar() {
+      const n = sel.size; selbar.hidden = !pickMode;
+      selCount.textContent = n ? `เลือกแล้ว ${n} รายการ` : 'ติ๊กหน้ารายการเพื่อเลือก (กด Shift ค้างเพื่อเลือกต่อเนื่อง)';
+      ACTS.forEach((a) => { const c = elig(a.k).length; a.btn.textContent = n ? `${a.label} (${c})` : a.label; a.btn.disabled = !c; a.btn.title = !n ? '' : !c ? 'ในรายการที่เลือก ไม่มีรายการที่ทำคำสั่งนี้ได้' : c < n ? `ทำได้ ${c} จาก ${n} รายการที่เลือก` : ''; });
+      bClear.disabled = !n; bAll.disabled = !shown.length;
+    }
+    function syncRows() { list.querySelectorAll('.sar-pickrow').forEach((row) => { const on = sel.has(row.dataset.id); row.classList.toggle('on', on); row.querySelector('input').checked = on; }); drawBar(); }
+    function setPick(on) { pickMode = on; pickBtn.setAttribute('aria-pressed', String(on)); pickBtn.classList.toggle('btn-primary', on); if (!on) sel.clear(); draw(); }
+    async function reloadMine() {
+      try { r = await call('my'); } catch (e) { toast(errText(e), 'error', 6000); return; }
+      for (const k of [...sel.keys()]) { const fresh = r.items.find((i) => keyOf(i) === k); if (fresh) sel.set(k, fresh); else sel.delete(k); }   // the new copy carries the new permissions
+      fillFilters(); draw();
+    }
+    x.onChanged = reloadMine;   // a letter acted on in the detail dialog → this list shows the new state
+    /** One dialog for a bulk command: runs the letters ONE BY ONE (progress on screen), lists the ones that failed and lets the user retry only those. */
+    function batchDialog({ title, docs, skipped, body, goLabel, collect, worker, danger }) {
+      const regs = docs.map((d) => d.reg).join(', ');
+      const err = h('div', { class: 'sar-formerr', role: 'alert', hidden: true }); const prog = h('p', { class: 'muted', role: 'status', 'aria-live': 'polite' }); const fails = h('ul', { class: 'sar-fails' });
+      let m = null; let closed = false; let todo = docs; let okTotal = 0;
+      const go = h('button', { class: `btn ${danger ? 'btn-danger' : 'btn-primary'}`, type: 'button' }, `${goLabel} ${docs.length} รายการ`); const cancel = h('button', { class: 'btn', type: 'button', onclick: () => m.close() }, 'ยกเลิก');
+      go.addEventListener('click', async () => {
+        err.hidden = true; const vals = collect((t) => { err.textContent = t; err.hidden = false; }); if (!vals) return;
+        go.disabled = true; cancel.disabled = true; fails.replaceChildren(); const bad = []; let ok = 0;
+        for (let n = 0; n < todo.length && !closed; n += 1) {
+          const i = todo[n]; prog.textContent = `กำลังดำเนินการ ${n + 1} / ${todo.length} (เลขรับ ${i.reg} · ${i.unitName})…`;
+          try { await worker(i, vals); ok += 1; okTotal += 1; sel.delete(keyOf(i)); } catch (e) {
+            bad.push(i); fails.append(h('li', null, `${i.reg} (${i.unitName}): ${errText(e)}`));
+            if (e && (e.code === 'INVALID_SESSION' || e.code === 'DOMAIN_NOT_ALLOWED')) break;
+          }
+        }
+        if (closed) return;
+        cancel.disabled = false; todo = bad; prog.textContent = `สำเร็จ ${ok} รายการ${bad.length ? ` · ไม่สำเร็จ ${bad.length} รายการ` : ''}`;
+        if (bad.length) { go.disabled = false; go.textContent = `ลองใหม่ ${bad.length} รายการที่ไม่สำเร็จ`; cancel.textContent = 'ปิด'; } else { toast(`${title} สำเร็จ ${okTotal} รายการ`, 'success'); m.close(); }
+      });
+      m = modal(title, [h('p', { class: 'muted' }, `เลขรับ: ${regs.length > 160 ? `${regs.slice(0, 160)}…` : regs}`), skipped ? h('p', { class: 'hint' }, `ข้าม ${skipped} รายการที่คำสั่งนี้ใช้ไม่ได้ (สิทธิ์ไม่ถึงหรือสถานะไม่ตรง)`) : null, ...body, err, prog, fails], [go, cancel], { wide: true, onClose: () => { closed = true; if (okTotal) reloadMine(); else syncRows(); } });
+    }
+    function bulk(kind) {
+      const docs = elig(kind);
+      if (!docs.length) { toast('ในรายการที่เลือก ไม่มีรายการที่ทำคำสั่งนี้ได้ (สิทธิ์หรือสถานะไม่ตรง)', 'info', 5000); return; }
+      const skipped = sel.size - docs.length; const base = { docs, skipped };
+      if (kind === 'ack') { batchDialog({ ...base, title: 'รับทราบ/รับเรื่อง', goLabel: 'รับเรื่อง', body: [], collect: () => ({}), worker: (i) => call('ack', { id: i.id, unit: i.unit }) }); return; }
+      if (kind === 'assign') {
+        const pool = [...new Set(docs.flatMap((i) => r.pools[i.unit] || []))]; const picks = new Map(); const due = h('input', { type: 'date' });
+        const boxes = h('div', { class: 'sar-pool' }, pool.map((e) => { const cb = h('input', { type: 'checkbox' }); picks.set(e, cb); return h('label', { class: 'sar-check' }, cb, h('span', null, e)); }));
+        batchDialog({ ...base, title: 'มอบหมายผู้รับผิดชอบ', goLabel: 'มอบหมาย',
+          body: [pool.length ? boxes : h('p', { class: 'muted' }, 'หน่วยงานเหล่านี้ยังไม่มีสมาชิก — ให้ผู้ดูแลระบบเพิ่มอีเมลในหน้า “หน่วยงาน”'), field('กำหนดเสร็จ', due, 'ไม่ระบุ = คงกำหนดเดิมของแต่ละเรื่อง').root, h('p', { class: 'hint' }, 'คนที่เลือกแต่ไม่ได้อยู่ในหน่วยงานของเรื่องนั้น ระบบจะข้ามคนนั้น (ถ้าไม่เหลือใครเลย เรื่องนั้นจะอยู่ในรายการที่ไม่สำเร็จ)')],
+          collect: (bad) => { const users = [...picks.entries()].filter(([, cb]) => cb.checked).map(([e]) => e); if (!users.length) { bad('เลือกผู้รับผิดชอบอย่างน้อย 1 คน'); return null; } return { users, due: due.value }; },
+          worker: (i, v) => { const users = v.users.filter((e) => (r.pools[i.unit] || []).includes(e)); if (!users.length) throw new Error('ผู้รับผิดชอบที่เลือกไม่ได้อยู่ในหน่วยงานนี้'); return call('assign', { id: i.id, unit: i.unit, users, due: v.due }); } });
+        return;
+      }
+      if (kind === 'done') {
+        const note = h('textarea', { rows: 3, maxlength: 400, placeholder: 'ใช้ร่วมกันทุกเรื่อง (ไม่ใส่ก็ได้)' });
+        batchDialog({ ...base, title: 'ปิดงาน (ดำเนินการแล้ว)', goLabel: 'ปิดงาน', body: [field('สรุปผลการดำเนินการ', note).root], collect: () => ({ note: note.value.trim() }), worker: (i, v) => call('done', { id: i.id, unit: i.unit, note: v.note }) });
+        return;
+      }
+      const reason = h('textarea', { rows: 2, maxlength: 400, placeholder: 'เหตุผลที่ส่งคืน — ใช้ร่วมกันทุกเรื่อง' });
+      batchDialog({ ...base, title: 'ส่งคืนสารบรรณ', goLabel: 'ส่งคืน', danger: true, body: [field('เหตุผล *', reason).root], collect: (bad) => { const v = reason.value.trim(); if (v.length < 3) { reason.focus(); bad('กรุณาระบุเหตุผลที่ส่งคืน (อย่างน้อย 3 ตัวอักษร)'); return null; } return { reason: v }; }, worker: (i, v) => call('return', { id: i.id, unit: i.unit, reason: v.reason }) });
+    }
+
+    el.append(h('div', { class: 'card sar-filters' }, h('div', { class: 'sar-fgrid' }, statusSel, originSel, unitSel), search, h('div', { class: 'btn-row' }, pickBtn)), info, list, selbar);
+    fillFilters(); draw();
   }
 
   /* ----------------------------- ทะเบียน ----------------------------- */
   async function registerView(el, x, p) {
-    const st = { kind: p.kind || 'in', year: cfg.year, q: '', stage: p.stage && p.stage !== 'registered' ? p.stage : '', urgent: !!p.urgent, from: '', to: '', registry: p.registry || '', offset: 0, total: 0 };
+    const st = { kind: p.kind || 'in', year: p.year || cfg.year, origin: p.origin || '', q: p.q || '', stage: p.stage && p.stage !== 'registered' ? p.stage : '', urgent: !!p.urgent, from: '', to: '', registry: p.registry || '', offset: 0, total: 0 };
     const sel = new Map(); let pickMode = false; let shown = []; let lastIdx = -1;   // เลือกหลายรายการ: id → รายการ (เก็บไว้ข้ามการโหลดเพิ่ม/เปลี่ยนตัวกรอง)
     const list = h('div', { class: 'sar-list', 'aria-live': 'polite' }); const info = h('p', { class: 'muted' }); const more = h('button', { class: 'btn', type: 'button', hidden: true }, 'โหลดเพิ่ม');
     const bar = h('div', { class: 'sar-loadbar', hidden: true, 'aria-hidden': 'true' }, h('i'));
-    const kindBar = h('div', { class: 'sar-seg' }, [['in', 'ทะเบียนรับ'], ['out', 'ทะเบียนส่ง']].map(([k, l]) => h('button', { type: 'button', class: st.kind === k ? 'on' : '', onclick: (e) => { st.kind = k; clearSel(); [...kindBar.children].forEach((b) => b.classList.toggle('on', b === e.currentTarget)); stageSel.hidden = k === 'out'; load(true); } }, l)));
+    const kindBar = h('div', { class: 'sar-seg' }, [['in', 'ทะเบียนรับ'], ['out', 'ทะเบียนส่ง']].map(([k, l]) => h('button', { type: 'button', class: st.kind === k ? 'on' : '', onclick: (e) => { st.kind = k; st.origin = ''; clearSel(); [...kindBar.children].forEach((b) => b.classList.toggle('on', b === e.currentTarget)); stageSel.hidden = k === 'out'; originSel.hidden = k === 'out'; load(true); } }, l)));
     const years = []; for (let y = cfg.year; y >= cfg.year - 4; y -= 1) years.push(y);
-    const yearSel = h('select', { 'aria-label': 'ปี พ.ศ.' }, years.map((y) => opt(String(y), `พ.ศ. ${y}`))); yearSel.addEventListener('change', () => { st.year = Number(yearSel.value); clearSel(); load(true); });
+    const yearSel = h('select', { 'aria-label': 'ปี พ.ศ.' }, years.map((y) => opt(String(y), `พ.ศ. ${y}`))); yearSel.value = String(st.year); yearSel.addEventListener('change', () => { st.year = Number(yearSel.value); clearSel(); load(true); });
     /* No "ลงรับแล้ว รอเสนอ" filter: the register is a backup, so an unrouted letter has no known status. */
     const stageSel = h('select', { 'aria-label': 'สถานะการส่งต่อ', hidden: st.kind === 'out' }, opt('', 'ทุกรายการ'), ...['open', 'routed', 'inprogress', 'returned', 'done', 'void'].map((k) => opt(k, k === 'open' ? 'ส่งต่อแล้ว ยังไม่เสร็จ' : STAGE[k])), opt('overdue', 'เลยกำหนด (ที่ส่งต่อแล้ว)')); stageSel.value = st.stage; stageSel.addEventListener('change', () => { st.stage = stageSel.value; load(true); });
+    /* v1.17: "มาจากไหน" — filter the received letters by their origin (the code in front of the letter number). The options come with every list answer (counts of the whole year). */
+    const originSel = h('select', { 'aria-label': 'ต้นทางของหนังสือ (มาจากหน่วยงานไหน)', hidden: st.kind === 'out' }, opt('', 'ทุกต้นทาง')); originSel.addEventListener('change', () => { st.origin = originSel.value; load(true); });
+    function fillOrigins(o) {
+      if (!o) { originSel.hidden = true; return; }
+      originSel.hidden = st.kind === 'out'; const keep = st.origin;
+      const ops = [opt('', 'ทุกต้นทาง'), ...o.list.map((i) => opt(i.key, `${i.known ? i.name : `⚠ ${i.key} (ไม่รู้จัก)`} · ${i.n}`))];
+      if (o.unknown) ops.push(opt('_unknown', `⚠ ทุกรหัสที่ไม่รู้จัก · ${o.unknown}`)); if (o.none) ops.push(opt('_none', `ไม่มีรหัสในเลขที่หนังสือ · ${o.none}`));
+      if (keep && !ops.some((x) => x.value === keep)) ops.push(opt(keep, keep));
+      originSel.replaceChildren(...ops); originSel.value = keep;
+    }
     const urg = h('label', { class: 'sar-check' }, h('input', { type: 'checkbox', checked: st.urgent }), h('span', null, 'เฉพาะด่วนมาก/ด่วนที่สุด')); urg.firstChild.addEventListener('change', () => { st.urgent = urg.firstChild.checked; load(true); });
-    const search = h('input', { type: 'search', placeholder: 'ค้นหาเลขรับ เลขที่หนังสือ เรื่อง หน่วยงาน…', 'aria-label': 'ค้นหา' }); search.addEventListener('input', debounce(() => { st.q = search.value.trim(); load(true); }, 350));
+    const search = h('input', { type: 'search', placeholder: 'ค้นหาเลขรับ เลขที่หนังสือ เรื่อง หน่วยงาน…', 'aria-label': 'ค้นหา', value: st.q }); search.addEventListener('input', debounce(() => { st.q = search.value.trim(); load(true); }, 350));
     const from = h('input', { type: 'date', 'aria-label': 'ตั้งแต่วันที่ลงทะเบียน' }); const to = h('input', { type: 'date', 'aria-label': 'ถึงวันที่ลงทะเบียน' }); from.addEventListener('change', () => { st.from = from.value; load(true); }); to.addEventListener('change', () => { st.to = to.value; load(true); });
     const regSel = regCodes.length ? h('select', { 'aria-label': 'กลุ่มงาน/ทะเบียน' }, opt('', 'ทุกกลุ่มงาน'), opt('central', 'สารบรรณกลาง'), cfg.units.filter((u) => u.registry && u.active).map((u) => opt(u.code, u.name))) : null;
     if (regSel) { regSel.value = st.registry; regSel.addEventListener('change', () => { st.registry = regSel.value; load(true); }); }
     const csv = h('button', { class: 'btn', type: 'button', onclick: () => exportCsv() }, svgIcon(ICONS.download, 18), 'ส่งออก Excel (CSV)');
     const pickBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', onclick: () => setPick(!pickMode) }, svgIcon(ICONS.check, 18), 'เลือกหลายรายการ');
-    const filters = h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, regSel, yearSel, stageSel, from, to, urg), search, bar, h('div', { class: 'btn-row' }, pickBtn, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)')));
+    const filters = h('div', { class: 'card sar-filters' }, kindBar, h('div', { class: 'sar-fgrid' }, regSel, yearSel, originSel, stageSel, from, to, urg), search, bar, h('div', { class: 'btn-row' }, pickBtn, csv, h('button', { class: 'btn', type: 'button', onclick: () => printReg() }, 'พิมพ์ทะเบียน (A4)')));
 
     /* ---- เลือกหลายรายการ: ติ๊กหลายฉบับ แล้วส่งต่อ / พิมพ์ตรารับ / ส่งออก / พิมพ์ทะเบียน ได้ในครั้งเดียว (Shift = เลือกต่อเนื่อง) ---- */
     x.onChanged = () => load(true);   // a letter edited / acted on in the detail dialog → the list behind it shows the new data
@@ -444,7 +635,7 @@ export async function mount(root) {
       try {
         const r = await call('list', { ...st, limit: 40 }); if (my !== seq) return;
         if (reset) { list.replaceChildren(); shown = []; lastIdx = -1; }
-        st.total = r.total;
+        st.total = r.total; fillOrigins(r.origins);
         info.textContent = `ปี พ.ศ. ${r.year}: ${r.counts.total} ฉบับ (วันนี้ ${r.counts.today}) · เลขล่าสุด ${r.counts.lastNo || '-'} · ยกเลิก ${r.counts.void}${r.total !== r.counts.total ? ` · ตรงเงื่อนไข ${r.total}` : ''}`;
         r.items.forEach((d) => { shown.push(d); list.append(pickRow(d)); });
         if (!r.items.length && reset) list.append(empty('ไม่พบหนังสือตามเงื่อนไข'));
@@ -463,8 +654,8 @@ export async function mount(root) {
     async function exportCsv(only) {
       const r = only ? { kind: st.kind, year: st.year, rows: only, truncated: false } : await act(() => call('rows', st, 60000)); if (!r) return;
       const out = r.kind === 'out';
-      const head = ['เลข' + (out ? 'ส่ง' : 'รับ'), 'วันที่ลงทะเบียน', 'เลขที่หนังสือ', 'ลงวันที่', out ? 'ถึง' : 'จาก', 'เรื่อง', 'ชั้นความเร็ว', 'ชั้นความลับ', 'สถานะการส่งต่อ', 'การปฏิบัติ', 'หมายเหตุ'];
-      const rows = r.rows.map((d) => [d.reg, thaiDateTime(d.at), d.docNo, thaiDate(d.docDate), d.party, d.subject, URGENCY[d.urgency], SECRECY[d.secrecy], stageLabel(d.stage), d.action, d.note]);
+      const head = ['เลข' + (out ? 'ส่ง' : 'รับ'), 'วันที่ลงทะเบียน', 'เลขที่หนังสือ', 'ลงวันที่', out ? 'ถึง' : 'จาก', ...(out ? [] : ['หน่วยงานต้นทาง']), 'เรื่อง', 'ชั้นความเร็ว', 'ชั้นความลับ', 'สถานะการส่งต่อ', 'การปฏิบัติ', 'หมายเหตุ'];
+      const rows = r.rows.map((d) => [d.reg, thaiDateTime(d.at), d.docNo, thaiDate(d.docDate), d.party, ...(out ? [] : [d.issuerName ? (d.issuerKnown ? d.issuerName : `${d.issuer} (ไม่รู้จัก)`) : '']), d.subject, URGENCY[d.urgency], SECRECY[d.secrecy], stageLabel(d.stage), d.action, d.note]);
       const blob = new Blob([toCsv(head, rows)], { type: 'text/csv;charset=utf-8' }); const a = h('a', { href: URL.createObjectURL(blob), download: `ทะเบียน${out ? 'ส่ง' : 'รับ'}_${r.year}${only ? '_ที่เลือก' : ''}.csv` }); document.body.append(a); a.click(); a.remove();
       toast(`ส่งออก ${r.rows.length} รายการ${r.truncated ? ' (ตัดที่ 5,000 รายการ — กรองช่วงวันที่แล้วส่งออกใหม่)' : ''}`, 'success');
     }
