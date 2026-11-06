@@ -122,8 +122,8 @@ export const HR_HTML = `
         <ul class="cal-legend" aria-label="สัญลักษณ์บนปฏิทิน">
           <li><span class="meet-badge" aria-hidden="true"><svg viewBox="0 0 16 16" width="13" height="13" focusable="false"><circle cx="5.4" cy="5" r="2.1" fill="currentColor"/><circle cx="11.1" cy="5.9" r="1.7" fill="currentColor"/><path d="M1.6 13.2c0-2.5 1.7-4 3.8-4s3.8 1.5 3.8 4M9.9 9.6c.5-.2 1-.3 1.4-.3 1.7 0 3.1 1.2 3.1 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>ประชุม (ทรงแคปซูล)</li>
           <li><span class="lg-vac" aria-hidden="true">🌴</span>ลาพักผ่อน (กรอบประ)</li>
-          <li><span class="lg-split lg-am" aria-hidden="true"></span>ครึ่งวันเช้า อยู่ซีกซ้ายของวัน</li>
-          <li><span class="lg-split lg-pm" aria-hidden="true"></span>ครึ่งวันบ่าย อยู่ซีกขวาของวัน</li>
+          <li><span class="lg-split lg-am" aria-hidden="true"></span>ช่วงเช้า (เช่น 08:00–12:00) อยู่ซีกซ้ายของวัน</li>
+          <li><span class="lg-split lg-pm" aria-hidden="true"></span>ช่วงบ่าย (เช่น 13:00–16:00) อยู่ซีกขวาของวัน</li>
         </ul>
         <p class="cal-tip">💡 แตะวันที่ในปฏิทินเพื่อเริ่มบันทึกรายการของวันนั้น · แตะรายการเพื่อดูรายละเอียดและไฟล์แนบ</p>
       </div>

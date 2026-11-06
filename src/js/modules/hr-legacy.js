@@ -9,6 +9,7 @@
 // @ts-nocheck
 import { upgradeTimeInput, toMinutes } from '../core/timefield.js';
 import { prepareAttachment, fmtSize, splitFiles, ATTACH } from '../core/files.js';
+import { slotOf, slotText, pairSlotRows } from './hr-slot.js';
 export function createHrApp($r, google, env) {
 var __H = {};
 // ─────────────────────────────────────────────
@@ -358,9 +359,11 @@ function renderCalendar() {
   // FullCalendar only listens to window resize: also follow the panel itself (scrollbar appears, page padding changes, panel shown again)
   if (window.ResizeObserver && !calRO && calEl.parentNode) {
     var roTimer = null;
-    calRO = new ResizeObserver(function() { clearTimeout(roTimer); roTimer = setTimeout(function() { if (calendar) calendar.updateSize(); }, 60); });
+    calRO = new ResizeObserver(function() { clearTimeout(roTimer); roTimer = setTimeout(function() { if (calendar) { calendar.updateSize(); pairSlotRows(calEl); } }, 60); });
     calRO.observe(calEl.parentNode);
   }
+  var pairTimer = null;
+  function schedulePair() { clearTimeout(pairTimer); pairTimer = setTimeout(function() { pairSlotRows(calEl); }, 40); }
   calendar = new FullCalendar.Calendar(calEl, {
     initialView: isMobile ? 'listWeek' : 'dayGridMonth',
     height: isMobile ? 'auto' : 'max(560px, calc(100vh - 360px))',
@@ -404,14 +407,17 @@ function renderCalendar() {
           '</div>' };
       }
       if (isMonth && !arg.event.allDay) {
-        var isHalf = ep && ep.isHalfDay, isPM = !!(isHalf && fcIsAfternoon(ep)), isMeet = !!(ep && fcIsMeeting(ep.type));
+        var slot = slotOf(ep), isHalf = !!slot, isPM = slot === 'pm', isMeet = !!(ep && fcIsMeeting(ep.type));
         var wStyle = isHalf ? 'width:50%;' : 'width:100%;';
         var mStyle = isPM ? 'margin-left:50%;' : '';
-        var half   = isHalf ? '<span title="' + (isPM ? 'ครึ่งบ่าย' : 'ครึ่งเช้า') + '" style="font-size:11px;opacity:0.9;margin-left:3px;">' + (isPM ? '◑' : '◐') + '</span>' : '';
+        var half   = '';   // the side (left = morning · right = afternoon) already says it; the tooltip gives the hours
+        var rad    = isMeet ? '12px' : '3px', radius = isHalf ? (isPM ? '0 ' + rad + ' ' + rad + ' 0' : rad + ' 0 0 ' + rad) : rad;
         var color  = hrSafeColor(arg.event.backgroundColor);
         var vacStyle = isVacation ? 'outline:2px dashed rgba(255,253,249,0.9);outline-offset:-3px;font-weight:800;' : '';
-        return { html: '<div style="' + wStyle + mStyle + 'background:' + color +
-          ';color:#fff;border-radius:' + (isMeet ? '12px' : '3px') + ';padding:2px ' + (isMeet ? '8px 2px 3px' : '6px') + ';font-size:14px;font-weight:500;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;box-sizing:border-box;' + vacStyle + '">' +
+        var tip = isHalf ? ' title="' + esc((isPM ? 'ช่วงบ่าย ' : 'ช่วงเช้า ') + slotText(ep) + ' น. · ' + (ep.type || '') + ' · ' + (ep.name || '')) + '"' : '';
+        var slotCss = isHalf ? 'white-space:normal;word-break:break-word;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;padding-top:1px;padding-bottom:1px;' : 'white-space:nowrap;text-overflow:ellipsis;';
+        return { html: '<div class="' + (isHalf ? 'slot-bar' : '') + '"' + tip + ' style="' + wStyle + mStyle + 'background:' + color +
+          ';color:#fff;border-radius:' + radius + ';padding:2px ' + (isMeet ? '8px 2px 3px' : '6px') + ';font-size:14px;font-weight:500;overflow:hidden;' + slotCss + 'box-sizing:border-box;' + vacStyle + '">' +
           (isMeet ? MEET_BADGE : '') + typeLabel + ' · ' + (name||'') + half + provinceTag +
           (missionTag ? '<span style="opacity:0.85;font-weight:400;"> — ' + missionTag + '</span>' : '') + '</div>' };
       }
@@ -454,10 +460,14 @@ function renderCalendar() {
           if (titleEl) titleEl.prepend(dot);
         }
       }
-      if (ep && ep.isHalfDay) {
-        info.el.classList.add('half-day-event'); info.el.style.opacity = '0.92';
-        var pm = fcIsAfternoon(ep); info.el.classList.add(pm ? 'half-pm' : 'half-am');
-        if (info.view.type.indexOf('list') === 0) { var lt = info.el.querySelector('.fc-list-event-title'); if (lt) lt.append(' ' + (pm ? '◑ ครึ่งบ่าย' : '◐ ครึ่งเช้า')); }
+      var slot = slotOf(ep);
+      if (slot) {
+        var pm = slot === 'pm';
+        if (info.view.type === 'dayGridMonth') {   // month grid: the bar fills only its half of the day (morning = left · afternoon = right)
+          info.el.classList.add('half-day-event', pm ? 'half-pm' : 'half-am', pm ? 'slot-pm' : 'slot-am'); info.el.style.opacity = '0.92';
+          schedulePair();
+        }
+        if (info.view.type.indexOf('list') === 0) { var lt = info.el.querySelector('.fc-list-event-title'); if (lt) lt.append(' ' + (pm ? '◑ ช่วงบ่าย ' : '◐ ช่วงเช้า ') + slotText(ep) + ' น.'); }
       }
       if (ep && VACATION_TYPES.indexOf(ep.type) >= 0) { info.el.classList.add('vacation-event'); }
       if (ep && fcIsMeeting(ep.type)) {
@@ -476,6 +486,7 @@ function renderCalendar() {
       var d = String(info.dateStr || '').slice(0, 10);
       if (/^\d{4}-\d{2}-\d{2}$/.test(d)) startFormOnDate(d);
     },
+    datesSet: function() { schedulePair(); }, windowResize: function() { schedulePair(); },
     viewDidMount: function(info) { currentView = info.view.type; }
   });
   calendar.render();
