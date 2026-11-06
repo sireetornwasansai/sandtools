@@ -286,33 +286,45 @@ a { color: var(--primary); text-decoration: none; }
 .recent-item-sub { font-size:11.5px; color:var(--text2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .recent-item-when { font-size:10.5px; color:var(--text2); flex-shrink:0; white-space:nowrap; text-align:right; }
 .recent-item-vac { font-size:10px; background:var(--amber-bg); color:var(--warn); border-radius:4px; padding:1px 5px; font-weight:700; flex-shrink:0; }
-/* ── ลาพักผ่อน: กรอบเด่นชัด เพื่อดูง่ายว่าใครไม่อยู่ ── */
-.fc-event.vacation-event {
-  border: 2px dashed var(--white) !important;
-  box-shadow: 0 0 0 2px var(--amber), 0 1px 4px rgba(26,23,20,0.18) !important;
-  position: relative;
+/* ── ลาพักผ่อน: พื้นลายเฉียง + กรอบใน + ไอคอนต้นปาล์ม — วาดอยู่ "ภายใน" แถบทั้งหมด ไม่ล้นไปทับแถบ/วันข้างเคียง (สีลาย/กรอบอิงสีตัวอักษรของแถบ จึงเห็นชัดทั้งแถบเข้มและอ่อน) ── */
+.fc-event.vacation-event:not(.has-ev-bar),
+.ev-bar.ev-vac {
+  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 17%, transparent) 0 5px, transparent 5px 10px) !important;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, currentColor 62%, transparent) !important;
 }
-.fc-event.vacation-event::before {
-  content: "🌴";
-  position: absolute; top: -8px; left: -6px;
-  font-size: 12px; line-height: 1;
-  background: var(--amber); border-radius: 50%;
-  width: 16px; height: 16px; display: flex;
-  align-items: center; justify-content: center;
-  box-shadow: 0 1px 3px rgba(26,23,20,0.3); z-index: 5;
-}
+.fc-event.vacation-event { position: relative; }
+.fc-timegrid-event.vacation-event { color: #fff; }
 .fc-list-event.vacation-event td { background: var(--amber-bg) !important; }
 /* ── ครึ่งวัน: กล่องของปฏิทินต้องไม่เป็นสีเต็มความกว้าง — เห็นเฉพาะแถบ 50% ที่ซีกของมัน (เช้า = ซ้าย · บ่าย = ขวา) ── */
 .fc-daygrid-event.half-day-event { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
-.fc-daygrid-event.half-day-event.vacation-event { border: 0 !important; }
-.fc-daygrid-event.half-day-event.vacation-event::before { left: -6px; }
-.fc-daygrid-event.half-day-event.half-pm.vacation-event::before { left: calc(50% - 6px); }
+.fc-daygrid-event.half-day-event.vacation-event { border: 0 !important; background-image: none !important; }   /* ครึ่งวัน: ลาย/กรอบอยู่ที่ .slot-bar (ซีกของมัน) */
 /* ── ประชุม: ป้ายไอคอนคน + ทรงแคปซูล (ลาพักผ่อนใช้กรอบประ จึงไม่ซ้ำกัน) ── */
 .meet-badge {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
   width: 18px; height: 18px; margin-right: 4px; vertical-align: -3px;
   border-radius: 9px; background: var(--white); color: var(--text);
 }
+.vac-badge {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 18px; height: 18px; margin-right: 4px; vertical-align: -3px;
+  border-radius: 5px; background: var(--white); color: var(--text);
+}
+/* ── ประชุม: แถบเต็มความกว้างของวันเสมอ · หลายบรรทัดไม่ตัดข้อความ · เวลาอยู่ในแถบ ── */
+.ev-bar.ev-meet {
+  width: 100%; box-sizing: border-box; border-radius: 12px; padding: 5px 9px 6px;
+  white-space: normal; word-break: break-word; line-height: 1.3; font-size: 14px; font-weight: 700;
+  box-shadow: 0 1px 3px rgba(26,23,20,.28), inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+}
+.ev-meet-head { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; }
+.ev-meet-head .meet-badge { margin: 0; }
+.ev-meet-time {
+  margin-left: auto; padding: 0 7px; border-radius: 9px; font-size: 12px; font-weight: 700;
+  font-variant-numeric: tabular-nums; background: color-mix(in srgb, currentColor 18%, transparent);
+}
+.ev-meet-body { margin-top: 2px; font-weight: 500; }
+.fc-daygrid-event.meeting-event:not(.half-day-event) { min-height: 30px !important; }
+.fc-daygrid-event.meeting-event:not(.half-day-event) .fc-event-main,
+.fc-daygrid-event.meeting-event:not(.half-day-event) .fc-event-title { white-space: normal; font-weight: 700; }
 .fc-daygrid-event.meeting-event:not(.half-day-event) { border-radius: 12px !important; }
 .fc-list-event.meeting-event .meet-badge { margin-right: 6px; vertical-align: -4px; }
 .cal-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 2px 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--text2); }
@@ -321,7 +333,12 @@ a { color: var(--primary); text-decoration: none; }
 .cal-legend .lg-split { width: 20px; height: 12px; border: 1.5px solid var(--text2); border-radius: 3px; box-sizing: border-box; }
 .cal-legend .lg-am { background: linear-gradient(90deg, var(--text2) 50%, transparent 50%); }
 .cal-legend .lg-pm { background: linear-gradient(90deg, transparent 50%, var(--text2) 50%); }
-.cal-legend .lg-vac { font-size: 13px; line-height: 1; }
+.cal-legend .lg-vac {
+  width: 20px; height: 12px; border-radius: 3px; box-sizing: border-box;
+  color: var(--white); background-color: var(--text2);
+  background-image: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 35%, transparent) 0 3px, transparent 3px 6px);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, currentColor 80%, transparent);
+}
 
 .fc-list-event.vacation-event .fc-list-event-dot { border-color: var(--amber) !important; }
 .fc-daygrid-event {

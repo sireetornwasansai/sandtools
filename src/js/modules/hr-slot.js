@@ -34,6 +34,13 @@ export function slotText(ep) {
  *  Only DOM styles are touched (never moved), so FullCalendar can re-render safely; call again after any (re)render or resize. */
 export function pairSlotRows(root) {
   if (!root) return;
+  // multi-day bars are absolutely positioned by FullCalendar: if it did not reserve their height, the week row ends under them and they cover the next week.
+  root.querySelectorAll('.fc-daygrid-day-events').forEach((c) => { c.style.minHeight = ''; });
+  root.querySelectorAll('.fc-daygrid-body tr').forEach((tr) => {
+    let need = 0;
+    tr.querySelectorAll('.fc-daygrid-event-harness-abs').forEach((a) => { const c = a.parentElement; need = Math.max(need, a.offsetHeight + (a.offsetTop || 0)); void c; });
+    if (need) tr.querySelectorAll('.fc-daygrid-day-events').forEach((c) => { c.style.minHeight = `${need + 4}px`; });
+  });
   root.querySelectorAll('.fc-daygrid-day-events').forEach((cell) => {
     const kids = [...cell.children];
     kids.forEach((k) => { k.style.order = ''; k.style.marginTop = ''; const b = k.querySelector('.slot-bar'); if (b) b.style.minHeight = ''; });

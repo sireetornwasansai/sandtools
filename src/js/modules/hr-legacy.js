@@ -41,6 +41,19 @@ function fcIsAfternoon(ep) {
   if (note.indexOf('เช้า') >= 0) return false;
   return !!(ep && ep.startTime) && String(ep.startTime) >= '12:00';
 }
+// ประชุมแสดงเต็มความกว้างของวันเสมอ (ไม่แบ่งซีกเช้า/บ่าย) — เวลาประชุมแสดงอยู่ในแถบแทน
+function fcSlot(ep) { return (ep && fcIsMeeting(ep.type)) ? '' : slotOf(ep); }
+// ประชุมขึ้นก่อนในทุกวัน (ใช้กับ eventOrder)
+function fcMeetFirst(a, b) { return (fcIsMeeting(b.type) ? 1 : 0) - (fcIsMeeting(a.type) ? 1 : 0); }
+// สีตัวอักษรบนแถบ: ขาวหรือเกือบดำ — เลือกตัวที่คอนทราสต์สูงกว่า (แถบสีอ่อนเช่นฟ้า/ชมพู/เหลืองอ่านไม่ออกเมื่อใช้ตัวอักษรขาว)
+function fcTextOn(hex) {
+  var h = String(hex || '').replace('#', ''); if (h.length === 3) h = h.replace(/./g, '$&$&');
+  var n = parseInt(h.slice(0, 6), 16); if (!/^[0-9a-f]{6,8}$/i.test(h) || isNaN(n)) return '#fff';
+  var ch = [n >> 16 & 255, n >> 8 & 255, n & 255].map(function(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  var L = 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  return L <= 0.28 ? '#fff' : '#1a1714';   // ขาวยังคงเป็นค่าตั้งต้น (คอนทราสต์ ≥ ~3.2:1) · สีอ่อนกว่านั้นใช้ตัวอักษรเกือบดำ
+}
+var VAC_BADGE = '<span class="vac-badge" title="ลาพักผ่อน" aria-hidden="true"><svg viewBox="0 0 16 16" width="13" height="13" focusable="false"><path d="M1.8 8.6a6.2 6.2 0 0 1 12.4 0Z" fill="currentColor"/><path d="M8 8.6v5.9M6 14.6h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>';
 var MEET_BADGE = '<span class="meet-badge" title="ประชุม" aria-hidden="true"><svg viewBox="0 0 16 16" width="13" height="13" focusable="false"><circle cx="5.4" cy="5" r="2.1" fill="currentColor"/><circle cx="11.1" cy="5.9" r="1.7" fill="currentColor"/><path d="M1.6 13.2c0-2.5 1.7-4 3.8-4s3.8 1.5 3.8 4M9.9 9.6c.5-.2 1-.3 1.4-.3 1.7 0 3.1 1.2 3.1 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>';
 var THAI_PROVINCES = [
   "กรุงเทพมหานคร","กระบี่","กาญจนบุรี","กาฬสินธุ์","กำแพงเพชร","ขอนแก่น","จันทบุรี","ฉะเชิงเทรา",
@@ -372,6 +385,7 @@ function renderCalendar() {
     slotMinTime: '07:00:00', slotMaxTime: '19:00:00',
     slotDuration: '00:30:00', slotLabelInterval: '01:00',
     allDaySlot: true, slotEventOverlap: true, eventMaxStack: 4,
+    eventOrder: [fcMeetFirst, 'start', '-duration', 'allDay', 'title'],   // ประชุมอยู่บนสุดของแต่ละวัน
     nowIndicator: true, eventMinHeight: 28,
     slotLabelFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
     slotLabelContent: function(arg){ return arg.text.replace('24:00','00:00'); },
@@ -394,7 +408,7 @@ function renderCalendar() {
       var provinceTag = (ep && ep.province) ? ' 📍' + esc(ep.province) : '';
       var missionTag  = (ep && ep.mission)  ? esc(ep.mission) : '';
       var isVacation  = ep && VACATION_TYPES.indexOf(ep.type) >= 0;
-      var typeLabel   = esc(isVacation ? '🌴 ' + (ep.type||'') : (ep.type||''));
+      var typeLabel   = esc(ep.type||'');
 
       if (isTimeGrid && !arg.event.allDay) {
         var fmt = { hour:'2-digit', minute:'2-digit', hour12:false };
@@ -402,23 +416,28 @@ function renderCalendar() {
         var es = arg.event.end   ? arg.event.end.toLocaleTimeString('th-TH',fmt)   : '';
         return { html: '<div style="position:relative;padding:3px 4px;font-size:0.8em;line-height:1.25;overflow:hidden;color:#fff;height:100%;display:flex;flex-direction:column;justify-content:center;">' +
           '<div style="font-size:9px;font-weight:700;opacity:0.85;">' + ss + (es ? ' – ' + es : '') + '</div>' +
-          '<div style="font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (fcIsMeeting(ep && ep.type) ? MEET_BADGE : '') + (name ? name + ' · ' : '') + '<span style="opacity:0.9;font-weight:' + (isVacation?'800':'400') + ';">' + typeLabel + '</span>' + (provinceTag ? '<span style="opacity:0.9;font-weight:400;">' + provinceTag + '</span>' : '') + '</div>' +
+          '<div style="font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (fcIsMeeting(ep && ep.type) ? MEET_BADGE : (isVacation ? VAC_BADGE : '')) + (name ? name + ' · ' : '') + '<span style="opacity:0.9;font-weight:' + (isVacation?'800':'400') + ';">' + typeLabel + '</span>' + (provinceTag ? '<span style="opacity:0.9;font-weight:400;">' + provinceTag + '</span>' : '') + '</div>' +
           (missionTag ? '<div style="font-size:9px;font-weight:400;opacity:0.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🎯 ' + missionTag + '</div>' : '') +
           '</div>' };
       }
       if (isMonth && !arg.event.allDay) {
-        var slot = slotOf(ep), isHalf = !!slot, isPM = slot === 'pm', isMeet = !!(ep && fcIsMeeting(ep.type));
+        var isMeet = !!(ep && fcIsMeeting(ep.type));
+        var slot = fcSlot(ep), isHalf = !!slot, isPM = slot === 'pm';
+        var color = hrSafeColor(arg.event.backgroundColor), fg = fcTextOn(color);
+        if (isMeet) {   // ประชุม = แถบเต็มวัน หลายบรรทัด ไม่ตัดข้อความ + เวลาประชุมอยู่ในแถบ
+          var mt = (ep.startTime && ep.endTime) ? String(ep.startTime).slice(0, 5) + '–' + String(ep.endTime).slice(0, 5) + ' น.' : '';
+          return { html: '<div class="ev-bar ev-meet" style="background-color:' + color + ';color:' + fg + ';">' +
+            '<div class="ev-meet-head">' + MEET_BADGE + '<span class="ev-meet-type">' + typeLabel + '</span>' + (mt ? '<span class="ev-meet-time">' + mt + '</span>' : '') + '</div>' +
+            '<div class="ev-meet-body">' + (name || '') + provinceTag + (missionTag ? ' — ' + missionTag : '') + '</div></div>' };
+        }
         var wStyle = isHalf ? 'width:50%;' : 'width:100%;';
         var mStyle = isPM ? 'margin-left:50%;' : '';
-        var half   = '';   // the side (left = morning · right = afternoon) already says it; the tooltip gives the hours
-        var rad    = isMeet ? '12px' : '3px', radius = isHalf ? (isPM ? '0 ' + rad + ' ' + rad + ' 0' : rad + ' 0 0 ' + rad) : rad;
-        var color  = hrSafeColor(arg.event.backgroundColor);
-        var vacStyle = isVacation ? 'outline:2px dashed rgba(255,253,249,0.9);outline-offset:-3px;font-weight:800;' : '';
+        var radius = isHalf ? (isPM ? '0 3px 3px 0' : '3px 0 0 3px') : '3px';
         var tip = isHalf ? ' title="' + esc((isPM ? 'ช่วงบ่าย ' : 'ช่วงเช้า ') + slotText(ep) + ' น. · ' + (ep.type || '') + ' · ' + (ep.name || '')) + '"' : '';
         var slotCss = isHalf ? 'white-space:normal;word-break:break-word;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;padding-top:1px;padding-bottom:1px;' : 'white-space:nowrap;text-overflow:ellipsis;';
-        return { html: '<div class="' + (isHalf ? 'slot-bar' : '') + '"' + tip + ' style="' + wStyle + mStyle + 'background:' + color +
-          ';color:#fff;border-radius:' + radius + ';padding:2px ' + (isMeet ? '8px 2px 3px' : '6px') + ';font-size:14px;font-weight:500;overflow:hidden;' + slotCss + 'box-sizing:border-box;' + vacStyle + '">' +
-          (isMeet ? MEET_BADGE : '') + typeLabel + ' · ' + (name||'') + half + provinceTag +
+        return { html: '<div class="ev-bar' + (isHalf ? ' slot-bar' : '') + (isVacation ? ' ev-vac' : '') + '"' + tip + ' style="' + wStyle + mStyle + 'background-color:' + color +
+          ';color:' + fg + ';border-radius:' + radius + ';padding:2px 6px;font-size:14px;font-weight:' + (isVacation ? '700' : '500') + ';overflow:hidden;' + slotCss + 'box-sizing:border-box;">' +
+          (isVacation ? VAC_BADGE : '') + typeLabel + ' · ' + (name||'') + provinceTag +
           (missionTag ? '<span style="opacity:0.85;font-weight:400;"> — ' + missionTag + '</span>' : '') + '</div>' };
       }
       return true;
@@ -460,7 +479,15 @@ function renderCalendar() {
           if (titleEl) titleEl.prepend(dot);
         }
       }
-      var slot = slotOf(ep);
+      if (info.view.type === 'dayGridMonth' && info.event.allDay) {   // แถบทั้งวัน (เนื้อหาเริ่มต้นของ FullCalendar): ตัวอักษรให้คอนทราสต์กับสีแถบ + ไอคอนลาพักผ่อน
+        var fg2 = fcTextOn(hrSafeColor(info.event.backgroundColor));
+        info.el.style.color = fg2; info.el.style.setProperty('--fc-event-text-color', fg2);
+        var bt = info.el.querySelector('.fc-event-title');
+        if (bt && ep && VACATION_TYPES.indexOf(ep.type) >= 0) bt.insertAdjacentHTML('afterbegin', VAC_BADGE);
+        else if (bt && ep && fcIsMeeting(ep.type)) bt.insertAdjacentHTML('afterbegin', MEET_BADGE);
+      }
+      if (info.el.querySelector('.ev-bar')) info.el.classList.add('has-ev-bar');   // แถบที่วาดเองข้างใน (เดือน/เวลา) — ลาย/กรอบวาดที่ .ev-bar ไม่ซ้ำที่กล่องนอก
+      var slot = fcSlot(ep);
       if (slot) {
         var pm = slot === 'pm';
         if (info.view.type === 'dayGridMonth') {   // month grid: the bar fills only its half of the day (morning = left · afternoon = right)
