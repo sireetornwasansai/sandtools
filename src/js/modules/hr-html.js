@@ -34,29 +34,29 @@ export const HR_HTML = `
     <div class="sidebar-section">
       <div class="sidebar-section-label">เมนูหลัก</div>
       <button class="nav-item active" id="nav-calendar" data-hr-click="showPanel('calendar')">
-        <span class="ni-icon">📅</span> ปฏิทิน
+        <span class="ni-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></span> ปฏิทิน
       </button>
       <button class="nav-item" id="nav-form" data-hr-click="showPanel('form')">
-        <span class="ni-icon">✏️</span> บันทึกรายการ
+        <span class="ni-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9a2.1 2.1 0 00-3-3L5 17z"/><path d="M14 8l3 3"/></svg></span> บันทึกรายการ
       </button>
       <button class="nav-item" id="nav-report" data-hr-click="showPanel('report')">
-        <span class="ni-icon">📊</span> รายงาน
+        <span class="ni-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 20V10M12 20V4M19 20v-7"/></svg></span> รายงาน
       </button>
       <button class="nav-item" id="nav-staff" data-hr-click="showPanel('staff')">
-        <span class="ni-icon">👥</span> จัดการพนักงาน
+        <span class="ni-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M16 5.2a3 3 0 010 5.6M18 14.8c1.8.7 3 2.4 3 5.2"/></svg></span> จัดการพนักงาน
       </button>
       <button class="nav-item" id="nav-holidays" data-hr-click="showPanel('holidays')">
-        <span class="ni-icon">🔴</span> จัดการวันหยุด
+        <span class="ni-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M10 13.5l4 4M14 13.5l-4 4"/></svg></span> จัดการวันหยุด
       </button>
     </div>
 
     <div class="sidebar-section">
       <div class="sidebar-section-label">เครื่องมือส่วนตัว (Dev)</div>
       <button class="nav-item" id="nav-dailylog" data-hr-click="showPanel('dailylog')">
-        <span class="ni-icon">📝</span> บันทึกประจำวัน
+        <span class="ni-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg></span> บันทึกประจำวัน
       </button>
       <button class="nav-item" id="nav-projects" data-hr-click="showPanel('projects')">
-        <span class="ni-icon">🗂️</span> โปรเจคที่ดูแล
+        <span class="ni-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.5 7.5a2 2 0 012-2h3.8l2 2.2h7.2a2 2 0 012 2v8.3a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/></svg></span> โปรเจคที่ดูแล
       </button>
     </div>
 
@@ -91,7 +91,7 @@ export const HR_HTML = `
 
     <div class="sidebar-setup">
       <button class="btn-setup" id="setupBtn" data-hr-click="runSetup()">
-        <span>⚙️</span> ตั้งค่าระบบ
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg> ตั้งค่าระบบ
       </button>
     </div>
   </aside>
@@ -108,9 +108,9 @@ export const HR_HTML = `
           <button class="view-pill-btn" id="vDay"   data-hr-click="changeView('timeGridDay')">วัน</button>
           <button class="view-pill-btn" id="vList"  data-hr-click="changeView('listWeek')">รายการ</button>
         </div>
-        <button class="btn-topbar primary" data-hr-click="showPanel('form')">+ บันทึก</button>
-        <button class="btn-topbar" data-hr-click="loadAll()" title="รีเฟรชข้อมูล" aria-label="รีเฟรชข้อมูล">🔄</button>
-        <button class="btn-topbar" data-hr-click="exportCSV()">⬇ Export</button>
+        <button class="btn-topbar primary" data-hr-click="showPanel('form')"><span class="btn-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>บันทึก</span></button>
+        <button class="btn-topbar" data-hr-click="loadAll()" title="รีเฟรชข้อมูล" aria-label="รีเฟรชข้อมูล"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 00-14.5-4M4 4v4h4"/><path d="M4 13a8 8 0 0014.5 4M20 20v-4h-4"/></svg></button>
+        <button class="btn-topbar" data-hr-click="exportCSV()"><span class="btn-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14"/></svg>Export</span></button>
       </div>
     </div>
 
@@ -125,14 +125,14 @@ export const HR_HTML = `
           <li><span class="lg-split lg-am" aria-hidden="true"></span>ช่วงเช้า (เช่น 08:00–12:00) อยู่ซีกซ้ายของวัน</li>
           <li><span class="lg-split lg-pm" aria-hidden="true"></span>ช่วงบ่าย (เช่น 13:00–16:00) อยู่ซีกขวาของวัน</li>
         </ul>
-        <p class="cal-tip">💡 แตะวันที่ในปฏิทินเพื่อเริ่มบันทึกรายการของวันนั้น · แตะรายการเพื่อดูรายละเอียดและไฟล์แนบ</p>
+        <p class="cal-tip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg> แตะวันที่ในปฏิทินเพื่อเริ่มบันทึกรายการของวันนั้น · แตะรายการเพื่อดูรายละเอียดและไฟล์แนบ</p>
       </div>
 
       <!-- FORM -->
       <div class="panel" id="formPanel">
         <div class="card">
           <div class="card-header">
-            <div class="card-header-icon">✏️</div>
+            <div class="card-header-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9a2.1 2.1 0 00-3-3L5 17z"/><path d="M14 8l3 3"/></svg></div>
             <div class="card-header-title">บันทึกรายการ</div>
           </div>
           <div class="card-body">
@@ -286,7 +286,7 @@ export const HR_HTML = `
 
         <div class="card" style="margin-top:16px;">
           <div class="card-header">
-            <div class="card-header-icon">🕒</div>
+            <div class="card-header-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
             <div class="card-header-title">รายการล่าสุด</div>
             <button class="btn-refresh-recent" data-hr-click="loadAll()" title="รีเฟรช" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:15px;opacity:0.6;">🔄</button>
           </div>
@@ -300,7 +300,7 @@ export const HR_HTML = `
       <div class="panel" id="staffPanel">
         <div class="card">
           <div class="card-header">
-            <div class="card-header-icon">➕</div>
+            <div class="card-header-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg></div>
             <div class="card-header-title">เพิ่มเจ้าหน้าที่</div>
           </div>
           <div class="card-body">
@@ -383,7 +383,7 @@ export const HR_HTML = `
                 <input class="form-input" type="text" id="rSearch" placeholder="ค้นหาชื่อ..." style="width:150px" data-hr-input="filterReportTable()">
               </div>
               <button class="btn-search" data-hr-click="loadReport()">🔍 ค้นหา</button>
-              <button class="btn-topbar" data-hr-click="exportCSV()" style="align-self:flex-end;height:38px">⬇ Export CSV</button>
+              <button class="btn-topbar" data-hr-click="exportCSV()" style="align-self:flex-end;height:38px"><span class="btn-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14"/></svg>Export</span> CSV</button>
             </div>
           </div>
         </div>
@@ -475,7 +475,7 @@ export const HR_HTML = `
             </button>
           </div>
           <div class="menu-wrap">
-            <button class="btn-topbar" data-hr-click="toggleMenu('dlogExportMenu')">⬇ Export</button>
+            <button class="btn-topbar" data-hr-click="toggleMenu('dlogExportMenu')"><span class="btn-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14"/></svg>Export</span></button>
             <div class="menu-dropdown" id="dlogExportMenu">
               <div class="menu-item" data-hr-click="exportDlogCSV(); closeAllMenus()">📄 Export CSV</div>
               <div class="menu-item" data-hr-click="copyDlogSummary(); closeAllMenus()">📋 คัดลอกสรุปข้อความ</div>
@@ -549,14 +549,14 @@ export const HR_HTML = `
             <button class="btn-topbar primary" data-hr-click="toggleProjAddForm()">
               ➕ เพิ่มโปรเจค
             </button>
-            <button class="btn-topbar" id="projViewToggleBtn" data-hr-click="toggleProjView()">📊 มุมมอง Timeline</button>
+            <button class="btn-topbar" id="projViewToggleBtn" data-hr-click="toggleProjView()"><span class="btn-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>มุมมอง Timeline</span></button>
           </div>
           <div style="display:flex;align-items:center;gap:10px">
             <div style="font-size:12px;color:var(--text3)">
               ติดตามสถานะและงานที่ต้องทำต่อของแต่ละเว็บไซต์
             </div>
             <div class="menu-wrap">
-              <button class="btn-topbar" data-hr-click="toggleMenu('projExportMenu')">⬇ Export</button>
+              <button class="btn-topbar" data-hr-click="toggleMenu('projExportMenu')"><span class="btn-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14"/></svg>Export</span></button>
               <div class="menu-dropdown" id="projExportMenu">
                 <div class="menu-item" data-hr-click="exportProjCSV(); closeAllMenus()">📄 Export CSV</div>
                 <div class="menu-item" data-hr-click="copyProjSummary(); closeAllMenus()">📋 คัดลอกสรุปข้อความ</div>

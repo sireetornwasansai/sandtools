@@ -405,7 +405,7 @@ function renderCalendar() {
       if (ep && ep.isHoliday) {
         return { html: '<div class="fc-event-title" style="font-size:10px;">' + esc(arg.event.title) + '</div>' };
       }
-      var provinceTag = (ep && ep.province) ? ' 📍' + esc(ep.province) : '';
+      var provinceTag = (ep && ep.province) ? ' <span class="ev-prov"><svg class="ic ic-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>' + esc(ep.province) + '</span>' : '';
       var missionTag  = (ep && ep.mission)  ? esc(ep.mission) : '';
       var isVacation  = ep && VACATION_TYPES.indexOf(ep.type) >= 0;
       var typeLabel   = esc(ep.type||'');
@@ -417,7 +417,7 @@ function renderCalendar() {
         return { html: '<div style="position:relative;padding:3px 4px;font-size:0.8em;line-height:1.25;overflow:hidden;color:#fff;height:100%;display:flex;flex-direction:column;justify-content:center;">' +
           '<div style="font-size:9px;font-weight:700;opacity:0.85;">' + ss + (es ? ' – ' + es : '') + '</div>' +
           '<div style="font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (fcIsMeeting(ep && ep.type) ? MEET_BADGE : (isVacation ? VAC_BADGE : '')) + (name ? name + ' · ' : '') + '<span style="opacity:0.9;font-weight:' + (isVacation?'800':'400') + ';">' + typeLabel + '</span>' + (provinceTag ? '<span style="opacity:0.9;font-weight:400;">' + provinceTag + '</span>' : '') + '</div>' +
-          (missionTag ? '<div style="font-size:9px;font-weight:400;opacity:0.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🎯 ' + missionTag + '</div>' : '') +
+          (missionTag ? '<div style="font-size:9px;font-weight:400;opacity:0.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">ภารกิจ: ' + missionTag + '</div>' : '') +
           '</div>' };
       }
       if (isMonth && !arg.event.allDay) {
@@ -559,10 +559,10 @@ function showPanel(name) {
   if (p) p.classList.add('active');
   if (n) n.classList.add('active');
   var titles = {
-    calendar:'📅 ปฏิทินการปฏิบัติงาน', form:'✏️ บันทึกรายการ',
-    staff:'👥 จัดการพนักงาน', report:'📊 รายงานประจำเดือน',
-    holidays:'🔴 จัดการวันหยุดราชการ',
-    dailylog:'📝 บันทึกประจำวัน', projects:'🗂️ โปรเจคที่ดูแล'
+    calendar:'ปฏิทินการปฏิบัติงาน', form:'บันทึกรายการ',
+    staff:'จัดการพนักงาน', report:'รายงานประจำเดือน',
+    holidays:'จัดการวันหยุดราชการ',
+    dailylog:'บันทึกประจำวัน', projects:'โปรเจคที่ดูแล'
   };
   $r.getElementById('panelTitle').textContent = titles[name] || '';
   var pill = $r.getElementById('calViewPill');
