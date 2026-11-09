@@ -1240,3 +1240,7 @@ input, select, textarea { caret-color: var(--primary); }
 
 @media (min-width: 761px) { .btn-setup .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } .btn-setup { padding: 0 10px; } }   /* icon-only beside the date jump; the label stays for screen readers + phones */
 @media (max-width: 900px) { .ev-bar.slot-bar { font-size: 12px !important; padding: 2px 5px !important; line-height: 1.25; } .ev-bar { font-size: 12.5px !important; } }   /* half-day bars are only half a (narrow) cell wide: the tooltip carries the full text */
+
+/* multi-day leave = one chip per working day; the pill says which day of the run it is */
+.ev-seg { margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; background: color-mix(in srgb, currentColor 20%, transparent); }
+.ev-bar.slot-bar { -webkit-line-clamp: 3 !important; }   /* a half-day bar is half a cell wide: allow a third line before cutting the text */

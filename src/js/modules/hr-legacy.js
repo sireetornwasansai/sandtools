@@ -305,11 +305,36 @@ function getHolidayLabelEvents() {
     };
   });
 }
+/** A leave / trip that spans several days becomes ONE chip PER WORKING DAY ("วันที่ 1/2").
+ *  FullCalendar draws a multi-day bar as an absolutely positioned layer on top of the day's normal stack; whenever the two disagree about heights
+ *  (fonts, wrapped text, half-day pairs) the bars slide over each other. One chip per day lives in the ordinary flow of its cell, so it can never overlap.
+ *  recordId stays the original row's, so click / edit / delete are unchanged. */
+function splitMultiDay(list) {
+  var out = [];
+  list.forEach(function(e) {
+    var ep = e.extendedProps;
+    if (!ep || ep.isHoliday || !ep.startDate || !ep.endDate || ep.endDate <= ep.startDate) { out.push(e); return; }
+    var days = [], d = new Date(ep.startDate + 'T00:00:00'), end = new Date(ep.endDate + 'T00:00:00');
+    for (; d <= end; d.setDate(d.getDate() + 1)) {
+      var w = d.getDay(); if (w === 0 || w === 6) continue;            // the calendar hides Sat/Sun
+      days.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'));
+    }
+    if (days.length < 2) { out.push(e); return; }
+    var st = String(ep.startTime || '08:00').slice(0, 5), et = String(ep.endTime || '16:30').slice(0, 5);
+    days.forEach(function(day, i) {
+      var seg = Object.assign({}, e, { id: e.id + '#' + day, start: day + 'T' + st + ':00', end: day + 'T' + et + ':00',
+        title: e.title + ' (วันที่ ' + (i + 1) + '/' + days.length + ')' });
+      seg.extendedProps = Object.assign({}, ep, { segIndex: i + 1, segCount: days.length });
+      out.push(seg);
+    });
+  });
+  return out;
+}
 function getFilteredEvents() {
   var combined = getHolidayEvents().concat(getHolidayLabelEvents());
-  if (deptFilter === 'all') return allEvents.concat(combined);
+  if (deptFilter === 'all') return splitMultiDay(allEvents).concat(combined);
   var deptName = DEPARTMENTS[deptFilter];
-  return allEvents.filter(function(e){ return e.extendedProps && e.extendedProps.department === deptName; }).concat(combined);
+  return splitMultiDay(allEvents.filter(function(e){ return e.extendedProps && e.extendedProps.department === deptName; })).concat(combined);
 }
 
 // ─────────────────────────────────────────────
@@ -438,6 +463,7 @@ function renderCalendar() {
         return { html: '<div class="ev-bar' + (isHalf ? ' slot-bar' : '') + (isVacation ? ' ev-vac' : '') + '"' + tip + ' style="' + wStyle + mStyle + 'background-color:' + color +
           ';color:' + fg + ';border-radius:' + radius + ';padding:2px 6px;font-size:14px;font-weight:' + (isVacation ? '700' : '500') + ';overflow:hidden;' + slotCss + 'box-sizing:border-box;">' +
           (isVacation ? VAC_BADGE : '') + typeLabel + ' · ' + (name||'') + provinceTag +
+          (ep.segCount ? '<span class="ev-seg">' + ep.segIndex + '/' + ep.segCount + '</span>' : '') +
           (missionTag ? '<span style="opacity:0.85;font-weight:400;"> — ' + missionTag + '</span>' : '') + '</div>' };
       }
       return true;
