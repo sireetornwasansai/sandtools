@@ -90,8 +90,8 @@ export const HR_HTML = `
     </div>
 
     <div class="sidebar-setup">
-      <button class="btn-setup" id="setupBtn" data-hr-click="runSetup()">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg> ตั้งค่าระบบ
+      <button class="btn-setup" id="setupBtn" title="ตั้งค่าระบบ" aria-label="ตั้งค่าระบบ" data-hr-click="runSetup()">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg> <span class="lbl">ตั้งค่าระบบ</span>
       </button>
     </div>
   </aside>
@@ -99,7 +99,7 @@ export const HR_HTML = `
   <main class="main">
     <div class="topbar">
       <div class="topbar-left">
-        <div class="topbar-title" id="panelTitle">📅 ปฏิทินการปฏิบัติงาน</div>
+        <div class="topbar-title" id="panelTitle">ปฏิทินการปฏิบัติงาน</div>
       </div>
       <div class="topbar-right">
         <div class="view-pill" id="calViewPill">

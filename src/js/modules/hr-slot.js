@@ -43,7 +43,9 @@ export function pairSlotRows(root) {
   });
   root.querySelectorAll('.fc-daygrid-day-events').forEach((cell) => {
     const kids = [...cell.children];
-    kids.forEach((k) => { k.style.order = ''; k.style.marginTop = ''; const b = k.querySelector('.slot-bar'); if (b) b.style.minHeight = ''; });
+    // FullCalendar reserves room under a multi-day (absolute) bar with an inline margin-top on the first harness of the day → remember it and put it back,
+    // never blank it (blanking it made the next day's bars slide up under the multi-day bar).
+    kids.forEach((k) => { if (k.dataset.fcMt === undefined) k.dataset.fcMt = k.style.marginTop || ''; k.style.order = ''; k.style.marginTop = k.dataset.fcMt; const b = k.querySelector('.slot-bar'); if (b) b.style.minHeight = ''; });
     cell.classList.remove('has-slot-pair');
     const first = (cls) => kids.find((k) => k.querySelector && k.querySelector(`.${cls}`));
     const am = first('slot-am'); const pm = first('slot-pm');
@@ -55,6 +57,6 @@ export function pairSlotRows(root) {
     const a = lead.querySelector('.slot-bar'); const b = tail.querySelector('.slot-bar');
     const h = Math.max(lead.offsetHeight, tail.offsetHeight);
     if (a) a.style.minHeight = `${h}px`; if (b) b.style.minHeight = `${h}px`;
-    tail.style.marginTop = `${-lead.offsetHeight}px`;
+    tail.style.marginTop = `${-lead.offsetHeight + (parseFloat(tail.dataset.fcMt) || 0)}px`;
   });
 }

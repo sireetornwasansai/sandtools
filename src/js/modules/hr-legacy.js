@@ -379,7 +379,7 @@ function renderCalendar() {
   function schedulePair() { clearTimeout(pairTimer); pairTimer = setTimeout(function() { pairSlotRows(calEl); }, 40); }
   calendar = new FullCalendar.Calendar(calEl, {
     initialView: isMobile ? 'listWeek' : 'dayGridMonth',
-    height: isMobile ? 'auto' : 'max(560px, calc(100vh - 360px))',
+    height: 'auto',   // rows grow with their events (a fixed height clipped the last week and forced inner scrolling)
     locale: 'th', firstDay: 1, hiddenDays: [0, 6],
     events: events,
     slotMinTime: '07:00:00', slotMaxTime: '19:00:00',

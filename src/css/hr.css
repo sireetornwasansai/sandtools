@@ -1162,7 +1162,8 @@ input, select, textarea { caret-color: var(--primary); }
 .sidebar > .sidebar-section:nth-of-type(1) { order: 1; }                 /* main navigation */
 .sidebar > .sidebar-section:nth-of-type(2) { order: 2; }                 /* personal tools */
 .sidebar-datejump { order: 3; }
-.sidebar-setup { order: 3; }
+.sidebar-setup { order: 7; margin-left: 0; }
+.btn-setup { white-space: nowrap; }
 .dept-filter { order: 5; }
 .sidebar-stats { order: 6; margin-left: auto; align-items: center; gap: 0; }
 .sidebar-datejump input[type="date"] { min-height: 36px; }
@@ -1198,7 +1199,7 @@ input, select, textarea { caret-color: var(--primary); }
 .fc .fc-day-today { background: color-mix(in srgb, var(--primary) 5%, var(--white)) !important; }
 .fc .fc-day-today .fc-daygrid-day-number { background: var(--primary); color: var(--sand-primary-contrast, #fff) !important; }
 .fc .fc-daygrid-day-events { padding: 0 4px 4px; }
-.fc .fc-daygrid-event-harness { margin-top: 3px !important; }
+/* NB: never set margin/height on .fc-daygrid-event-harness — FullCalendar reserves room for multi-day bars with an inline margin-top there */
 .fc .fc-daygrid-more-link { font-size: 12px; font-weight: 600; color: var(--primary); padding: 2px 6px; }
 /* events: one size, one radius; the colour carries the meaning, text stays readable */
 .fc-daygrid-event { font-size: 13px !important; line-height: 1.35; transition: filter .12s, transform .12s; }
@@ -1230,3 +1231,12 @@ input, select, textarea { caret-color: var(--primary); }
 }
 @media (pointer: coarse) { .nav-item, .btn-topbar, .dept-btn, .fc .fc-button, .btn-setup { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .fc-daygrid-event { transition: none; } }
+
+/* control bar: date jump + setup stay on the first row — navigation shrinks instead of wrapping */
+.sidebar-datejump input[type="date"] { width: 148px; }
+.sidebar > .sidebar-section { flex: 0 1 auto; }
+@media (min-width: 1000px) { .sidebar-datejump { margin-left: auto; } .sidebar .nav-item { padding: 6px 10px; } }
+#calendar { min-height: 0; }
+
+@media (min-width: 761px) { .btn-setup .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } .btn-setup { padding: 0 10px; } }   /* icon-only beside the date jump; the label stays for screen readers + phones */
+@media (max-width: 900px) { .ev-bar.slot-bar { font-size: 12px !important; padding: 2px 5px !important; line-height: 1.25; } .ev-bar { font-size: 12.5px !important; } }   /* half-day bars are only half a (narrow) cell wide: the tooltip carries the full text */
