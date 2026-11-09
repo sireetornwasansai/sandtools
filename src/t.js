@@ -6,6 +6,11 @@
  *      sandView('submit')            → counted as the page "/#/submit" (letters, digits, - _ only; the real address is ignored)
  *      sandRole('staff')             → who is using it: 'admin' | 'head' | 'officer' | 'committee' | 'researcher' | 'user' (anything else = not stated). Call it once after login. Only this word is sent — never a name or an id.
  *      sandView('review', 'admin')   → both at once
+ *  Monitor (#/monitor ในแอป SAND) — ห้ามใส่ข้อมูลผู้ป่วย/ข้อมูลส่วนบุคคลในข้อความ (ระบบตัดอีเมล เบอร์ เลขยาว query string ให้อีกชั้น)
+ *      sandLog('warn', 'ส่งฟอร์มช้า', {step: 'upload'})   → บันทึก 1 บรรทัด · 'info' | 'warn' | 'error'
+ *      var done = sandTask('ส่งหนังสือเวียน'); … done();  /  done(false, 'เหตุผล')   → งานสำเร็จ/ล้มเหลว พร้อมเวลาที่ใช้
+ *      sandTask('ซิงก์ข้อมูล', 'fail', 'เหตุผล')            → บันทึกผลตรง ๆ ('start' | 'ok' | 'fail')
+ *  จับ error เอง: error หน้าเว็บ · promise ที่ไม่ถูกจับ · fetch ที่ตอบ 5xx/เชื่อมต่อไม่ได้ (ปิดด้วย data-errors="off")
  */
 (function () {
   'use strict';
@@ -33,10 +38,47 @@
     var r = d.createElement('a'); r.href = d.referrer;
     return r.hostname && r.hostname !== l.hostname ? r.hostname.replace(/^www\./, '') : '';
   }
-  function send(type, name, first, vp) {
-    var body = JSON.stringify({ k: key, t: type, p: vp || path(), o: role, e: name || '', r: first ? ref() : '', u: first ? utm() : '', w: w.innerWidth || 0, l: n.language || '' });
+  function post(body) {
     try { if (n.sendBeacon && n.sendBeacon(api, new Blob([body], { type: 'text/plain' }))) return; } catch (e) { /* fall through */ }
     try { fetch(api, { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain' }, keepalive: true, mode: 'no-cors', credentials: 'omit' }); } catch (e) { /* ignore */ }
+  }
+  function send(type, name, first, vp) {
+    post(JSON.stringify({ k: key, t: type, p: vp || path(), o: role, e: name || '', r: first ? ref() : '', u: first ? utm() : '', w: w.innerWidth || 0, l: n.language || '' }));
+  }
+
+  /* ---- Monitor: log lines. At most 40 per page load; the same automatic error is sent once. ---- */
+  var LEVELS = ['info', 'warn', 'error']; var sentLog = 0; var seenErr = {};
+  function clip(v, max) { return String(v == null ? '' : v).replace(/https?:\/\/[^\s"'<>)\]]+/gi, function (u) { return u.replace(/[?#].*$/, ''); }).replace(/\s+/g, ' ').slice(0, max); }
+  function sendLog(kind, level, name, msg, status, ms, extra) {
+    if (++sentLog > 40) return;
+    var x = extra == null ? '' : typeof extra === 'string' ? extra : (function () { try { return JSON.stringify(extra); } catch (e) { return ''; } })();
+    post(JSON.stringify({ k: key, t: 'lg', c: kind, v: level, e: clip(name, 60), m: clip(msg, 300), s: status || '', d: ms || 0, x: clip(x, 300), p: last || path(), o: role }));
+  }
+  function autoErr(kind, level, where, msg) {
+    var id = where + '|' + msg; if (seenErr[id] || d.visibilityState === 'hidden') return;
+    seenErr[id] = 1; sendLog(kind, level, where, msg, '', 0, '');
+  }
+  if (s.getAttribute('data-errors') !== 'off') {
+    w.addEventListener('error', function (e) {
+      if (!e || (e.target && e.target !== w)) return;
+      autoErr('er', 'error', (e.filename ? String(e.filename).split('/').pop().split('?')[0] : 'error') + (e.lineno ? ':' + e.lineno : ''), e.message || 'Script error');
+    });
+    w.addEventListener('unhandledrejection', function (e) { var r = e && e.reason; autoErr('er', 'error', 'promise', r && r.message ? r.message : String(r || 'Promise rejected')); });
+    if (typeof w.fetch === 'function') {
+      var nativeFetch = w.fetch;
+      w.fetch = function (input, init) {
+        var u = ''; var m = (init && init.method) || (input && input.method) || 'GET';
+        try { u = typeof input === 'string' ? input : (input && input.url) || String(input || ''); } catch (e) { u = ''; }
+        var own = u.indexOf(api) === 0;
+        return nativeFetch.apply(w, arguments).then(function (res) {
+          if (!own && res && res.status >= 500) autoErr('er', 'error', 'fetch', 'HTTP ' + res.status + ' ' + m + ' ' + clip(u, 120));
+          return res;
+        }, function (err) {
+          if (!own && !(err && err.name === 'AbortError')) autoErr('lg', 'warn', 'fetch', 'เชื่อมต่อไม่ได้ ' + m + ' ' + clip(u, 120));
+          throw err;
+        });
+      };
+    }
   }
 
   var last = '', firstView = true;
@@ -54,6 +96,13 @@
   w.addEventListener('popstate', function () { setTimeout(view, 0); });
   w.addEventListener('hashchange', function () { setTimeout(view, 0); });
   w.sandTrack = function (name) { if (name) send('ev', String(name).slice(0, 60), false); };
+  w.sandLog = function (level, message, data) { if (message) sendLog('lg', LEVELS.indexOf(level) >= 0 ? level : 'info', '', message, '', 0, data); };
+  w.sandTask = function (name, status, info) {
+    name = String(name || '').slice(0, 60); if (!name) return function () {};
+    if (status === 'start' || status === 'ok' || status === 'fail') { sendLog('tk', status === 'fail' ? 'error' : 'info', name, typeof info === 'string' ? info : '', status, 0, ''); return function () {}; }
+    var t0 = Date.now();
+    return function (ok, why) { var fail = ok === false; sendLog('tk', fail ? 'error' : 'info', name, why ? String(why) : '', fail ? 'fail' : 'ok', Date.now() - t0, ''); };
+  };
   w.sandRole = function (r) { r = String(r || '').toLowerCase(); role = ROLE_OK.indexOf(r) >= 0 ? r : r === 'staff' ? 'user' : ''; };
   w.sandView = function (name, r) { if (r !== undefined) w.sandRole(r); var n = String(name || '').toLowerCase().replace(/[^a-z0-9_\-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); if (!n) return; var p = '/#/' + n; if (p === last) return; last = p; send('pv', '', firstView, p); firstView = false; };
   if (d.readyState === 'loading') d.addEventListener('DOMContentLoaded', start); else start();

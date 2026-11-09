@@ -5,7 +5,7 @@ import { ICONS } from './core/icons.js';
 import { config, APP_NAME } from './core/config.js';
 import { getSettings, setSettings, addRecent } from './core/store.js';
 import { recording } from './core/logger.js';
-import { TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
+import { TOOLS, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, MONITOR_ROUTE, INBOX_ROUTE, SARABAN_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, HISTORY_ROUTE, HOME_ROUTE, SETTINGS_ROUTE, parseHash, findRoute, navigate } from './core/routes.js';
 import { buildBottomNav, initMobileHelpers } from './core/mobile-nav.js';
 import { openPalette } from './core/palette.js';
 import { backendConfigured, warmBackend } from './core/api.js';
@@ -73,7 +73,7 @@ function buildShell() {
     primary: primary.filter(Boolean),
     sections: [
       { title: 'เครื่องมือ', routes: [HOME_ROUTE, ...TOOLS] },
-      { title: 'ข้อมูลของฉัน', routes: [...(full ? [SARABAN_ROUTE, INBOX_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE] : []), ...(recording() ? [HISTORY_ROUTE] : [])] },
+      { title: 'ข้อมูลของฉัน', routes: [...(full ? [SARABAN_ROUTE, INBOX_ROUTE, HR_ROUTE, LEAVE_ROUTE, HRLINE_ROUTE, LIBRARY_ROUTE, LINKS_ROUTE, QRS_ROUTE, PROJECTS_ROUTE, MONITOR_ROUTE] : []), ...(recording() ? [HISTORY_ROUTE] : [])] },
       { title: 'ระบบ', routes: [SETTINGS_ROUTE] },
     ],
   });
@@ -84,7 +84,7 @@ function buildShell() {
     h('nav', { class: 'sidebar', 'aria-label': 'เมนูหลัก' },
       h('div', { class: 'nav-group' }, navLink(HOME_ROUTE), h('div', { class: 'nav-title' }, 'เครื่องมือ'), ...TOOLS.map((t) => navLink(t)),
         ...((backendConfigured() && user) || recording() ? [h('div', { class: 'nav-title' }, 'ข้อมูลของฉัน')] : []),
-        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE), navLink(LINKS_ROUTE), navLink(QRS_ROUTE), navLink(PROJECTS_ROUTE), navLink(INBOX_ROUTE), navLink(SARABAN_ROUTE), navLink(HR_ROUTE), navLink(LEAVE_ROUTE), navLink(HRLINE_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
+        ...(backendConfigured() && user ? [navLink(LIBRARY_ROUTE), navLink(LINKS_ROUTE), navLink(QRS_ROUTE), navLink(PROJECTS_ROUTE), navLink(MONITOR_ROUTE), navLink(INBOX_ROUTE), navLink(SARABAN_ROUTE), navLink(HR_ROUTE), navLink(LEAVE_ROUTE), navLink(HRLINE_ROUTE)] : []), ...(recording() ? [navLink(HISTORY_ROUTE)] : [])),
       h('div', { class: 'nav-group nav-bottom' }, navLink(SETTINGS_ROUTE), collapseBtn)),
     (main = h('main', { id: 'main', class: 'main', tabindex: '-1' })),
     mobileNav.nav);

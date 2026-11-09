@@ -1,0 +1,19 @@
+SAND Tools — อัปเดต "เฝ้าระวังระบบ" (#/monitor)
+วางทับ/เพิ่มไฟล์ตามโครงสร้างนี้ในรากของ repo (sandtools-main) ได้เลย:
+
+  api/collect.js                        แก้
+  gas/Analytics.gs                      แก้   → วางใน Apps Script แทน Analytics.gs เดิม
+  src/t.js                              แก้
+  src/js/core/routes.js                 แก้
+  src/js/main.js                        แก้
+  src/js/modules/monitor.js             ใหม่
+  src/js/modules/monitor-engine.js      ใหม่
+  src/css/monitor.css                   ใหม่
+  tests/gas-monitor.test.mjs            ใหม่
+  tests/unit/monitor-engine.test.mjs    ใหม่
+  package.json                          แก้ (เพิ่ม gas-monitor.test.mjs ในสคริปต์ test)
+
+หลังวาง:
+  1. Apps Script: วาง Analytics.gs → รัน setupAnalytics 1 ครั้ง → Deploy เวอร์ชันใหม่
+  2. git add . && git commit -m "feat: monitor page" && git push  (Vercel build เอง)
+  3. npm test  (ควรผ่านทั้งหมด)

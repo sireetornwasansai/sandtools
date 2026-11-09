@@ -8,7 +8,8 @@
  * Public part (no login, secret-protected):
  *   POST {action:"hit", secret, …}     one page view / event — only the edge function (which holds EDGE_SECRET) may call it
  * Signed-in part:
- *   POST {action:"projects", session, op: list | names | create | update | delete | stats}
+ *   POST {action:"projects", session, op: list | names | create | update | delete | stats | monitor | feed | issues | around}
+ *   monitor / feed / issues / around = หน้า #/monitor (ดูท้ายไฟล์ "Monitor")
  *
  * Sheet tabs:  Sites (one row per project)  ·  Hits (one row per page view or event, newest at the bottom)
  *
@@ -52,7 +53,7 @@ function anaFind(key) {
 function anaPublic(s, x) {
   x = x || {};
   return { key: s.key, name: s.name, url: s.url, domains: s.domains, owner: s.owner, created: s.created, status: s.status, note: s.note, tags: s.tags, track: s.track,
-    pv7: x.pv7 || 0, uv7: x.uv7 || 0, last: x.last || 0, links: x.links || 0, linkClicks: x.linkClicks || 0, qrs: x.qrs || 0 };
+    pv7: x.pv7 || 0, uv7: x.uv7 || 0, last: x.last || 0, links: x.links || 0, linkClicks: x.linkClicks || 0, qrs: x.qrs || 0, err24: x.err24 || 0, health: x.health || '' };
 }
 function anaUncache(key) { try { CacheService.getScriptCache().remove('as:' + key); } catch (x) { /* ignore */ } }
 function anaLog(u, op, key, extra) {
@@ -108,6 +109,7 @@ function anaHit(b) {
   var rk = 'ar:' + key + ':' + Math.floor(Date.now() / 60000), n = Number(cache.get(rk) || 0) + 1;
   cache.put(rk, String(n), 120);
   if (n > intProp('ANA_RATE_PER_MIN', 300)) return { ok: false, reason: 'rate' };
+  if (b.t === 'lg') return anaEventHit(key, b);   // log / error / task → Events tab (Monitor section)
   var type = b.t === 'ev' ? 'ev' : 'pv';
   var name = type === 'ev' ? anaSmall(b.e, 60) : anaSmall(b.p, 200) || '/';
   if (!name) return { ok: false };
@@ -154,6 +156,7 @@ function anaFlushJob() { try { anaFlush(); } catch (x) { console.error('anaFlush
 function anaPruneJob() {
   try {
     anaFlush();
+    try { anaPruneEvents(); } catch (pe) { console.error('anaPruneEvents ' + pe); }
     var sh = sheetTab('Hits', ANA_HIT_HEADERS), last = sh.getLastRow();
     if (last < 2) return;
     var cutoff = Date.now() - intProp('ANA_RETENTION_DAYS', 400) * 86400000, ts = sh.getRange(2, 1, last - 1, 1).getValues(), n = 0;
@@ -340,6 +343,10 @@ function projects(b) {
     case 'update': return anaUpdate(sc, u, b);
     case 'delete': return anaDelete(sc, u, b);
     case 'stats':  return anaStats(anaOwned(sc, b.key), b.days);
+    case 'monitor': return anaMonitor(sc);
+    case 'feed':   return anaFeed(sc, b);
+    case 'issues': return anaIssues(sc, b);
+    case 'around': return anaAround(sc, b);
     case 'replay': return simReplay(sc, b);   // 3D plan: replay of a real day (below)
     case 'wings':  return simWings(sc, b);    // 3D plan: pages of every system in one call (below)
     case 'floor':  return simFloor(sc, b);    // 3D plan: every project's totals + hourly profile in ONE call (below)
@@ -360,7 +367,8 @@ function anaList(sc) {
   var links = lnkAll().filter(function (l) { return l.project && keys[l.project] && l.status !== 'deleted'; }), only = {};
   links.forEach(function (l) { only[l.code] = l.project; keys[l.project].links++; if (l.kind !== 'link') keys[l.project].qrs++; });
   if (links.length) lnkClicks(only).forEach(function (c) { if (!c.bot) keys[only[c.code]].linkClicks++; });
-  return { admin: sc.admin, base: lnkBase(), items: mine.map(function (s) { var a = keys[s.key]; return anaPublic(s, { pv7: a.pv7, uv7: Object.keys(a.uvd).length, last: a.last, links: a.links, linkClicks: a.linkClicks, qrs: a.qrs }); })
+  var pr = {}, hl = {}; try { pr = anaProblems(keys, Date.now()); hl = anaHealthAll(); } catch (mx) { console.error('anaList monitor ' + mx); }   // bonus: never break the list
+  return { admin: sc.admin, base: lnkBase(), items: mine.map(function (s) { var a = keys[s.key]; return anaPublic(s, { pv7: a.pv7, uv7: Object.keys(a.uvd).length, last: a.last, links: a.links, linkClicks: a.linkClicks, qrs: a.qrs, err24: pr[s.key] ? pr[s.key].err24 : 0, health: hl[s.key] ? hl[s.key].state : '' }); })
     .sort(function (x, y) { return x.created < y.created ? 1 : -1; }) };
 }
 
@@ -418,21 +426,25 @@ function anaDelete(sc, u, b) {
 
 /** Run ONCE from the editor: creates the tabs and the triggers (flush every minute, prune every night). Safe to run again. */
 function setupAnalytics() {
-  var sites = sheetTab('Sites', ANA_SITE_HEADERS), hits = sheetTab('Hits', ANA_HIT_HEADERS);
-  [[sites, ANA_SITE_HEADERS, [110, 220, 300, 260, 200, 150, 80, 260, 160, 80], '#3758f9'], [hits, ANA_HIT_HEADERS, [160, 110, 60, 300, 160, 70, 90, 110, 110, 130, 70, 100, 50], '#c2410c']].forEach(function (t) {
+  var sites = sheetTab('Sites', ANA_SITE_HEADERS), hits = sheetTab('Hits', ANA_HIT_HEADERS), events = sheetTab('Events', ANA_EVT_HEADERS), health = sheetTab('Health', ANA_HEALTH_HEADERS);
+  [[sites, ANA_SITE_HEADERS, [110, 220, 300, 260, 200, 150, 80, 260, 160, 80], '#3758f9'], [hits, ANA_HIT_HEADERS, [160, 110, 60, 300, 160, 70, 90, 110, 110, 130, 70, 100, 50], '#c2410c'],
+    [events, ANA_EVT_HEADERS, [150, 110, 60, 70, 160, 320, 70, 90, 200, 90, 130, 80, 110, 110, 260], '#be123c'], [health, ANA_HEALTH_HEADERS, [110, 80, 100, 110, 150, 150, 100], '#15803d']].forEach(function (t) {
     var sh = t[0];
     sh.getRange(1, 1, 1, t[1].length).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e');
     sh.setFrozenRows(1); t[2].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); }); sh.setTabColor(t[3]);
   });
   sites.getRange(2, 1, Math.max(sites.getMaxRows() - 1, 1), 4).setNumberFormat('@');
   hits.getRange(2, 1, Math.max(hits.getMaxRows() - 1, 1), 1).setNumberFormat('0');
+  events.getRange(2, 1, Math.max(events.getMaxRows() - 1, 1), 1).setNumberFormat('0');
+  health.getRange(2, 5, Math.max(health.getMaxRows() - 1, 1), 2).setNumberFormat('0');
   var links = sheetTab('Links', LNK_LINK_HEADERS);
   links.getRange(1, 12, 1, 7).setValues([['โครงการ', 'ชนิด', 'ข้อมูล QR', 'ที่มา', 'ลิงก์ย่อ (URL)', 'รูป QR (Drive id)', 'รูป QR (URL)']]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#0f5c9e'); links.setColumnWidth(12, 110);
-  ScriptApp.getProjectTriggers().forEach(function (t) { var f = t.getHandlerFunction(); if (f === 'anaFlushJob' || f === 'anaPruneJob') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) { var f = t.getHandlerFunction(); if (f === 'anaFlushJob' || f === 'anaPruneJob' || f === 'anaPingJob') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('anaFlushJob').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('anaPruneJob').timeBased().everyDays(1).atHour(3).create();
+  ScriptApp.newTrigger('anaPingJob').timeBased().everyMinutes(10).create();   // uptime check (off: Script property ANA_PING = off)
   if (!prop('EDGE_SECRET')) setupLinks();
-  console.log('พร้อมใช้งาน — แท็บ Sites, Hits และทริกเกอร์เขียนข้อมูลทุกนาที/ล้างข้อมูลเก่าทุกคืนถูกสร้างแล้ว\nอย่าลืมตั้ง SAND_EDGE_SECRET ใน Vercel ให้เท่ากับ EDGE_SECRET (ดูได้ใน Project Settings → Script properties)');
+  console.log('พร้อมใช้งาน — แท็บ Sites, Hits, Events, Health และทริกเกอร์เขียนข้อมูลทุกนาที/ตรวจสถานะเว็บทุก 10 นาที/ล้างข้อมูลเก่าทุกคืนถูกสร้างแล้ว\nอย่าลืมตั้ง SAND_EDGE_SECRET ใน Vercel ให้เท่ากับ EDGE_SECRET (ดูได้ใน Project Settings → Script properties)');
 }
 
 /* ====================================================================================================================
@@ -649,4 +661,269 @@ function simFloor(sc, b) {
   var out = { days: days, total: sites.length, generated: now, sites: sites };
   simCachePut(ck, out, 60);
   return out;
+}
+
+/* ====================================================================================================================
+ * Monitor — event log · task log · uptime of every project  (หน้า #/monitor)
+ * ==================================================================================================================== */
+
+/**
+ * ที่มาของข้อมูล (ชีตเดียวกัน ไม่ต้องมีเซิร์ฟเวอร์เพิ่ม):
+ *   Hits    pv = เปิดหน้า · ev = เหตุการณ์ผู้ใช้ (sandTrack)                       (มีอยู่เดิม)
+ *   Events  er = ข้อผิดพลาดที่ t.js จับเอง · lg = บันทึก (sandLog) · tk = งาน (sandTask) · hc = ตรวจสถานะเว็บ (ล่ม/กลับมา)
+ *   Health  สถานะล่าสุดของแต่ละเว็บ (แถวละโครงการ) — เขียนโดย anaPingJob ทุก 10 นาที
+ * ความเป็นส่วนตัว: ข้อความทุกบรรทัดผ่าน anaScrub (ตัด query string, อีเมล, เบอร์, เลขยาว ≥ 7 หลัก, โทเคน) · ไม่ส่ง hash ผู้เข้าชมออกไป (ส่งแค่ 4 ตัวแรก)
+ * Script properties (ไม่บังคับ): ANA_EVENT_RATE_PER_MIN (120) · ANA_EVENT_RETENTION_DAYS (90) · ANA_PING (off) · ANA_PING_MAX (40)
+ */
+
+var ANA_EVT_HEADERS = ['เวลา', 'รหัสไซต์', 'ชนิด', 'ระดับ', 'ชื่อ / งาน', 'ข้อความ', 'สถานะ', 'ใช้เวลา (ms)', 'หน้า', 'กลุ่ม (fp)', 'ผู้เข้าชม (hash รายวัน)', 'อุปกรณ์', 'เบราว์เซอร์', 'ระบบ', 'ข้อมูลเพิ่ม'];
+var ANA_HEALTH_HEADERS = ['รหัสไซต์', 'สถานะ', 'รหัสตอบกลับ', 'เวลาตอบ (ms)', 'ตรวจล่าสุด', 'เริ่มสถานะนี้', 'ล้มเหลวติดกัน'];
+var ANA_EVT_SCAN_ROWS = 30000;
+var ANA_FEED_KINDS = ['er', 'lg', 'tk', 'hc', 'ev', 'pv'];
+var ANA_LEVELS = ['info', 'warn', 'error'];
+var ANA_PING_NAME = 'ตรวจสถานะเว็บ';
+
+function anaScrub(v, max) {
+  return String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/https?:\/\/[^\s"'<>)\]]+/gi, function (u) { return u.replace(/[?#].*$/, ''); })
+    .replace(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)+/g, '[อีเมล]')
+    .replace(/\b0\d{1,2}[- ]?\d{3}[- ]?\d{4}\b/g, '[เบอร์]')
+    .replace(/\b\d-\d{4}-\d{5}-\d{2}-\d\b/g, '[เลข]')
+    .replace(/\b\d{7,}\b/g, '[เลข]')
+    .replace(/\b[A-Za-z0-9_\-]{28,}\b/g, '[รหัส]')
+    .replace(/\s+/g, ' ').trim().slice(0, max || 300);
+}
+/** Same problem → same short code (numbers / placeholders ignored). */
+function anaFp(kind, name, msg) {
+  var s = kind + '|' + String(name || '').toLowerCase() + '|' + String(msg || '').toLowerCase().replace(/\[[^\]]*\]/g, '').replace(/\d+/g, '#').replace(/\s+/g, ' ').slice(0, 120), h = 5381;
+  for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+function anaEvtRow(t, key, kind, level, name, msg, status, ms, page, fp, vid, device, browser, os, extra) {
+  return [t, key, kind, level, cell(name, 60), cell(msg, 300), status, ms, cell(page, 200), fp, vid, device, browser, os, cell(extra, 300)];
+}
+function anaPick(list, allowed, dflt) {
+  var a = Array.isArray(list) ? list : String(list || '').split(/[,\s]+/), out = [];
+  a.forEach(function (k) { if (allowed.indexOf(k) >= 0 && out.indexOf(k) < 0) out.push(k); });
+  return out.length ? out : dflt;
+}
+function anaNum(v, dflt) { var n = Number(v); return isFinite(n) && n > 0 ? n : dflt; }
+
+/** One log / error / task line (called from anaHit: secret, project switch and domain allow-list already checked). */
+function anaEventHit(key, b) {
+  var cache = CacheService.getScriptCache(), min = Math.floor(Date.now() / 60000);
+  var rk = 'ae:' + key + ':' + min, n = Number(cache.get(rk) || 0) + 1;
+  cache.put(rk, String(n), 120);
+  if (n > intProp('ANA_EVENT_RATE_PER_MIN', 120)) return { ok: false, reason: 'rate' };
+  var kind = b.kind === 'er' || b.kind === 'tk' ? b.kind : 'lg';
+  var status = kind === 'tk' ? (['start', 'ok', 'fail'].indexOf(b.st) >= 0 ? b.st : 'ok') : '';
+  var level = ANA_LEVELS.indexOf(b.lv) >= 0 ? b.lv : (kind === 'er' ? 'error' : 'info');
+  if (kind === 'er') level = 'error';
+  if (status === 'fail' && level === 'info') level = 'error';
+  var name = anaScrub(b.e, 60), msg = anaScrub(b.msg, 300);
+  if (!name && !msg) return { ok: false };
+  var fp = anaFp(kind, name, msg), fk = 'af:' + key + ':' + fp + ':' + min, fn = Number(cache.get(fk) || 0) + 1;
+  cache.put(fk, String(fn), 120);
+  if (fn > 10) return { ok: false, reason: 'dup' };
+  var device = b.device === 'server' ? 'server' : (ANA_DEVICES.indexOf(b.device) >= 0 ? b.device : 'other');
+  sheetTab('Events', ANA_EVT_HEADERS).appendRow(anaEvtRow(Date.now(), key, kind, level, name, msg, status, Math.min(86400000, Math.round(anaNum(b.ms, 0))), b.p ? anaScrub(b.p, 200) : '', fp,
+    /^[0-9a-f]{8,16}$/.test(String(b.vid || '')) ? 'v' + b.vid : '', device, anaSmall(b.browser, 24, /[^\w .\-]/g), anaSmall(b.os, 24, /[^\w .\-]/g), anaScrub(b.x, 300)));
+  return { ok: true };
+}
+
+function anaEvtRead(keys, since) {
+  var sh = sheetTab('Events', ANA_EVT_HEADERS), last = sh.getLastRow();
+  if (last < 2) return [];
+  var from = Math.max(2, last - ANA_EVT_SCAN_ROWS + 1), vals = sh.getRange(from, 1, last - from + 1, ANA_EVT_HEADERS.length).getValues(), out = [];
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    if (keys && !keys[String(r[1])]) continue;
+    var t = r[0] instanceof Date ? r[0].getTime() : Number(r[0]);
+    if (!isFinite(t) || t < since) continue;
+    out.push({ t: t, key: String(r[1]), kind: String(r[2]), level: String(r[3]), name: String(r[4] || ''), msg: String(r[5] || ''), status: String(r[6] || ''), ms: Number(r[7]) || 0,
+      page: String(r[8] || ''), fp: String(r[9] || ''), vid: String(r[10] || ''), device: String(r[11] || ''), browser: String(r[12] || ''), os: String(r[13] || ''), x: String(r[14] || '') });
+  }
+  return out;
+}
+function anaHitRows(keys, since, kinds, onlyKey) {
+  var want = { ev: kinds.indexOf('ev') >= 0, pv: kinds.indexOf('pv') >= 0 }, out = [];
+  if (!want.ev && !want.pv) return out;
+  anaRead(onlyKey || null).forEach(function (r) {
+    if (!keys[r.key] || r.bot || r.t < since || !want[r.type]) return;
+    out.push({ t: r.t, key: r.key, kind: r.type, level: 'info', name: r.name, msg: '', status: '', ms: 0, page: r.type === 'pv' ? r.name : '', fp: '', vid: r.vid, device: r.device, browser: r.browser, os: r.os, x: '' });
+  });
+  return out;
+}
+/** What the page may see: never the visitor hash, only its first 4 characters. */
+function anaOut(e, names) {
+  return { t: e.t, key: e.key, site: names[e.key] || e.key, kind: e.kind, level: e.level, name: e.name, msg: e.msg, status: e.status, ms: e.ms, page: e.page, fp: e.fp,
+    v: e.vid ? e.vid.slice(1, 5) : '', device: e.device, browser: e.browser, os: e.os, x: e.x };
+}
+function anaIsProblem(e) { return e.level === 'error' || e.level === 'warn'; }
+
+function anaProblems(keys, now) {
+  var out = Object.create(null), k;
+  for (k in keys) { var z = []; for (var h = 0; h < 24; h++) z.push(0); out[k] = { err24: 0, warn24: 0, fail24: 0, ok24: 0, err1h: 0, lastEvt: 0, series: z }; }
+  anaEvtRead(keys, now - 86400000).forEach(function (e) {
+    var a = out[e.key]; if (!a) return;
+    if (e.t > a.lastEvt) a.lastEvt = e.t;
+    if (e.kind === 'tk' && e.status === 'ok') a.ok24++;
+    if (e.kind === 'tk' && e.status === 'fail') a.fail24++;
+    if (e.kind !== 'hc') { if (e.level === 'error') { a.err24++; if (e.t >= now - 3600000) a.err1h++; } else if (e.level === 'warn') a.warn24++; }   // up/down comes from Health, so a past outage is not an "error" once the site is back
+    if (anaIsProblem(e)) a.series[Math.max(0, 23 - Math.floor((now - e.t) / 3600000))]++;
+  });
+  return out;
+}
+
+/* ------------------------------------ uptime ------------------------------------ */
+
+function anaHealthAll() {
+  var sh = sheetTab('Health', ANA_HEALTH_HEADERS), last = sh.getLastRow(), map = Object.create(null);
+  if (last < 2) return map;
+  sh.getRange(2, 1, last - 1, ANA_HEALTH_HEADERS.length).getValues().forEach(function (r, i) {
+    if (!r[0]) return;
+    map[String(r[0])] = { row: i + 2, state: String(r[1] || 'unknown'), code: Number(r[2]) || 0, ms: Number(r[3]) || 0, checked: Number(r[4]) || 0, since: Number(r[5]) || 0, fails: Number(r[6]) || 0 };
+  });
+  return map;
+}
+/** "Down" needs 2 failed checks in a row. 401/403 count as up. Only a change of state writes an Events line. */
+function anaHealthApply(sh, map, s, code, ms) {
+  var now = Date.now(), prev = map[s.key] || null, okish = (code >= 200 && code < 400) || code === 401 || code === 403;
+  var fails = okish ? 0 : (prev ? prev.fails : 0) + 1;
+  var state = okish ? 'up' : (fails >= 2 ? 'down' : (prev ? prev.state : 'unknown'));
+  var since = prev && prev.state === state ? prev.since : now, wasDown = !!prev && prev.state === 'down', downFor = prev ? now - prev.since : 0;
+  var row = [s.key, state, code, ms, now, since, fails], at = prev ? prev.row : 0;
+  if (prev) sh.getRange(prev.row, 1, 1, 7).setValues([row]); else { sh.appendRow(row); at = sh.getLastRow(); }
+  map[s.key] = { row: at, state: state, code: code, ms: ms, checked: now, since: since, fails: fails };
+  if (state === 'down' && !wasDown) {
+    sheetTab('Events', ANA_EVT_HEADERS).appendRow(anaEvtRow(now, s.key, 'hc', 'error', ANA_PING_NAME, 'เข้าเว็บไม่ได้ (' + (code ? 'HTTP ' + code : 'ไม่มีการตอบกลับ') + ')', 'down', ms, '', anaFp('hc', ANA_PING_NAME, 'down'), '', 'server', '', '', ''));
+  } else if (state === 'up' && wasDown) {
+    sheetTab('Events', ANA_EVT_HEADERS).appendRow(anaEvtRow(now, s.key, 'hc', 'info', ANA_PING_NAME, 'กลับมาใช้งานได้ (HTTP ' + code + ') · ล่มนาน ' + Math.max(1, Math.round(downFor / 60000)) + ' นาที', 'up', ms, '', anaFp('hc', ANA_PING_NAME, 'up'), '', 'server', '', '', ''));
+  }
+  return state;
+}
+/** Every 10 min: GET each active project's website. Stops before the 6-minute limit. */
+function anaPingJob() {
+  try {
+    if (prop('ANA_PING') === 'off') return;
+    var t0 = Date.now(), sites = anaAll().filter(function (s) { return s.status === 'active' && s.track && /^https?:\/\//i.test(s.url); }).slice(0, intProp('ANA_PING_MAX', 40));
+    if (!sites.length) return;
+    var map = anaHealthAll(), sh = sheetTab('Health', ANA_HEALTH_HEADERS);
+    sites.forEach(function (s) {
+      if (Date.now() - t0 > 240000) return;
+      var url; try { url = lnkCheckUrl(s.url); } catch (x) { return; }
+      var code = 0, t1 = Date.now();
+      try { code = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': 'SAND-Monitor/1.0' } }).getResponseCode(); } catch (e) { code = 0; }
+      try { anaHealthApply(sh, map, s, code, Date.now() - t1); } catch (e2) { console.error('anaHealthApply ' + e2); }
+    });
+  } catch (x) { console.error('anaPingJob ' + x); }
+}
+function anaPruneEvents() {
+  var sh = sheetTab('Events', ANA_EVT_HEADERS), last = sh.getLastRow();
+  if (last < 2) return 0;
+  var cutoff = Date.now() - intProp('ANA_EVENT_RETENTION_DAYS', 90) * 86400000, ts = sh.getRange(2, 1, last - 1, 1).getValues(), n = 0;
+  while (n < ts.length && Number(ts[n][0]) < cutoff) n++;
+  if (n > 0) sh.deleteRows(2, n);
+  return n;
+}
+
+/* ------------------------------ projects/monitor ------------------------------ */
+/** → {generated, totals:{down,error,warn,ok,wait,off}, items:[{key,name,url,tags,state,reasons[],health,err24,warn24,fail24,ok24,err1h,pv24,ev24,lastHit,lastEvent,series[24]}]} */
+function anaMonitor(sc) {
+  var ck = 'mo:' + simScope(sc), hit = simCacheGet(ck);
+  if (hit) return hit;
+  var p = simPrepare(sc), now = Date.now(), pr = anaProblems(p.keys, now), hl = anaHealthAll(), agg = Object.create(null);
+  p.sites.forEach(function (s) { agg[s.key] = { last: 0, pv24: 0, ev24: 0, pv7: 0 }; });
+  anaRead(null).forEach(function (r) {
+    var a = agg[r.key]; if (!a || r.bot) return;
+    if (r.t > a.last) a.last = r.t;
+    if (r.type === 'pv' && r.t >= now - 7 * 86400000) a.pv7++;
+    if (r.t >= now - 86400000) { if (r.type === 'pv') a.pv24++; else a.ev24++; }
+  });
+  var totals = { down: 0, error: 0, warn: 0, ok: 0, wait: 0, off: 0 };
+  var items = p.sites.map(function (s) {
+    var a = agg[s.key], q = pr[s.key], h = hl[s.key] || null, reasons = [], state, on = s.track && s.status === 'active';
+    if (on && h && h.state === 'down') reasons.push('down');
+    if (on && q.err1h > 0) reasons.push('err1h');
+    if (on && q.err24 > 0) reasons.push('err24');
+    if (on && q.fail24 > 0) reasons.push('taskfail');
+    if (on && a.last && now - a.last > 86400000 && a.pv7 >= 20) reasons.push('quiet');
+    if (on && h && h.state === 'up' && h.ms > 8000) reasons.push('slow');
+    if (on && !a.last && !q.lastEvt && !h) reasons.push('nodata');
+    if (!on) state = 'off';
+    else if (reasons.indexOf('down') >= 0) state = 'down';
+    else if (reasons.indexOf('err1h') >= 0) state = 'error';
+    else if (reasons.indexOf('nodata') >= 0) state = 'wait';
+    else if (reasons.length) state = 'warn';
+    else state = 'ok';
+    totals[state]++;
+    return { key: s.key, name: s.name, url: s.url, tags: s.tags, state: state, reasons: reasons, health: h ? { state: h.state, code: h.code, ms: h.ms, checked: h.checked, since: h.since } : null,
+      err24: q.err24, warn24: q.warn24, fail24: q.fail24, ok24: q.ok24, err1h: q.err1h, pv24: a.pv24, ev24: a.ev24, lastHit: a.last, lastEvent: q.lastEvt, series: q.series };
+  });
+  var out = { generated: now, totals: totals, items: items };
+  simCachePut(ck, out, 30);
+  return out;
+}
+
+/* -------------------------------- projects/feed -------------------------------- */
+/** feed {key?, kinds?, level?, q?, fp?, hours?, from?, to?, before?, limit?, order?} → {items, total, more, next, from, to, kindCount} (newest first) */
+function anaFeed(sc, b) {
+  var p = simPrepare(sc), keys = p.keys, onlyKey = '';
+  if (b.key) { anaOwned(sc, b.key); onlyKey = String(b.key); keys = {}; keys[onlyKey] = p.keys[onlyKey]; }
+  var kinds = anaPick(b.kinds, ANA_FEED_KINDS, ['er', 'lg', 'tk', 'hc', 'ev']);
+  var level = ['info', 'warn', 'error', 'problem'].indexOf(b.level) >= 0 ? b.level : '';
+  var q = String(b.q || '').toLowerCase().replace(/[\u0000-\u001f]/g, '').trim().slice(0, 60);
+  var fp = /^[a-z0-9]{1,10}$/.test(String(b.fp || '')) ? String(b.fp) : '';
+  var now = Date.now(), base = now - (now % 20000), hours = [1, 6, 24, 168, 720].indexOf(Number(b.hours)) >= 0 ? Number(b.hours) : 24;
+  var to = anaNum(b.to, base + 60000), from = anaNum(b.from, base - hours * 3600000), before = anaNum(b.before, 0);
+  var limit = Math.max(1, Math.min(200, parseInt(b.limit, 10) || 60)), asc = b.order === 'asc';
+  var ck = 'fd:' + simScope(sc) + ':' + onlyKey + ':' + kinds.join('') + ':' + level + ':' + q + ':' + fp + ':' + from + ':' + to + ':' + before + ':' + limit + (asc ? 'a' : 'd'), hit = simCacheGet(ck);
+  if (hit) return hit;
+  var names = Object.create(null); p.sites.forEach(function (s) { names[s.key] = s.name; });
+  var rows = anaEvtRead(keys, from).filter(function (e) { return e.t <= to; }).concat(anaHitRows(keys, from, kinds, onlyKey).filter(function (e) { return e.t <= to; }));
+  var kindCount = { er: 0, lg: 0, tk: 0, hc: 0, ev: 0, pv: 0 }, shown = [];
+  rows.forEach(function (e) {
+    if (level === 'problem' ? !anaIsProblem(e) : level && e.level !== level) return;
+    if (fp && e.fp !== fp) return;
+    if (q && (e.name + ' ' + e.msg + ' ' + e.page + ' ' + (names[e.key] || '') + ' ' + e.x).toLowerCase().indexOf(q) < 0) return;
+    kindCount[e.kind] = (kindCount[e.kind] || 0) + 1;
+    if (kinds.indexOf(e.kind) >= 0) shown.push(e);
+  });
+  shown.sort(function (a, c) { return asc ? a.t - c.t : c.t - a.t; });
+  if (before) shown = shown.filter(function (e) { return asc ? e.t > before : e.t < before; });
+  var more = shown.length > limit, page = shown.slice(0, limit);
+  var out = { items: page.map(function (e) { return anaOut(e, names); }), total: shown.length, more: more, next: page.length ? page[page.length - 1].t : 0, from: from, to: to, kindCount: kindCount };
+  simCachePut(ck, out, 20);
+  return out;
+}
+/** around {key, t, mins?} → everything one project did around moment t (oldest first). */
+function anaAround(sc, b) {
+  var t = anaNum(b.t, 0); if (!t) throw httpError('BAD_REQUEST', 'ไม่ระบุเวลา');
+  var w = Math.max(1, Math.min(60, parseInt(b.mins, 10) || 10)) * 60000;
+  return anaFeed(sc, { key: b.key, kinds: ANA_FEED_KINDS.join(','), from: t - w, to: t + w, order: 'asc', limit: 200 });
+}
+
+/* ------------------------------- projects/issues ------------------------------- */
+/** issues {key?, hours?: 24|168|720} → repeated problems grouped by fingerprint (worst first) */
+function anaIssues(sc, b) {
+  var p = simPrepare(sc), keys = p.keys;
+  if (b.key) { anaOwned(sc, b.key); keys = {}; keys[String(b.key)] = p.keys[String(b.key)]; }
+  var hours = [24, 168, 720].indexOf(Number(b.hours)) >= 0 ? Number(b.hours) : 168, now = Date.now(), since = now - hours * 3600000, step = (hours * 3600000) / 12;
+  var names = Object.create(null); p.sites.forEach(function (s) { names[s.key] = s.name; });
+  var groups = Object.create(null);
+  anaEvtRead(keys, since).forEach(function (e) {
+    if (!anaIsProblem(e)) return;
+    var gk = e.key + ':' + (e.fp || e.name), g = groups[gk];
+    if (!g) g = groups[gk] = { fp: e.fp, key: e.key, site: names[e.key] || e.key, kind: e.kind, level: e.level, name: e.name, msg: e.msg, n: 0, users: Object.create(null), first: e.t, last: e.t, trend: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], pages: Object.create(null) };
+    g.n++;
+    if (e.level === 'error') g.level = 'error';
+    if (e.t < g.first) g.first = e.t;
+    if (e.t >= g.last) { g.last = e.t; g.msg = e.msg; g.name = e.name; }
+    g.users[(e.vid || ('x' + g.n)) + anaDay(e.t)] = 1;
+    g.trend[Math.max(0, Math.min(11, Math.floor((e.t - since) / step)))]++;
+    if (e.page) lnkBump(g.pages, e.page);
+  });
+  var items = Object.keys(groups).map(function (k) { var g = groups[k]; g.users = Object.keys(g.users).length; g.pages = lnkTop(g.pages, 3); return g; })
+    .sort(function (a, c) { return (c.level === 'error') - (a.level === 'error') || c.n - a.n || c.last - a.last; }).slice(0, 50);
+  return { hours: hours, items: items };
 }
