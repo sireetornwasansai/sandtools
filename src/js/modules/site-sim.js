@@ -739,19 +739,6 @@ export function mountSiteFloor(host, opts = {}) {
   function opdWings(items) {
     const b = HL.bld.main; const K = 1.2; const FL = 0.62 * K; const nF = 3; const H = nF * FL; const ax = b.door[0]; const hwC = 1.5 * K; const yF = b.door[1]; const yB = yF - 3.2 * K;
     const WALL = Cc('#ecc99b'); const BAND = Cc('#d39a5a'); const BAND2 = Cc('#b97f44'); const PUR = Cc('#8b6fc4'); const GLASS = Cc('#a9c9e2'); const SP = Cc('#1e3a8a'); const FRAME = Cc('#475569'); const DOOR = '#475569';
-    /** A small rooftop car park: a grey pad inside the roof coping, white bay lines, a low parapet on the two open sides and two parked cars (the middle bay is free). */
-    const roofPark = (x0, x1, yB, yF, H) => {
-      const z = H + 0.06; const cx = (x0 + x1) / 2; const y0 = yB + 0.32; const y1 = yF - 0.95; const PAD = Cc('#5b6472'); const LN = Cc('#f1f5f9'); const PAR = Cc('#cbd5e1');
-      box(cx, (y0 + y1) / 2, x1 - x0 - 0.3, y1 - y0, 0.012, PAD, z);
-      for (let k = 0; k <= 3; k++) box(cx, y0 + 0.08 + k * ((y1 - y0 - 0.16) / 3), x1 - x0 - 0.42, 0.035, 0.016, LN, z + 0.012);
-      box(x1 - 0.1, (y0 + y1) / 2, 0.08, y1 - y0 + 0.1, 0.2, PAR, z); box(cx, y0 - 0.06, x1 - x0 - 0.1, 0.08, 0.2, PAR, z);   // parapet: east edge + back edge
-      const bay = (k) => y0 + 0.08 + (k + 0.5) * ((y1 - y0 - 0.16) / 3);
-      for (const [k, col] of [[0, '#f8fafc'], [2, '#0f766e']]) { const yc = bay(k); const xc = cx - 0.04; const W = Cc(col);
-        box(xc, yc, 0.9, 0.44, 0.15, W, z + 0.03); box(xc - 0.06, yc, 0.46, 0.38, 0.13, Cc('#a9c9e2'), z + 0.18);
-        for (const dx of [-0.3, 0.3]) for (const dy of [-0.2, 0.2]) box(xc + dx, yc + dy, 0.18, 0.05, 0.09, '#111827', z + 0.02); }
-      const [sx, sy] = P(x0 + 0.2, y1 + 0.12, Z(z)); const uu = tw * 0.06; ctx.fillStyle = '#1d4ed8'; ctx.beginPath(); ctx.roundRect(sx - uu, sy - uu * 4.4, uu * 2, uu * 2.2, uu * 0.4); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = `800 ${uu * 1.7}px ${font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('P', sx, sy - uu * 3.3);
-      ctx.strokeStyle = '#64748b'; ctx.lineWidth = Math.max(1, uu * 0.3); ctx.beginPath(); ctx.moveTo(sx, sy - uu * 2.2); ctx.lineTo(sx, sy); ctx.stroke();   // "P" sign on a post
-    };
     const wing = (x0, x1, east, title, sub, col) => {
       const cx = (x0 + x1) / 2; const cy = (yB + yF) / 2; const w = x1 - x0; const dd = yF - yB; const dx = cx + (east ? -0.6 : 0.6);
       items.push({ d: cx + cy + 0.2, f: () => {
@@ -762,8 +749,7 @@ export function mountSiteFloor(host, opts = {}) {
           if (east) { faceX(x1 + 0.004, yB, yF, zt - 0.12, zt - 0.036, BAND2); faceX(x1 + 0.005, yB, yF, zt - 0.17, zt - 0.13, PUR); for (let y = yB + 0.25; y < yF - 0.4; y += 0.5) faceX(x1 + 0.006, y, y + 0.34, za + 0.12, za + 0.42, GLASS); } }
         faceY(dx - 0.42, dx + 0.42, yF + 0.012, 0, 0.78, DOOR); faceY(dx - 0.38, dx - 0.03, yF + 0.013, 0.04, 0.72, GLASS); faceY(dx + 0.03, dx + 0.38, yF + 0.013, 0.04, 0.72, GLASS);   // side door
         box(dx, yF + 0.28, 1.0, 0.5, 0.06, PUR, 0.82);   // small canopy
-        if (!east) { for (let x = x0 + 0.5; x < x1 - 0.5; x += 0.62) for (const yy of [yB + 0.85, yB + 1.55]) box(x, yy, 0.54, 0.58, 0.07, SP, H + 0.06); }   // solar panels (west wing)
-        else roofPark(x0, x1, yB, yF, H);   // small rooftop car park (east wing): clear of the name board at the front edge and of the roof coping
+        for (let x = x0 + 0.5; x < x1 - 0.5; x += 0.62) for (const yy of [yB + 0.85, yB + 1.55]) box(x, yy, 0.54, 0.58, 0.07, SP, H + 0.06);   // solar panels
       } });
       items.push({ d: cx + yF - 0.4 + 1.2, f: () => { const bw = Math.min(3.0, w - 0.2); box(cx, yF - 0.46, bw + 0.1, 0.12, 0.72, FRAME, H + 0.06); signY(cx - bw / 2, yF - 0.395, H + 0.12, bw, 0.6, col, [[title, 0.22, 0.2], [sub, 0.1, 0.43]]); } });
     };
@@ -833,6 +819,9 @@ export function mountSiteFloor(host, opts = {}) {
       lot.rows.forEach((ry, row) => { for (let b = 0; b < nb; b++) { n += 1; if (lot.ems && row === 0 && b >= (lot.emsAt || 0) && b < (lot.emsAt || 0) + 2) continue; if (hash01(n * 7 + li) > (lot.rows.length > 2 ? 0.5 : 0.58)) continue; if (!lot.ems && x0 + (b + 0.5) * bw < lot.x0 + 2.1) continue;   /* a free pocket at the west end of the car park: cars turn round there */ parked.push({ x: x0 + (b + 0.5) * bw, y: ry + 0.55, ang: row % 2 ? -Math.PI / 2 : Math.PI / 2, v: { kind: hash01(n) > 0.8 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(n * 3) * CAR_COLS.length)], lit: false } }); } });
       lot.bw = bw; lot.nb = nb; lot.bx = x0;
     });
+    { const bo = L.bld.main; const cc = (i) => CAR_COLS[Math.floor(hash01(i * 31 + 7) * CAR_COLS.length)];   // behind the outpatient building: bare ground between it and ตึกสายลม — no lines, no bays, but cars can (and do) stand there
+      for (const [x, y, ang, k] of [[bo.x0 + 2.7, bo.y0 - 0.65, 0.12, 1], [bo.x0 + 3.8, bo.y0 - 1.1, -0.18, 2], [bo.x1 - 1.2, bo.y0 - 0.8, 0.22, 3]]) parked.push({ x, y, ang, v: { kind: k === 3 ? 'van' : 'car', col: cc(k), lit: false } }); }
+    parked.push({ x: 5.6, y: 6.55, ang: 0.05, v: { kind: 'van', col: '#8b8f96', lit: false } });   // the pickup beside the co-op market (after the street-view photo)
     const bikes = []; { const b = L.bikes; let n2 = 0; for (const [yc, ang] of [[b.y0 + 0.4, Math.PI / 2], [b.y1 - 0.4, -Math.PI / 2]]) for (let x = b.x0 + 0.35; x < b.x1 - 0.2; x += 0.3) { n2 += 1; if (hash01(n2 * 11 + 5) > 0.62) continue; bikes.push({ x, y: yc, ang, col: CAR_COLS[Math.floor(hash01(n2 * 17) * CAR_COLS.length)] }); } }
     { const g = L.gravel; let n4 = 0; for (const [cx, ang] of [[g.x0 + 0.95, 0], [g.x1 - 0.95, Math.PI]]) for (let y = g.y0 + 0.6; y < g.y1 - 0.4; y += 0.72) { n4 += 1; if (hash01(n4 * 13 + 41) > 0.52) continue; parked.push({ x: cx, y, ang, v: { kind: hash01(n4 * 5) > 0.75 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(n4 * 29) * CAR_COLS.length)], lit: false } }); } }   // cars on the gravel car park (two rows facing a wide aisle)
     { const sp = L.sidePark; let n3 = 0; for (let y = sp.y0 + 0.35; y < sp.y1 - 0.2; y += 0.7) { n3 += 1; if (hash01(n3 * 19 + 3) > 0.7) continue; parked.push({ x: (sp.x0 + sp.x1) / 2, y, ang: 0, v: { kind: 'car', col: CAR_COLS[Math.floor(hash01(n3 * 23) * CAR_COLS.length)], lit: false } }); } }   // cars parked along the road beside the emergency building
@@ -911,6 +900,8 @@ export function mountSiteFloor(host, opts = {}) {
     }
     { const b = L.bikes; rc(b.x0, b.y0, b.x1, b.y1, pal.lot); poly(rectPts(b.x0, b.y0, b.x1, b.y1), null, pal.lotLine, 1); ctx.save(); ctx.strokeStyle = pal.lotLine; ctx.lineWidth = Math.max(1, tw * 0.014); ctx.beginPath(); for (const [ya, yb] of [[b.y0 + 0.1, b.y0 + 0.65], [b.y1 - 0.65, b.y1 - 0.1]]) for (let x = b.x0 + 0.2; x <= b.x1 - 0.15; x += 0.3) { const a = P(x, ya); const c = P(x, yb); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); } ctx.stroke(); ctx.restore(); }   // motorcycle bays
     { const b = L.sidePark; rc(b.x0, b.y0, b.x1, b.y1, pal.lot); poly(rectPts(b.x0, b.y0, b.x1, b.y1), null, pal.lotLine, 1); ctx.save(); ctx.strokeStyle = pal.lotLine; ctx.lineWidth = Math.max(1, tw * 0.014); ctx.beginPath(); for (let y = b.y0; y <= b.y1 + 0.01; y += 0.7) { const a = P(b.x0, y); const c = P(b.x1, y); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); } ctx.stroke(); ctx.restore(); }   // parking beside the road
+    { const bo = L.bld.main; rc(bo.x0 + 2.0, bo.y0 - 1.6, bo.x1, bo.y0 - 0.1, Cc('#d2c19b'), 0.55); rc(bo.x0 + 2.4, bo.y0 - 1.0, bo.x1 - 0.4, bo.y0 - 0.85, Cc('#b7a47a'), 0.25); }   // bare ground behind the outpatient building (informal parking)
+    rc(0.6, 4.5, 6.5, 8.7, Cc('#d9c9a4'), 0.95); rc(0.9, 6.6, 6.2, 6.78, Cc('#bfae88'), 0.28); rc(0.9, 8.1, 6.2, 8.25, Cc('#bfae88'), 0.22); rc(3.3, 4.6, 3.45, 8.6, Cc('#bfae88'), 0.18);   // the co-op plot: bare ground (after the street-view photos)
     // car parks (the one beside the emergency building has the ambulance bay with red hatching)
     L.lots.forEach((lot) => {
       rc(lot.x0, lot.y0, lot.x1, lot.y1, pal.lot); poly(rectPts(lot.x0, lot.y0, lot.x1, lot.y1), null, pal.lotLine, 1);
@@ -1131,6 +1122,34 @@ export function mountSiteFloor(host, opts = {}) {
       signX(yc + 0.5, x + 0.03, 1.9, 1.0, 0.3, Cc('#0f766e'), [['ทางเข้า', 0.15, 0.15]]);
     } });
   }
+  /** The co-op plot (สหกรณ์) on the empty ground at the left, after the street-view photos of road 1001: the old two-storey house with the brown hipped roof (the co-op),
+   *  the white single-storey shop with the green roof and an awning, three market tents with tables and stools, a billboard, three traffic cones (the pickup is a parked car, see buildCampus). */
+  function coopArea(items) {
+    const WALL = Cc('#eadfc4'); const BAND = Cc('#c9b48a'); const R1 = Cc('#8c4a2b'); const R2 = Cc('#7a3f24'); const GL = Cc('#9dbbd4'); const POST = Cc('#64748b');
+    { const cx = 1.95; const cy = 5.5; const w = 2.0; const d = 1.3; const x0 = cx - w / 2; const x1 = cx + w / 2; const y1 = cy + d / 2; const y0 = cy - d / 2; const H = 1.0;
+      items.push({ d: x1 + y1 + 0.05, f: () => {
+        box(cx, cy, w, d, H, WALL); box(cx, cy, w + 0.06, d + 0.06, 0.05, BAND, H * 0.5);
+        for (let r = 0; r < 2; r++) { const za = r * 0.5 + 0.12; for (let x = x0 + 0.22; x < x1 - 0.3; x += 0.46) { if (r === 0 && Math.abs(x + 0.13 - cx) < 0.3) continue; faceY(x, x + 0.26, y1 + 0.006, za, za + 0.26, GL); } for (let y = y0 + 0.2; y < y1 - 0.3; y += 0.4) faceX(x1 + 0.006, y, y + 0.22, za, za + 0.26, GL); }
+        faceY(cx - 0.2, cx + 0.2, y1 + 0.01, 0, 0.42, '#6b4423');
+        box(cx, cy, w + 0.34, d + 0.34, 0.12, R1, H); box(cx, cy, w - 0.06, d - 0.06, 0.14, R2, H + 0.12); box(cx, cy, w - 0.62, d - 0.42, 0.14, R1, H + 0.26); box(cx, cy, w - 1.2, 0.18, 0.1, R2, H + 0.4);   // hipped tiled roof
+        signY(cx - 0.55, y1 + 0.19, H - 0.4, 1.1, 0.2, '#166534', [['สหกรณ์การเกษตร', 0.095, 0.1]]);
+      } }); }
+    { const cx = 4.7; const cy = 5.3; const w = 2.4; const d = 0.8; const x0 = cx - w / 2; const x1 = cx + w / 2; const y1 = cy + d / 2; const H = 0.55;
+      items.push({ d: x1 + y1 + 0.05, f: () => {
+        box(cx, cy, w, d, H, Cc('#f2f0ea')); for (let x = x0 + 0.25; x < x1 - 0.5; x += 0.55) faceY(x, x + 0.34, y1 + 0.006, 0.14, 0.4, GL); faceX(x1 + 0.006, cy - 0.2, cy + 0.2, 0.14, 0.4, GL);
+        box(cx, cy - 0.1, w + 0.3, d + 0.2, 0.08, Cc('#2f7d6d'), H); box(cx, cy - 0.1, w + 0.3, d * 0.5, 0.07, Cc('#276b5d'), H + 0.08);   // green metal roof
+        box(cx - 0.55, y1 + 0.2, 1.1, 0.34, 0.04, Cc('#d9cfb8'), 0.42); for (const dx of [-1.05, -0.05]) box(cx - 0.55 + dx + 0.5, y1 + 0.34, 0.04, 0.04, 0.42, POST);   // awning on two posts
+        signY(cx + 0.5, y1 + 0.012, 0.3, 0.8, 0.18, '#15803d', [['ร้านสหกรณ์', 0.09, 0.09]]);
+      } }); }
+    const tent = (x, y, col, tcol) => items.push({ d: x + 0.45 + y + 0.45 + 0.05, f: () => {
+      box(x, y, 0.62, 0.34, 0.18, Cc(tcol)); for (const dx of [-0.4, 0.4]) for (const dy of [-0.4, 0.4]) box(x + dx, y + dy, 0.04, 0.04, 0.5, POST);
+      box(x, y, 0.92, 0.92, 0.05, Cc(col), 0.5); box(x, y, 0.5, 0.5, 0.07, Cc(col), 0.55);
+      for (const dx of [-0.25, 0.25]) box(x + dx, y + 0.62, 0.12, 0.12, 0.12, Cc('#2563eb'));   // blue plastic stools
+    } });
+    tent(1.4, 7.35, '#dc2626', '#c2410c'); tent(2.9, 7.65, '#3b4cc0', '#0f766e'); tent(4.4, 7.3, '#34a56b', '#c2410c');
+    items.push({ d: 6.3 + 8.2 + 0.2, f: () => { for (const dx of [5.45, 6.2]) box(dx, 8.2, 0.06, 0.06, 0.7, POST); signY(5.4, 8.23, 0.55, 0.9, 0.42, '#f59e0b', [['ตลาดนัด', 0.13, 0.12], ['สันทราย', 0.13, 0.31]], '#7f1d1d'); } });
+    for (const x of [4.5, 4.9, 5.3]) items.push({ d: x + 8.55, f: () => { box(x, 8.5, 0.12, 0.12, 0.04, '#111827'); box(x, 8.5, 0.07, 0.07, 0.22, Cc('#f97316'), 0.04); box(x, 8.5, 0.075, 0.075, 0.04, '#ffffff', 0.12); } });   // traffic cones
+  }
   /** The name wall at the front gate (white wall, dark bands, ministry emblem): "โรงพยาบาลสันทราย · Sansai Hospital". */
   function signWall(items) {
     const x0 = HL.sign.x0; const w = HL.sign.w; const y = HL.sign.y; const WH = 1.4; const WALL = Cc('#efece4');
@@ -1310,10 +1329,11 @@ export function mountSiteFloor(host, opts = {}) {
       labels.push({ x: lx, y: ly + tw * 0.34 + hh + 3, text: ids.length ? `ในอาคาร ${fmt(inside)} คน · เปิดหน้า ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(cum)} · คลิกเพื่อเข้า` : 'คลิกเพื่อเข้าไปดู', col: hov ? bd.col : null, sc: 0.8 });
     });
     { const [rlx, rly] = P(8.8, -6.5, 0); labels.push({ x: rlx, y: rly, text: '🔄 ถนนวนทวนเข็มนาฬิกา', col: null, sc: 0.65 }); }
+    { const [cx3, cy3] = P(3.3, 9.0, 0); labels.push({ x: cx3, y: cy3, text: '🏪 สหกรณ์การเกษตร', col: '#15803d', sc: 0.8 }); }
     { const [dx, dy] = P(gx + 1.7, f0 - 0.1, 0); labels.push({ x: dx, y: dy, text: '🚗 ทางเข้ารถของ รพ.', col: pal.brand, sc: 0.8 }); }
     { const [rx, ry] = P(3.4, f0 + L.road.w * 0.5, 0); labels.push({ x: rx, y: ry, text: 'ทางหลวง 1260', col: null, sc: 0.6 }); const [ex, ey] = P(e0 + L.road.w * 0.5, 6.5, 0); labels.push({ x: ex, y: ey, text: 'ทางหลวง 1001', col: null, sc: 0.6 }); }
     L.lots.forEach((lot) => { const [px2, py2] = P((lot.x0 + lot.x1) / 2, lot.y1 - 0.5, 0); labels.push({ x: px2, y: py2, text: lot.name || '🅿 ที่จอดรถ', col: null, sc: 0.6 }); });
-    erBuilding(items, now, emsLive); hospBuilding(items); opdWings(items); skywalk(items); erSideDoor(items); archway(items); dropCanopy(items); signWall(items); gravelSign(items); oneWaySigns(items);
+    erBuilding(items, now, emsLive); hospBuilding(items); opdWings(items); skywalk(items); erSideDoor(items); archway(items); dropCanopy(items); signWall(items); coopArea(items); gravelSign(items); oneWaySigns(items);
     towerItems(items); linkItems(items); sideGate(items, now); fencePanels(items); siteProps(items, now); ambientItems(items, now);
     { const [fx, fy] = P(3.0 + L.site.dx, -2.1 + L.site.dy, Z(3.7)); labels.push({ x: fx, y: fy, text: '🚧 กำลังก่อสร้างอาคารใหม่', col: '#d97706', sc: 0.85 }); }
     { const g = L.gravel; const [gx2, gy2] = P((g.x0 + g.x1) / 2, (g.y0 + g.y1) / 2, 0); labels.push({ x: gx2, y: gy2, text: '🅿 ที่จอดรถลูกรัง', col: '#92400e', sc: 0.7 }); }
