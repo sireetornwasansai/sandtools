@@ -22,7 +22,7 @@ test('backup register: an imported letter has no status and is never overdue —
   assert.equal(l.stage, 'registered'); assert.equal(l.legacy, true); assert.equal(l.overdue, 0);
   e.call(C, 'route', { id: r.doc.id, toUnits: [{ unit: 'hr', action: 'perform' }] });
   const l2 = e.call(C, 'list', { kind: 'in', registry: 'strat' }).items[0];
-  assert.equal(l2.stage, 'routed'); assert.ok(l2.overdue > 0, 'a routed letter past its due date is overdue'); assert.equal(e.call(C, 'dash', {}).kpi.routedOpen, 1);
+  assert.equal(l2.stage, 'inprogress'); assert.ok(l2.overdue > 0, 'a routed letter past its due date is overdue'); assert.equal(e.call(C, 'dash', {}).kpi.routedOpen, 1);
 });
 
 test('a new letter received here and not yet routed is simply "registered": no overdue alarm either', () => {

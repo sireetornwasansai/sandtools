@@ -87,10 +87,10 @@ test('senders spelt differently are counted as ONE name (flagged) and can be uni
 test('my work: every item says what this person may do (can) · the head gets the pool to assign from · a stranger sees nothing', () => {
   const e = setup(); const r = rc(e, { docNo: 'สธ 1/1', subject: 'ส่งต่อ' }); e.call(C, 'route', { id: r.doc.id, toUnits: [{ unit: 'qa', action: 'perform' }] });
   const mine = (who) => e.call(who, 'my', {});
-  const h = mine(HEAD).items[0]; same(h.can, { ack: true, assign: true, done: true, ret: true }); same([...mine(HEAD).pools.qa].sort(), [HEAD, STAFF].sort()); assert.equal(h.issuer, 'สธ');
-  const s = mine(STAFF); same(s.items[0].can, { ack: true, assign: false, done: true, ret: true }); assert.equal(s.pools.qa, undefined);
+  const h = mine(HEAD).items[0]; same(h.can, { ack: false, assign: true, done: true, ret: true }); same([...mine(HEAD).pools.qa].sort(), [HEAD, STAFF].sort()); assert.equal(h.issuer, 'สธ');
+  const s = mine(STAFF); same(s.items[0].can, { ack: false, assign: false, done: true, ret: true }); assert.equal(s.pools.qa, undefined);
   assert.equal(mine(OTHER).items.length, 0);
-  e.call(STAFF, 'ack', { id: r.doc.id, unit: 'qa' });
+  assert.throws(() => e.call(STAFF, 'ack', { id: r.doc.id, unit: 'qa' }), /รับหนังสือไปแล้ว/);   // v1.20: already received when the clerk routed it
   same(mine(STAFF).items[0].can, { ack: false, assign: false, done: true, ret: true });
   e.call(HEAD, 'done', { id: r.doc.id, unit: 'qa', note: 'เสร็จ' });
   same(mine(HEAD).items[0].can, { ack: false, assign: false, done: false, ret: false });

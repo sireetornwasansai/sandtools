@@ -162,10 +162,11 @@ test('routing: forward to units, acknowledge, assign, done — stages, SLA and p
   const e = env(); units(e); const c = e.as(clerk);
   const r = c('receive', F({ urgency: 'most', route: { mode: 'units', units: [{ unit: 'nurse', action: 'perform' }, { unit: 'fin', action: 'ack' }], text: 'โปรดดำเนินการ' } }));
   assert.deepEqual([...r.routed].sort(), ['fin', 'nurse']);
-  let g = c('get', { id: r.doc.id }); assert.equal(g.doc.stage, 'routed'); assert.equal(g.dueDate, '2026-10-15', 'ด่วนที่สุด = same day');
-  assert.equal(e.as('n1@x.go.th')('my', {}).open, 1);
+  let g = c('get', { id: r.doc.id }); assert.equal(g.doc.stage, 'inprogress', 'v1.20: a clerk hands the letter over in person, so it is received at once'); assert.equal(g.dueDate, '2026-10-15', 'ด่วนที่สุด = same day');
+  assert.deepEqual([...g.to.map((t) => t.status)], ['received', 'received']);
+  assert.equal(e.as('n1@x.go.th')('my', {}).items[0].status, 'received');
   assert.throws(() => e.as(nobody)('ack', { id: r.doc.id, unit: 'nurse' }), /ไม่มีสิทธิ์|เฉพาะบุคลากร/);
-  e.as('n1@x.go.th')('ack', { id: r.doc.id, unit: 'nurse' });
+  assert.throws(() => e.as('n1@x.go.th')('ack', { id: r.doc.id, unit: 'nurse' }), /รับหนังสือไปแล้ว/, 'nothing left to accept a second time');
   assert.throws(() => e.as('n1@x.go.th')('assign', { id: r.doc.id, unit: 'nurse', users: ['n2@x.go.th'] }), /หัวหน้า/);
   assert.throws(() => e.as('head@x.go.th')('assign', { id: r.doc.id, unit: 'nurse', users: ['stranger@x.go.th'] }), /ไม่ได้อยู่ในหน่วยงาน/);
   e.as('head@x.go.th')('assign', { id: r.doc.id, unit: 'nurse', users: ['n2@x.go.th'], due: '2026-10-20' });
@@ -175,7 +176,7 @@ test('routing: forward to units, acknowledge, assign, done — stages, SLA and p
   e.as('n2@x.go.th')('done', { id: r.doc.id, unit: 'nurse', note: 'เสร็จแล้ว' });
   e.as('fin@x.go.th')('done', { id: r.doc.id, unit: 'fin' });
   g = c('get', { id: r.doc.id }); assert.equal(g.doc.stage, 'done'); assert.equal(g.doc.overdue, 0);
-  assert.deepEqual([...g.events.map((x) => x.type)].filter((t) => ['receive', 'route', 'ack', 'assign', 'done'].includes(t)), ['receive', 'route', 'route', 'ack', 'assign', 'done', 'done']);
+  assert.deepEqual([...g.events.map((x) => x.type)].filter((t) => ['receive', 'route', 'ack', 'assign', 'done'].includes(t)), ['receive', 'route', 'ack', 'route', 'ack', 'assign', 'done', 'done']);
   assert.throws(() => e.as('n2@x.go.th')('done', { id: r.doc.id, unit: 'nurse' }), /ปิดงานไปแล้ว/);
 });
 
@@ -191,7 +192,7 @@ test('return to the clerk and re-route; exec command; delegate (acting head) exp
   e.as(boss)('done', { id: r.doc.id, unit: 'exec' });
   assert.equal(c('get', { id: r.doc.id }).doc.stage, 'returned');
   c('route', { id: r.doc.id, toUnits: [{ unit: 'nurse' }] });
-  assert.equal(c('get', { id: r.doc.id }).doc.stage, 'routed');
+  assert.equal(c('get', { id: r.doc.id }).doc.stage, 'inprogress');
   // delegate
   e.as(admin)('unitsave', { code: 'fin', name: 'งานการเงิน', short: 'การเงิน', head: 'fin@x.go.th', delegate: 'act@x.go.th', delegateUntil: '2026-10-20', members: '' });
   assert.ok(e.as('act@x.go.th')('config', {}).me.headOf.includes('fin'));
@@ -225,7 +226,7 @@ test('cancel: reason required, in-progress letters need an admin, void rows leav
   const e = env(); units(e); const c = e.as(clerk);
   const r = c('receive', F({ route: { mode: 'units', units: [{ unit: 'nurse' }] } }));
   assert.throws(() => c('cancelno', { id: r.doc.id, reason: 'x' }), /เหตุผล/);
-  e.as('n1@x.go.th')('ack', { id: r.doc.id, unit: 'nurse' });
+  e.as('head@x.go.th')('assign', { id: r.doc.id, unit: 'nurse', users: ['n2@x.go.th'] });   // real work by the unit locks the number for the clerk
   assert.throws(() => c('cancelno', { id: r.doc.id, reason: 'ลงรับซ้ำโดยไม่ตั้งใจ' }), /ผู้ดูแลระบบ/);
   assert.equal(e.as(admin)('cancelno', { id: r.doc.id, reason: 'ลงรับซ้ำโดยไม่ตั้งใจ' }).doc.stage, 'void');
   assert.equal(e.as('n1@x.go.th')('my', {}).items.length, 0);
@@ -360,4 +361,28 @@ test('queuefile: staff can fetch the Drive copy of a pending queue item (the rec
   assert.throws(() => c('queuefile', { inboxId: 'q2' }), /ไม่มีไฟล์ในระบบ/);
   assert.throws(() => c('queuefile', { inboxId: 'q3' }), /ไม่พบรายการในคิว/);
   assert.throws(() => e.as(nobody)('queuefile', { inboxId: 'q1' }), /เฉพาะเจ้าหน้าที่/);
+});
+
+test('v1.20 auto-receive: registering with a unit, or a clerk forwarding, lands the letter as "received" (history says so); an executive command still waits for the unit', () => {
+  const e = env(); units(e); const c = e.as(clerk);
+  const r = c('receive', F({ route: { mode: 'units', units: [{ unit: 'nurse', action: 'perform' }] } }));
+  let g = c('get', { id: r.doc.id });
+  assert.equal(g.doc.stage, 'inprogress'); assert.equal(g.to[0].status, 'received'); assert.equal(g.to[0].can.ack, false);
+  const ev = g.events.filter((x) => x.type === 'ack'); assert.equal(ev.length, 1); assert.match(ev[0].text, /อัตโนมัติ/);
+  assert.equal(e.as('n1@x.go.th')('my', {}).items[0].status, 'received');
+  const r2 = c('receive', F({ docNo: 'F2', subject: 'ส่งต่อภายหลัง' })); assert.equal(c('get', { id: r2.doc.id }).doc.stage, 'registered');
+  const f = c('route', { id: r2.doc.id, kind: 'forward', toUnits: [{ unit: 'fin' }] }); assert.equal(f.received, true);
+  g = c('get', { id: r2.doc.id }); assert.equal(g.to[0].status, 'received'); assert.equal(g.doc.stage, 'inprogress');
+  const r3 = c('receive', F({ docNo: 'C3', subject: 'ผู้บริหารสั่งการ', route: { mode: 'exec' } }));
+  const cmd = e.as(boss)('route', { id: r3.doc.id, kind: 'command', text: 'ดำเนินการ', toUnits: [{ unit: 'fin' }] }); assert.equal(cmd.received, false);
+  assert.equal(c('get', { id: r3.doc.id }).to.find((t) => t.unit === 'fin').status, 'pending');
+});
+
+test('v1.20 auto-receive: the clerk can still cancel a number right after routing it, but not once the unit has worked on it', () => {
+  const e = env(); units(e); const c = e.as(clerk);
+  const a = c('receive', F({ docNo: 'X1', route: { mode: 'units', units: [{ unit: 'nurse' }] } }));
+  assert.equal(c('cancelno', { id: a.doc.id, reason: 'ลงรับซ้ำโดยไม่ตั้งใจ' }).doc.stage, 'void');
+  const b = c('receive', F({ docNo: 'X2', subject: 'อีกฉบับ', route: { mode: 'units', units: [{ unit: 'nurse' }] } }));
+  e.as('head@x.go.th')('assign', { id: b.doc.id, unit: 'nurse', users: ['n2@x.go.th'] });
+  assert.throws(() => c('cancelno', { id: b.doc.id, reason: 'ลงรับซ้ำโดยไม่ตั้งใจ' }), /ผู้ดูแลระบบ/);
 });

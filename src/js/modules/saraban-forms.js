@@ -430,14 +430,14 @@ export function receiveView(root, X, pre = {}) {
     if (execs.length) chips.append(h('button', { class: 'chip', type: 'button', onclick: () => st.tick([execs[0].code]) }, `เสนอ${execs[0].short || 'ผู้บริหาร'}`));
     const out = h('div');
     const next = h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-primary', type: 'button', onclick: () => X.refresh('receive') }, 'รับหนังสือฉบับต่อไป'), h('button', { class: 'btn', type: 'button', onclick: () => X.openDoc(d.id) }, 'เปิดรายละเอียด'), stampBlob ? h('button', { class: 'btn', type: 'button', onclick: () => download(stampBlob, `${d.reg.replace('/', '-')}_ประทับตรารับ.pdf`) }, 'ดาวน์โหลดไฟล์ประทับตรา') : null);
-    const panel = h('div', { class: 'card sar-fwd' }, h('h3', { class: 'sar-h3' }, `ส่งหนังสือเลขรับ ${d.reg} ต่อให้หน่วยงานใด`), h('p', { class: 'muted' }, 'เลือกหน่วยงานที่จะรับเรื่อง พร้อมเลือก “เพื่อดำเนินการ/เพื่อทราบ” และกำหนดเสร็จ — หน่วยงานจะเห็นในหน้า “งานของฉัน” ถ้ายังไม่แน่ใจ ข้ามไปก่อนแล้วส่งต่อภายหลังได้'), chips.childNodes.length ? chips : null, picker, field('ข้อความถึงผู้รับ', msg).root);
+    const panel = h('div', { class: 'card sar-fwd' }, h('h3', { class: 'sar-h3' }, `ส่งหนังสือเลขรับ ${d.reg} ให้หน่วยงานใด`), h('p', { class: 'muted' }, 'เลือกหน่วยงานที่หนังสือฉบับนี้ต้องอยู่ พร้อมเลือก “เพื่อดำเนินการ/เพื่อทราบ” และกำหนดเสร็จ — ระบบจะบันทึกว่าหน่วยงาน “รับแล้ว” ให้ทันที ไม่ต้องกดรับซ้ำ และหน่วยงานจะเห็นในหน้า “งานของฉัน” (ถ้ายังไม่แน่ใจ ข้ามไปก่อนแล้วส่งต่อภายหลังได้)'), chips.childNodes.length ? chips : null, picker, field('ข้อความถึงผู้รับ', msg).root);
     const sendBtn = h('button', { class: 'btn btn-primary btn-lg', type: 'button', onclick: async () => {
       const toUnits = st.pick(); if (!toUnits.length) { toast('เลือกหน่วยงานอย่างน้อย 1 หน่วย', 'info'); return; }
       try { sendBtn.disabled = true; sendBtn.classList.add('is-loading'); const r = await X.call('route', { id: d.id, kind: 'forward', text: msg.value, toUnits }, 60000);
-        panel.replaceChildren(notice('success', 'ส่งต่อหนังสือแล้ว', `เลขรับ ${d.reg} → ${(r.routed || toUnits).map((t) => uname(t.unit || t)).join(', ')}`), next); toast('ส่งต่อแล้ว', 'success');
+        panel.replaceChildren(notice('success', 'ส่งให้หน่วยงานและขึ้นสถานะ “รับแล้ว”', `เลขรับ ${d.reg} → ${(r.routed || toUnits).map((t) => uname(t.unit || t)).join(', ')}`), next); toast('ส่งต่อแล้ว', 'success');
       } catch (e) { sendBtn.disabled = false; sendBtn.classList.remove('is-loading'); toast(errText(e), 'error', 7000); }
-    } }, svgIcon(ICONS.check, 20), 'ส่งต่อหนังสือ');
-    const later = h('button', { class: 'btn', type: 'button', onclick: () => panel.replaceChildren(notice('info', 'ลงรับเรียบร้อย — ยังไม่ส่งต่อ', 'ส่งต่อได้ภายหลังที่ “รายละเอียดหนังสือ → ส่งต่อหนังสือ”'), next) }, 'ยังไม่ส่งต่อ ข้ามไปก่อน');
+    } }, svgIcon(ICONS.check, 20), 'ส่งให้หน่วยงาน');
+    const later = h('button', { class: 'btn', type: 'button', onclick: () => panel.replaceChildren(notice('info', 'ลงรับเรียบร้อย — ยังไม่ส่งต่อ', 'ส่งให้หน่วยงานได้ภายหลังที่ “รายละเอียดหนังสือ → ส่งต่อหนังสือ” (จะขึ้นสถานะ “รับแล้ว” ให้เช่นกัน)'), next) }, 'ยังไม่ส่งต่อ ข้ามไปก่อน');
     panel.append(h('div', { class: 'btn-row sar-submit' }, sendBtn, later), out);
     return panel;
   }

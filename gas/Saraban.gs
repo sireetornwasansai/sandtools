@@ -49,6 +49,7 @@ var SAR_CATEGORIES = [['1', 'ทั่วไป'], ['2', 'นโยบายแ�
   ['9', 'พัฒนาบุคลากรและการอบรม'], ['10', 'เทคโนโลยีสารสนเทศ'], ['11', 'กฎหมาย วินัยและคดี'], ['12', 'ตรวจสอบภายใน'], ['13', 'การประชุม'], ['14', 'ความปลอดภัยและภัยพิบัติ'], ['15', 'คุณภาพและมาตรฐาน (HA)'], ['16', 'ประชาสัมพันธ์'], ['17', 'เภสัชกรรมและเวชภัณฑ์'], ['18', 'ร้องเรียนและสิทธิผู้ป่วย']];
 var SAR_ROUTE_ACTIONS = ['perform', 'ack'];                                // ให้ดำเนินการ · เพื่อทราบ
 var SAR_TO_STATUS = ['pending', 'received', 'assigned', 'done', 'returned'];
+var SAR_AUTO_ACK_NOTE = 'รับทราบอัตโนมัติ (เจ้าหน้าที่ธุรการส่งให้หน่วยงานโดยตรง)';
 var SAR_MASK_SUBJECT = '(หนังสือชั้นความลับ)';
 
 /* ------------------------------ pure helpers (no Google services) ------------------------------ */
@@ -614,17 +615,26 @@ function sarInboxPending_(id) {
 }
 function sarInboxMark_(q, doc, email) { q.regNo = doc.reg; q.regDate = sarToday(); q.status = 'accepted'; q.by = email; inbPut(inbSheet(), q.row, inbRowOf(q)); }
 
-/** Add / reopen the recipient rows (lock held). Returns the units that became pending. */
-function sarApplyRoute_(sc, o, route, byEmail, evType) {
+/** Add / reopen the recipient rows (lock held). Returns the units the letter was handed to.
+ *  autoAck (v1.20): the clerk who registers / forwards a letter hands it over in person (the unit sits next door), so the row goes straight to "received"
+ *  and the history gets an "ack" line — nobody has to accept the same letter a second time. Without it (a command from an executive) the row stays "pending". */
+function sarApplyRoute_(sc, o, route, byEmail, evType, autoAck) {
   var sh = sarTab(SAR_TO), last = sh.getLastRow(), rows = {}, now = sarNowStamp(), done = [];
   if (last >= 2) sh.getRange(2, 1, last - 1, TO_COLS).getValues().forEach(function (r, i) { if (String(r[0]) === o.id) rows[String(r[1])] = { t: sarToObj(r, i + 2) }; });
   route.forEach(function (x) {
     var ex = rows[x.unit];
-    if (ex && (ex.t.status === 'pending' || ex.t.status === 'received' || ex.t.status === 'assigned')) { if (x.due && !ex.t.due) { ex.t.due = x.due; ex.t.upd = now; sarPut(sh, ex.t.row, sarToRow(ex.t)); } return; }
+    if (ex && (ex.t.status === 'pending' || ex.t.status === 'received' || ex.t.status === 'assigned')) {
+      var touched = false;
+      if (x.due && !ex.t.due) { ex.t.due = x.due; touched = true; }
+      if (autoAck && ex.t.status === 'pending') { ex.t.status = 'received'; touched = true; sarEvent(o.id, 'ack', byEmail, x.unit, SAR_AUTO_ACK_NOTE, { auto: true }); }
+      if (touched) { ex.t.upd = now; sarPut(sh, ex.t.row, sarToRow(ex.t)); }
+      return;
+    }
     var t = ex ? ex.t : { row: 0, docId: o.id, unit: x.unit, people: [], created: now };
-    t.action = x.action; t.status = 'pending'; t.due = x.due || ''; t.note = x.text || ''; t.upd = now; t.by = byEmail;
+    t.action = x.action; t.status = autoAck ? 'received' : 'pending'; t.due = x.due || ''; t.note = x.text || ''; t.upd = now; t.by = byEmail;
     if (t.row) sarPut(sh, t.row, sarToRow(t)); else sarAppend(sh, sarToRow(t));
     sarEvent(o.id, evType || 'route', byEmail, x.unit, x.text || '', { action: x.action, due: x.due || '', reopened: !!ex });
+    if (autoAck) sarEvent(o.id, 'ack', byEmail, x.unit, SAR_AUTO_ACK_NOTE, { auto: true });
     done.push(x.unit);
   });
   sc.memo.tos = null;
@@ -652,7 +662,7 @@ function sarReceive(sc, b) {
     var routed = [];
     if (!r.replay) {
       if (q) sarInboxMark_(q, r.doc, sc.email);
-      if (route.length) { try { routed = sarApplyRoute_(sc, r.doc, route, sc.email, 'route'); grants = sarGrantsFor(sc, r.doc, routed); } catch (x) { r.warnings.push('ลงรับแล้ว แต่ส่งต่อไม่สำเร็จ — เปิดหนังสือแล้วกด “ส่งต่อ” อีกครั้ง'); console.error('sarApplyRoute ' + x); } }
+      if (route.length) { try { routed = sarApplyRoute_(sc, r.doc, route, sc.email, 'route', true); grants = sarGrantsFor(sc, r.doc, routed); } catch (x) { r.warnings.push('ลงรับแล้ว แต่ส่งต่อไม่สำเร็จ — เปิดหนังสือแล้วกด “ส่งต่อ” อีกครั้ง'); console.error('sarApplyRoute ' + x); } }
     }
     var out = sarReceipt(sc, r, route.length ? routed : [], routed);
     out._grants = grants;
@@ -748,6 +758,18 @@ function sarReserve(sc, b) {
     return { doc: sarPublic(sc, o, [], 'full'), docNo: o.docNo, replay: false };
   });
 }
+/** True when somebody of a unit really worked on the letter (assigned, finished, returned or accepted it by hand). The automatic "received" a clerk's routing creates does not count,
+ *  so the clerk can still cancel a number registered by mistake right after routing it. */
+function sarWorkedOn_(o, tos) {
+  if ((tos || []).some(function (t) { return t.status === 'assigned' || t.status === 'done' || t.status === 'returned'; })) return true;
+  var es = sarTab(SAR_EV), last = es.getLastRow();
+  if (last < 2) return false;
+  var from = Math.max(2, last - SAR_SCAN_EV + 1), hit = false;
+  es.getRange(from, 1, last - from + 1, EV_COLS).getValues().forEach(function (r) {
+    if (String(r[1]) === o.id && String(r[2]) === 'ack' && String(r[6] || '').indexOf('"auto":true') < 0) hit = true;
+  });
+  return hit;
+}
 /** A number is never deleted: it becomes "void" with a reason, and stays in the register. */
 function sarCancel(sc, b) {
   sarNeedStaff(sc);
@@ -757,7 +779,7 @@ function sarCancel(sc, b) {
     var sh = sarTab(SAR_TAB), o = sarFind(sh, b.id);
     if (o.status === 'void') throw httpError('LOCKED', 'เลขนี้ยกเลิกไปแล้ว');
     sc.memo.tos = null; var tos = sarToAll(sc).by[o.id] || [], stage = sarStage(o, tos);
-    if ((stage === 'inprogress' || stage === 'done') && !sc.admin) throw httpError('FORBIDDEN', 'หนังสือนี้มีการดำเนินการแล้ว — ให้ผู้ดูแลระบบเป็นผู้ยกเลิก');
+    if ((stage === 'inprogress' || stage === 'done') && !sc.admin && sarWorkedOn_(o, tos)) throw httpError('FORBIDDEN', 'หนังสือนี้มีการดำเนินการแล้ว — ให้ผู้ดูแลระบบเป็นผู้ยกเลิก');
     if (o.secrecy !== 'normal' && !sc.clear) throw httpError('FORBIDDEN', 'ไม่มีสิทธิ์ยกเลิกหนังสือชั้นความลับ');
     o.status = 'void'; o.voidWhy = why; o.upd = sarNowStamp(); sarPut(sh, o.row, sarRow(o));
     sarEvent(o.id, 'void', sc.email, '', 'ยกเลิกเลข ' + o.reg + ': ' + why, { stage: stage });
@@ -786,11 +808,12 @@ function sarRoute(sc, b) {
     var text = sarClean(b.text, 400);
     if (kind === 'command' && !text) throw httpError('BAD_REQUEST', 'กรุณาระบุข้อสั่งการ');
     var route = sarRouteIn(sc, { mode: 'units', units: b.toUnits, text: text }, { due: o.due });
-    var routed = sarApplyRoute_(sc, o, route, sc.email, kind);
+    var auto = kind === 'forward' && !!sc.staff;                          // clerk → unit: handed over in person, so it is received at once
+    var routed = sarApplyRoute_(sc, o, route, sc.email, kind, auto);
     sarCloseReturned_(sc, o, routed);
     if (kind === 'command') { sarEvent(o.id, 'order', sc.email, '', text, { units: routed }); o.action = ('สั่งการ: ' + text).slice(0, 300); o.upd = sarNowStamp(); sarPut(d.sh, o.row, sarRow(o)); }
     sarLog(sc.email, kind, o.reg, { id: o.id, units: routed.length });
-    return { routed: routed, _grants: sarGrantsFor(sc, o, routed) };
+    return { routed: routed, received: auto, _grants: sarGrantsFor(sc, o, routed) };
   });
   return sarRunGrants(res);
 }
