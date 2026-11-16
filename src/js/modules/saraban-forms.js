@@ -5,6 +5,7 @@ import { toast } from '../core/toast.js';
 import { modal } from '../core/layers.js';
 import { cameraSupported, openScanner, cameraErrorText } from './saraban-scan.js';
 import { URGENCY, SECRECY, RECEIVE_STEPS, SCAN_FIELD_LABELS, READ_MAX_PAGES, ATT_MAX, ATT_LIMIT, ATT_TARGET, attachKind, splitDrop, readEnough, parseLetter, plainText, addDays, newRid, fileToBase64 } from './saraban-engine.js';
+import { reconcile as ocrReconcile, hintsFromFileName } from './sar-ocr-post.js';
 
 const badge = (label, tone = 'muted') => h('span', { class: `sar-badge sar-${tone}` }, label);
 
@@ -283,7 +284,7 @@ export function receiveView(root, X, pre = {}) {
     if (img) previewUrl = URL.createObjectURL(img);
     preview.replaceChildren(previewUrl ? h('img', { src: previewUrl, alt: 'ตัวอย่างหน้าแรกของหนังสือ', class: 'sar-preview-img' }) : svgIcon(ICONS.file, 40), h('div', { class: 'muted sar-sub' }, pdf ? `${pdf.name} · ${(pdf.size / 1048576).toFixed(2)} MB${files.length > 1 ? ` · ${files.length} หน้า` : ''}` : ''));
   }
-  /** @param {File[]|FileList} list @param {{fromQueue?:boolean}} [o] fromQueue: the file is the queue item's own copy (the backend attaches it already, so it is only read) */
+  /** @param {File[]|FileList} list @param {{fromQueue?:boolean, hints?:{bookNo?:string,bookDate?:string,urgency?:string}}} [o] fromQueue: the file is the queue item's own copy (the backend attaches it already, so it is only read); hints: letter number / date / urgency the backend read from the file name */
   async function pickFiles(list, o = {}) {
     const files = [...(list || [])].filter(Boolean); if (!files.length || busy) return;
     const sp = splitDrop(files); const from = o.fromQueue ? 'queue' : '';
@@ -305,13 +306,20 @@ export function receiveView(root, X, pre = {}) {
       markScan(1); status.textContent = `กำลังอ่านข้อมูลจาก ${READ_MAX_PAGES} หน้าแรกของหนังสือ (ในเครื่อง ไม่ส่งออกอินเทอร์เน็ต)…`;
       const rd = await readLetter(pdf, sp.main, (s2) => { if (run === scanRun) status.textContent = s2; }); if (run !== scanRun) return;
       markScan(2); const r = parseLetter(rd.text);
+      /* cross-check the OCR with the file name (a Telegram/Drive name often carries the letter number + date; a misread digit is the commonest OCR error) */
+      const fh = hintsFromFileName(sp.main.name); const hints = { bookNo: (o.hints && o.hints.bookNo) || fh.bookNo, bookDate: (o.hints && o.hints.bookDate) || fh.bookDate, urgency: (o.hints && o.hints.urgency) || fh.urgency };
+      const rc = ocrReconcile({ docNo: r.docNo, docDate: r.docDate, urgency: r.urgency === 'normal' ? '' : r.urgency, refs: r.refs, party: r.party }, hints);
+      if (rc.fields.docNo) { r.docNo = rc.fields.docNo; r.found.docNo = true; }
+      if (rc.fields.docDate) { r.docDate = rc.fields.docDate; r.found.docDate = true; }
+      if (rc.fields.urgency) { r.urgency = rc.fields.urgency; r.found.urgency = true; }
+      const checks = rc.notes.filter((x) => x.field !== 'party').map((x) => x.msg);          // the sender is already shown as a missing/found chip
       const set = (k, v) => { if (v && (!F[k].value.trim() || !touched.has(k))) F[k].value = v; };    // a re-scan never overwrites what the clerk typed
       ['docNo', 'docDate', 'subject', 'party', 'salut', 'refs', 'encl', 'due'].forEach((k) => set(k, r[k]));
       if (!r.due && r.dueDays) set('due', addDays(today, r.dueDays));
       if (r.urgency !== 'normal') F.urgency.value = r.urgency; if (r.secrecy !== 'normal') F.secrecy.value = r.secrecy;
       found = r.found; autoMark(found); const n = Object.keys(found).length;
       const pageNote = rd.pages > READ_MAX_PAGES ? `อ่านจาก ${READ_MAX_PAGES} หน้าแรก (ไฟล์มี ${rd.pages} หน้า — แนบครบทุกหน้า) · ` : '';
-      note = n ? `${pageNote}ตรวจทานช่องที่ไฮไลต์สีให้ถูกต้อง แก้ไขได้ทุกช่องก่อนกดยืนยัน` : `${pageNote}อ่านข้อความจากไฟล์ไม่ได้ (อาจเป็นภาพไม่ชัด) — กรอกข้อมูลเองได้ ไฟล์ยังแนบอยู่ตามปกติ`;
+      note = n ? `${pageNote}ตรวจทานช่องที่ไฮไลต์สีให้ถูกต้อง แก้ไขได้ทุกช่องก่อนกดยืนยัน${checks.length ? ` · ตรวจก่อนยืนยัน: ${checks.join(' · ')}` : ''}` : `${pageNote}อ่านข้อความจากไฟล์ไม่ได้ (อาจเป็นภาพไม่ชัด) — กรอกข้อมูลเองได้ ไฟล์ยังแนบอยู่ตามปกติ`;
       if (r.secrecy !== 'normal') toast('พบคำว่าชั้นความลับในหนังสือ — ตรวจสอบและให้เจ้าหน้าที่ที่ได้รับอนุญาตลงรับ', 'error', 6000);
       dupCheck.flush();
     } catch (e) {
@@ -330,7 +338,7 @@ export function receiveView(root, X, pre = {}) {
     try {
       const r = await X.call('queuefile', { inboxId }, 60000);
       const bin = atob(r.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i += 1) u8[i] = bin.charCodeAt(i);
-      await pickFiles([new File([u8], r.name || 'queue.pdf', { type: r.mime })], { fromQueue: true });
+      await pickFiles([new File([u8], r.name || 'queue.pdf', { type: r.mime })], { fromQueue: true, hints: r.hints });
     } catch (e) {
       status.textContent = ''; scanSteps.hidden = true; paintFound({}, `${errText(e)} — ตรวจข้อมูลจากคิวและแก้ไขได้ หรืออัปโหลดไฟล์เอง`); setStep('dup');
     }

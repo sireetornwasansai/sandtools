@@ -65,6 +65,32 @@ function inbMonthRe() {
   names.sort(function (a, b) { return b.length - a.length; });
   return '(' + names.join('|') + ')';
 }
+/**
+ * File-name hints. A Telegram/Drive file name is often the most reliable copy of the letter number and date, e.g.
+ * "แก้ไข-ด่วนที่สุด ที่ สธ 0208.02 ว 10440 ลว 14 พ.ย.2567 - ….pdf" (no "/" in the number; "_" stands in for "." and " " when a name was sanitised).
+ * inbFileText strips the extension and the "dd-HHmmss_" prefix that inbFetchDoc adds.
+ */
+function inbFileText(name) {
+  return inbDigits(String(name || '')).replace(/\.[A-Za-z0-9]{1,5}$/, '').replace(/^\d{2}-\d{6}_/, '').replace(/_+/g, ' ').trim();
+}
+/** Letter number from a file name → "สธ 0208.02/ว10440" (same shape as inbBookNo). '' when none. */
+function inbBookNoLoose(name) {
+  var t = inbFileText(name);
+  var m = /([ก-ฮ]{2,4})\s*(\d{3,5}(?:[.\s]\d{1,2})*)\s*(?:\/\s*(ว\s*(?:\(ล\))?)?|\s(ว\s*(?:\(ล\))?))\s*(\d{1,6})(?!\d)/.exec(t);
+  if (!m) return '';
+  return m[1] + ' ' + m[2].replace(/\s+/g, '.') + '/' + String(m[3] || m[4] || '').replace(/\s+/g, '') + m[5];
+}
+/** The letter date from a file name ("14 พ.ย.2567", "14_พ_ย_2567", "14 พฤศจิกายน 2567") → yyyy-MM-dd. '' when none or the year is impossible (e.g. 25020). */
+function inbDateLoose(name) {
+  var t = inbFileText(name), best = null;
+  INB_MONTHS.forEach(function (names, i) {
+    var parts = names.map(function (n) { return n.replace(/\.$/, '').split('.').join('[\\s.]*'); });
+    var m = new RegExp('(\\d{1,2})[\\s.]*(?:' + parts.join('|') + ')\\.?[\\s.]*(?:พ\\.?ศ\\.?)?[\\s.]*(\\d{2,4})(?!\\d)').exec(t);
+    if (m && (!best || m.index < best.index)) best = { index: m.index, iso: inbIso(m[2], i + 1, m[1]) };
+  });
+  return best ? best.iso : '';
+}
+
 function inbMonthIdx(name) {
   var n = String(name).replace(/\.$/, '');
   for (var i = 0; i < INB_MONTHS.length; i++) for (var j = 0; j < INB_MONTHS[i].length; j++) if (INB_MONTHS[i][j].replace(/\.$/, '') === n) return i + 1;
@@ -121,7 +147,7 @@ function inbRelevant(text, urls, docName, keywords, captureAll) {
 
 /** The fields the clerk starts from. */
 function inbParse(text, urls, docName, chatTitle) {
-  return { bookNo: inbBookNo(text), bookDate: inbBookDate(text), subject: inbSubject(text, docName) || 'หนังสือจาก Telegram', from: inbFrom(text, chatTitle), urls: inbUrlsOf(text, urls) };
+  return { bookNo: inbBookNo(text) || inbBookNoLoose(docName), bookDate: inbBookDate(text) || inbDateLoose(docName), subject: inbSubject(text, docName) || 'หนังสือจาก Telegram', from: inbFrom(text, chatTitle), urls: inbUrlsOf(text, urls) };
 }
 
 /** Same chat key for live updates (-100123…) and Telegram Desktop exports (123…), so an imported history never duplicates live rows. */
