@@ -80,7 +80,7 @@ function doPost(e) {
     if (!body || typeof body !== 'object') throw httpError('BAD_REQUEST', 'รูปแบบคำขอไม่ถูกต้อง');
     ctx.op = String(body.action || '');
     var isImg = body.action === 'links' && body.op === 'saveimg';   // a QR picture is the only other request allowed to be large
-    var isSarUp = body.action === 'saraban' && body.op === 'upload';   // a letter's scan is the only Saraban request allowed to be large
+    var isSarUp = body.action === 'saraban' && (body.op === 'upload' || body.op === 'ocr');   // a letter's scan (upload) or one page image to read (ocr) are the only Saraban requests allowed to be large
     var isHrUp = body.action === 'hr' && (body.op === 'uploadFile' || body.op === 'saveData' || body.op === 'updateRecord');   // uploadFile carries ONE attached PDF/JPG/PNG (base64); saveData / updateRecord of old cached pages may still carry one
     if (body.action !== 'archive' && !isImg && !isSarUp && !isHrUp && raw.length > MAX_BODY_CHARS) throw httpError('REQUEST_TOO_LARGE', 'คำขอมีขนาดใหญ่เกินไป');
     if (isImg && raw.length > MAX_QRIMG_CHARS) throw httpError('REQUEST_TOO_LARGE', 'รูป QR ใหญ่เกินไป');

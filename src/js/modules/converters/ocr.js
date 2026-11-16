@@ -109,7 +109,7 @@ function rotatedCanvas(src, quarter) {
 }
 
 /** Decode an image Blob to a canvas (EXIF orientation honoured), long side capped so a 48 MP phone photo cannot exhaust memory. */
-async function imageToCanvas(blob) {
+export async function imageToCanvas(blob) {
   const bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
   try {
     const k = Math.min(1, 5200 / Math.max(bmp.width, bmp.height));
@@ -169,7 +169,11 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
   if (indexes.length > todo.length && !(opts.maxPages > 0)) warnings.push(`OCR อ่านได้สูงสุด ${OCR_MAX_PAGES} หน้าต่อไฟล์ — ข้ามหน้าที่เหลืออีก ${indexes.length - todo.length} หน้า`);
   if (opts.onStage) opts.onStage('ocr');
   if (opts.onProgress) opts.onProgress(0);
-  const engine = await createOcrEngine({ signal: opts.signal, onStatus: opts.onStatus });
+  // opts.remoteOcr(canvas, pageNo) → Promise<string|null>: an optional cloud reader tried first for each page (used only by the Saraban receive screen, and never
+  // when the caller needs word boxes). null / an error = "use the on-device engine for this page"; the engine is only started when a page really needs it.
+  const remote = typeof opts.remoteOcr === 'function' && !wordsOut ? opts.remoteOcr : null; let viaRemote = 0;
+  let engine = null; const local = async () => engine || (engine = await createOcrEngine({ signal: opts.signal, onStatus: opts.onStatus }));
+  if (!remote) await local();
   const deadline = new Deadline(opts.ocrTimeoutMs || 15 * 60 * 1000);
   const chunks = new Map(); const conf = [];
   try {
@@ -178,6 +182,11 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
       if (opts.signal && opts.signal.aborted) throw new ConversionError('CANCELLED', 'ยกเลิกการแปลงแล้ว');
       if (opts.onStatus) opts.onStatus(`กำลังอ่านข้อความจากภาพ หน้า ${n + 1} จาก ${todo.length}`);
       const rendered = await renderPage(pdf, todo[n] + 1);
+      if (remote) {
+        let text = null; try { text = await remote(rendered, todo[n] + 1); } catch { text = null; }
+        if (text) { rendered.width = 0; rendered.height = 0; viaRemote += 1; chunks.set(todo[n], text); if (opts.onProgress) opts.onProgress((n + 1) / todo.length); if (ocrEnough(opts, chunks, n, todo.length)) break; continue; }
+        await local();
+      }
       const canvas = opts.enhance === false ? rendered : enhanceCanvas(rendered).canvas;   // scanned PDFs are photos too: flatten light, straighten, size text
       if (canvas !== rendered) { rendered.width = 0; rendered.height = 0; }
       let data; const width = canvas.width, height = canvas.height;
@@ -189,7 +198,8 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
       if (opts.onProgress) opts.onProgress((n + 1) / todo.length);
       if (ocrEnough(opts, chunks, n, todo.length)) break;                   // the fields we came for are already read
     }
-  } finally { await engine.terminate(); }
+  } finally { if (engine) await engine.terminate(); }
+  if (viaRemote) warnings.push(`อ่านข้อความ ${viaRemote} หน้าด้วย Typhoon OCR (โมเดลอ่านเอกสารภาษาไทย) — โปรดตรวจทานเทียบกับต้นฉบับ โดยเฉพาะเลขที่ วันที่ และตัวเลข`);
   if (conf.length) {
     const avg = Math.round(conf.reduce((a, b) => a + b, 0) / conf.length);
     warnings.push(`อ่านข้อความจากภาพสแกนด้วย OCR (ความมั่นใจเฉลี่ย ${avg}%) — โปรดตรวจทานเทียบกับต้นฉบับ โดยเฉพาะเลขไทย วันที่ ชื่อ-สกุล และเลขที่เอกสาร ซึ่งอาจอ่านผิดได้`);
