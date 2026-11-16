@@ -32,7 +32,8 @@ const bkkDay = () => new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 1
 const STATE_COL = { ok: '#16a34a', paused: '#f59e0b', idle: '#94a3b8', silent: '#ef4444' };
 const SCREEN = { paused: '#475569', idle: '#334155', silent: '#7f1d1d' };
 const WALK = '#64748b';
-const LIVE_KEY = 'sand:home3d:live'; const MODE_KEY = 'sand:home3d:mode'; const LOOP_KEY = 'sand:home3d:loop';
+const LIVE_KEY = 'sand:home3d:live'; const MODE_KEY = 'sand:home3d:mode'; const LOOP_KEY = 'sand:home3d:loop'; const SKY_KEY = 'sand:home3d:sky';
+const SKY_TOD = [['auto', '⏱ ตามเวลาในผัง'], ['day', '☀️ กลางวัน'], ['night', '🌙 กลางคืน']];
 const BACK_COL = '#f59e0b';   // ring around people who came back the same day
 const GATE = { in: { col: '#14b8a6', label: 'เข้าสู่ระบบ', at: ENT }, out: { col: '#fb7185', label: 'ออกสู่ระบบ', at: EXIT } };
 const GATE_H = 1.3; const GATE_W = 0.56;
@@ -74,6 +75,9 @@ export function mountSiteFloor(host, opts = {}) {
   const S = { days: 30, all: [], extra: {}, source: 'sample', busy: false, err: null, at: 0, fromCache: false, legacy: false };
   const saved = Number(localStorage.getItem(RANGE_KEY)); if (RANGES.some(([n]) => n === saved)) S.days = saved;
   const savedMode = localStorage.getItem(MODE_KEY); let mode = MODE_IDS.includes(savedMode) ? savedMode : 'today'; let loopOn = localStorage.getItem(LOOP_KEY) !== '0'; let endHold = 0;
+  /** Sky of the campus view: time of day (auto = follows the clock of the plan: night 18:00–06:00, dusk / dawn in between) and rain (auto = some afternoons, on, off). */
+  let sky = { tod: 'auto', rain: 'auto' }; try { const q = JSON.parse(localStorage.getItem(SKY_KEY) || 'null'); if (q && typeof q === 'object') sky = { tod: ['auto', 'day', 'night'].includes(q.tod) ? q.tod : 'auto', rain: ['auto', 'on', 'off'].includes(q.rain) ? q.rain : 'auto' }; } catch { /* ignore */ }
+  let NIGHT = 0; let skyKey = '';
   const R = { rep: null, st: null, busy: false, at: 0, src: '' }; const RC = Object.create(null); let rseq = 0;   // R = the replayed real day · RC = 60 s memory per mode
   let sites = []; let themes = []; let more = 0; let LAY = []; let vis = []; let range = { from: cfg.open, to: cfg.close }; let pf = 1; let sm = summarize([]); let hits = [];
   let started = false; let t = 0; let playing = false; let speed = 20; let raf = 0; let last = 0; let lastMin = -1; let seq = 0; let dead = false; let onScreen = true; let hover = -1;
@@ -96,6 +100,10 @@ export function mountSiteFloor(host, opts = {}) {
   const csvBtn = h('button', { class: 'btn btn-sm', type: 'button', disabled: true, onclick: () => { downloadText(`\ufeff${ins ? pagesCsv(ins.units, S.days, ins.site.name) : dayOn() ? replayCsv(R.rep, sites) : sitesCsv(S.all, S.days)}`, `${ins ? `หน้าในระบบ_${ins.site.key}` : dayOn() ? `โครงการและเว็บไซต์_${R.rep.day}` : 'โครงการและเว็บไซต์'}_${dayOn() && !ins ? 'รายวัน' : `${S.days}วัน`}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`, 'text/csv'); toast('ส่งออกรายงานแล้ว', 'success'); } }, svgIcon(ICONS.download, 16), 'ส่งออก CSV');
   const playBtn = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => (playing ? pause() : play()) });
   const loopBtn = h('button', { class: 'btn s3-loop', type: 'button', 'aria-pressed': String(loopOn), title: 'เมื่อเล่นถึงสิ้นวัน ให้เริ่มใหม่ต่อเนื่อง', onclick: () => setLoop(!loopOn) }, svgIcon(ICONS.rotate, 16), 'วนเล่นซ้ำ');
+  const todEl = h('div', { class: 'tabs s3-sky', role: 'tablist', 'aria-label': 'ช่วงเวลาของวันในผัง' });
+  const rainBtn = h('button', { class: 'btn btn-sm s3-rain', type: 'button', title: 'ฝนตก: อัตโนมัติ → ตก → ปิด', onclick: () => { sky.rain = sky.rain === 'auto' ? 'on' : sky.rain === 'on' ? 'off' : 'auto'; saveSky(); drawSky(); } });
+  const skyHint = h('small', { class: 's3-modehint', role: 'status', 'aria-live': 'polite' }); const skyBar = h('div', { class: 's3-viewbar s3-skybar', hidden: true }, todEl, rainBtn, skyHint);
+  const skyStyle = document.createElement('style'); skyStyle.textContent = '.s3-stage[data-sky="night"] { background: linear-gradient(180deg, #0b1220, #172033); } .s3-stage[data-sky="night"] .s3-clock { color: #e5e7eb; } .s3-stage[data-sky="night"] .s3-clockbox small { color: #94a3b8; }'; document.head.append(skyStyle);
   const viewEl = h('div', { class: 'tabs s3-view', role: 'tablist', 'aria-label': 'มุมมองผัง' }); const viewHint = h('small', { class: 's3-modehint', role: 'status', 'aria-live': 'polite' });
   const liveBtn = h('button', { class: 'btn s3-livebtn', type: 'button', 'aria-pressed': String(liveOn), title: 'นาฬิกาเดินตามเวลาจริงและอัปเดตข้อมูลเองทุก 30 วินาที ไม่ต้องรีเฟรช', onclick: () => setLive(!liveOn) }, h('i', { class: 's3-livedot' }), 'เรียลไทม์');
   const modeEl = h('div', { class: 'tabs s3-mode', role: 'tablist', 'aria-label': 'โหมดการเล่นซ้ำ' }); const modeHint = h('small', { class: 's3-modehint', role: 'status', 'aria-live': 'polite' });
@@ -109,7 +117,7 @@ export function mountSiteFloor(host, opts = {}) {
   const insightBox = h('div', { class: 's3-insights' }); const tableBox = h('div', { class: 's3-table-wrap' }); const note = h('p', { class: 's3-note' });
   host.append(h('section', { class: 's3', 'aria-labelledby': 's3-title' },
     h('div', { class: 's3-head' }, h('div', null, backBtn, titleEl, status), h('div', { class: 's3-tools' }, rangeEl, openBtn, refreshBtn, csvBtn)),
-    banner, h('div', { class: 's3-viewbar' }, viewEl, btn3d, viewHint), h('div', { class: 's3-modebar' }, modeEl, modeHint), stage,
+    banner, h('div', { class: 's3-viewbar' }, viewEl, btn3d, viewHint), skyBar, h('div', { class: 's3-modebar' }, modeEl, modeHint), stage,
     h('div', { class: 's3-controls' }, playBtn, liveBtn, loopBtn,
       h('button', { class: 'btn', type: 'button', onclick: () => { t = range.from; lastMin = -1; playing = true; sync(); } }, svgIcon(ICONS.rotate, 16), 'เล่นใหม่ตั้งแต่เช้า'),
       h('button', { class: 'btn', type: 'button', onclick: () => { setLive(true); } }, svgIcon(ICONS.eye, 16), 'ไปที่เวลาปัจจุบัน'),
@@ -120,6 +128,7 @@ export function mountSiteFloor(host, opts = {}) {
       h('section', { class: 'card', 'aria-labelledby': 's3-h-hours' }, hoursTitle, hoursEl),
       h('section', { class: 'card', 'aria-labelledby': 's3-h-ai' }, h('h3', { id: 's3-h-ai' }, 'ตัวช่วยวิเคราะห์'), insightBox)),
     h('section', { class: 'card s3-tablecard', 'aria-labelledby': 's3-h-tbl' }, tblTitle, tableBox), note));
+  drawSky();
 
   // ---------- data ----------
   async function fetchReal(days) {
@@ -821,7 +830,8 @@ export function mountSiteFloor(host, opts = {}) {
     });
     { const bo = L.bld.main; const cc = (i) => CAR_COLS[Math.floor(hash01(i * 31 + 7) * CAR_COLS.length)];   // behind the outpatient building: bare ground between it and ตึกสายลม — no lines, no bays, but cars can (and do) stand there
       for (const [x, y, ang, k] of [[bo.x0 + 2.7, bo.y0 - 0.65, 0.12, 1], [bo.x0 + 3.8, bo.y0 - 1.1, -0.18, 2], [bo.x1 - 1.2, bo.y0 - 0.8, 0.22, 3]]) parked.push({ x, y, ang, v: { kind: k === 3 ? 'van' : 'car', col: cc(k), lit: false } }); }
-    parked.push({ x: 5.6, y: 6.55, ang: 0.05, v: { kind: 'van', col: '#8b8f96', lit: false } });   // the pickup beside the co-op market (after the street-view photo)
+    parked.push({ x: 5.6, y: 6.55, ang: 0.05, v: { kind: 'van', col: '#8b8f96', lit: false } });
+    for (const [x, y, ang, k] of [[1.5, 11.95, 0.1, 4], [3.2, 12.0, -0.12, 5], [5.0, 11.9, 0.08, 6]]) parked.push({ x, y, ang, v: { kind: k === 6 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(k * 31 + 7) * CAR_COLS.length)], lit: false } });   // shoppers' cars on the bare ground in front of the market   // the pickup beside the co-op market (after the street-view photo)
     const bikes = []; { const b = L.bikes; let n2 = 0; for (const [yc, ang] of [[b.y0 + 0.4, Math.PI / 2], [b.y1 - 0.4, -Math.PI / 2]]) for (let x = b.x0 + 0.35; x < b.x1 - 0.2; x += 0.3) { n2 += 1; if (hash01(n2 * 11 + 5) > 0.62) continue; bikes.push({ x, y: yc, ang, col: CAR_COLS[Math.floor(hash01(n2 * 17) * CAR_COLS.length)] }); } }
     { const g = L.gravel; let n4 = 0; for (const [cx, ang] of [[g.x0 + 0.95, 0], [g.x1 - 0.95, Math.PI]]) for (let y = g.y0 + 0.6; y < g.y1 - 0.4; y += 0.72) { n4 += 1; if (hash01(n4 * 13 + 41) > 0.52) continue; parked.push({ x: cx, y, ang, v: { kind: hash01(n4 * 5) > 0.75 ? 'van' : 'car', col: CAR_COLS[Math.floor(hash01(n4 * 29) * CAR_COLS.length)], lit: false } }); } }   // cars on the gravel car park (two rows facing a wide aisle)
     { const sp = L.sidePark; let n3 = 0; for (let y = sp.y0 + 0.35; y < sp.y1 - 0.2; y += 0.7) { n3 += 1; if (hash01(n3 * 19 + 3) > 0.7) continue; parked.push({ x: (sp.x0 + sp.x1) / 2, y, ang: 0, v: { kind: 'car', col: CAR_COLS[Math.floor(hash01(n3 * 23) * CAR_COLS.length)], lit: false } }); } }   // cars parked along the road beside the emergency building
@@ -898,10 +908,10 @@ export function mountSiteFloor(host, opts = {}) {
       for (const x of [12.0, 15.0]) arrow(x, -1.55, 1, 0); for (const y of [-4.5, -8.5]) arrow(16.6, y, 0, -1); for (const x of [14.0, 11.0]) arrow(x, -11.8, -1, 0); for (const y of [-8.0, -4.5]) arrow(WXA + 0.5, y, 0, 1);   // the ring road: anticlockwise
       ctx.globalAlpha = 1;
     }
+    rc(0.15, 4.3, 8.0, 12.6, Cc('#d9c9a4'), 0.98); for (const [y, a] of [[6.6, 0.28], [8.1, 0.22], [9.35, 0.22], [11.25, 0.26]]) rc(0.4, y, 7.8, y + 0.18, Cc('#bfae88'), a); rc(3.3, 4.4, 3.45, 12.4, Cc('#bfae88'), 0.16);   // the co-op plot: bare ground from the lawn to the front pavement and to the road beside the emergency building (after the street-view photos)
     { const b = L.bikes; rc(b.x0, b.y0, b.x1, b.y1, pal.lot); poly(rectPts(b.x0, b.y0, b.x1, b.y1), null, pal.lotLine, 1); ctx.save(); ctx.strokeStyle = pal.lotLine; ctx.lineWidth = Math.max(1, tw * 0.014); ctx.beginPath(); for (const [ya, yb] of [[b.y0 + 0.1, b.y0 + 0.65], [b.y1 - 0.65, b.y1 - 0.1]]) for (let x = b.x0 + 0.2; x <= b.x1 - 0.15; x += 0.3) { const a = P(x, ya); const c = P(x, yb); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); } ctx.stroke(); ctx.restore(); }   // motorcycle bays
     { const b = L.sidePark; rc(b.x0, b.y0, b.x1, b.y1, pal.lot); poly(rectPts(b.x0, b.y0, b.x1, b.y1), null, pal.lotLine, 1); ctx.save(); ctx.strokeStyle = pal.lotLine; ctx.lineWidth = Math.max(1, tw * 0.014); ctx.beginPath(); for (let y = b.y0; y <= b.y1 + 0.01; y += 0.7) { const a = P(b.x0, y); const c = P(b.x1, y); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); } ctx.stroke(); ctx.restore(); }   // parking beside the road
     { const bo = L.bld.main; rc(bo.x0 + 2.0, bo.y0 - 1.6, bo.x1, bo.y0 - 0.1, Cc('#d2c19b'), 0.55); rc(bo.x0 + 2.4, bo.y0 - 1.0, bo.x1 - 0.4, bo.y0 - 0.85, Cc('#b7a47a'), 0.25); }   // bare ground behind the outpatient building (informal parking)
-    rc(0.6, 4.5, 6.5, 8.7, Cc('#d9c9a4'), 0.95); rc(0.9, 6.6, 6.2, 6.78, Cc('#bfae88'), 0.28); rc(0.9, 8.1, 6.2, 8.25, Cc('#bfae88'), 0.22); rc(3.3, 4.6, 3.45, 8.6, Cc('#bfae88'), 0.18);   // the co-op plot: bare ground (after the street-view photos)
     // car parks (the one beside the emergency building has the ambulance bay with red hatching)
     L.lots.forEach((lot) => {
       rc(lot.x0, lot.y0, lot.x1, lot.y1, pal.lot); poly(rectPts(lot.x0, lot.y0, lot.x1, lot.y1), null, pal.lotLine, 1);
@@ -1141,12 +1151,17 @@ export function mountSiteFloor(host, opts = {}) {
         box(cx - 0.55, y1 + 0.2, 1.1, 0.34, 0.04, Cc('#d9cfb8'), 0.42); for (const dx of [-1.05, -0.05]) box(cx - 0.55 + dx + 0.5, y1 + 0.34, 0.04, 0.04, 0.42, POST);   // awning on two posts
         signY(cx + 0.5, y1 + 0.012, 0.3, 0.8, 0.18, '#15803d', [['ร้านสหกรณ์', 0.09, 0.09]]);
       } }); }
+    const glow = (x, y, r) => { if (pal.wk >= 1) return; const [gx2, gy2] = P(x, y, 0); const g = ctx.createRadialGradient(gx2, gy2, 0, gx2, gy2, tw * r); g.addColorStop(0, 'rgba(253,230,138,.5)'); g.addColorStop(1, 'rgba(253,230,138,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(gx2, gy2, tw * r, tw * r * 0.5, 0, 0, 7); ctx.fill(); };   // warm lamp light under the stalls at night
     const tent = (x, y, col, tcol) => items.push({ d: x + 0.45 + y + 0.45 + 0.05, f: () => {
+      glow(x, y + 0.1, 0.62);
       box(x, y, 0.62, 0.34, 0.18, Cc(tcol)); for (const dx of [-0.4, 0.4]) for (const dy of [-0.4, 0.4]) box(x + dx, y + dy, 0.04, 0.04, 0.5, POST);
       box(x, y, 0.92, 0.92, 0.05, Cc(col), 0.5); box(x, y, 0.5, 0.5, 0.07, Cc(col), 0.55);
       for (const dx of [-0.25, 0.25]) box(x + dx, y + 0.62, 0.12, 0.12, 0.12, Cc('#2563eb'));   // blue plastic stools
     } });
     tent(1.4, 7.35, '#dc2626', '#c2410c'); tent(2.9, 7.65, '#3b4cc0', '#0f766e'); tent(4.4, 7.3, '#34a56b', '#c2410c');
+    tent(1.2, 10.3, '#f59e0b', '#c2410c'); tent(2.7, 10.5, '#dc2626', '#0f766e'); tent(4.2, 10.25, '#3b4cc0', '#c2410c'); tent(5.7, 10.5, '#34a56b', '#0f766e');   // second row of stalls
+    items.push({ d: 7.4 + 9.7 + 0.05, f: () => { glow(7.0, 9.4, 0.7); box(7.0, 9.3, 0.8, 0.6, 0.5, Cc('#f4eee0')); box(7.0, 9.62, 1.1, 0.42, 0.06, Cc('#dc2626'), 0.5); for (const dx of [-0.5, 0.5]) box(7.0 + dx, 9.8, 0.04, 0.04, 0.5, POST); signY(6.62, 9.605, 0.2, 0.76, 0.2, '#b91c1c', [['ไก่ทอด', 0.11, 0.1]]); } });   // fried-chicken stall with the red awning (as on the photo)
+    for (const [x, y, c] of [[6.3, 11.3, '#dc2626'], [6.65, 11.5, '#2563eb'], [7.0, 11.3, '#111827'], [7.35, 11.5, '#f59e0b']]) items.push({ d: x + y + 0.05, f: () => bikeBike(x, y, c) });   // motorbikes
     items.push({ d: 6.3 + 8.2 + 0.2, f: () => { for (const dx of [5.45, 6.2]) box(dx, 8.2, 0.06, 0.06, 0.7, POST); signY(5.4, 8.23, 0.55, 0.9, 0.42, '#f59e0b', [['ตลาดนัด', 0.13, 0.12], ['สันทราย', 0.13, 0.31]], '#7f1d1d'); } });
     for (const x of [4.5, 4.9, 5.3]) items.push({ d: x + 8.55, f: () => { box(x, 8.5, 0.12, 0.12, 0.04, '#111827'); box(x, 8.5, 0.07, 0.07, 0.22, Cc('#f97316'), 0.04); box(x, 8.5, 0.075, 0.075, 0.04, '#ffffff', 0.12); } });   // traffic cones
   }
@@ -1329,7 +1344,7 @@ export function mountSiteFloor(host, opts = {}) {
       labels.push({ x: lx, y: ly + tw * 0.34 + hh + 3, text: ids.length ? `ในอาคาร ${fmt(inside)} คน · เปิดหน้า ${dayOn() && R.rep.scale === 1 ? '' : '≈'}${fmt(cum)} · คลิกเพื่อเข้า` : 'คลิกเพื่อเข้าไปดู', col: hov ? bd.col : null, sc: 0.8 });
     });
     { const [rlx, rly] = P(8.8, -6.5, 0); labels.push({ x: rlx, y: rly, text: '🔄 ถนนวนทวนเข็มนาฬิกา', col: null, sc: 0.65 }); }
-    { const [cx3, cy3] = P(3.3, 9.0, 0); labels.push({ x: cx3, y: cy3, text: '🏪 สหกรณ์การเกษตร', col: '#15803d', sc: 0.8 }); }
+    { const [cx3, cy3] = P(3.3, 12.45, 0); labels.push({ x: cx3, y: cy3, text: '🏪 สหกรณ์การเกษตร', col: '#15803d', sc: 0.8 }); }
     { const [dx, dy] = P(gx + 1.7, f0 - 0.1, 0); labels.push({ x: dx, y: dy, text: '🚗 ทางเข้ารถของ รพ.', col: pal.brand, sc: 0.8 }); }
     { const [rx, ry] = P(3.4, f0 + L.road.w * 0.5, 0); labels.push({ x: rx, y: ry, text: 'ทางหลวง 1260', col: null, sc: 0.6 }); const [ex, ey] = P(e0 + L.road.w * 0.5, 6.5, 0); labels.push({ x: ex, y: ey, text: 'ทางหลวง 1001', col: null, sc: 0.6 }); }
     L.lots.forEach((lot) => { const [px2, py2] = P((lot.x0 + lot.x1) / 2, lot.y1 - 0.5, 0); labels.push({ x: px2, y: py2, text: lot.name || '🅿 ที่จอดรถ', col: null, sc: 0.6 }); });
@@ -1403,6 +1418,7 @@ export function mountSiteFloor(host, opts = {}) {
       items.push({ d: r.pos[0] + r.pos[1] + 0.01, f: () => { ctx.globalAlpha = r.a == null ? 1 : r.a; person(r.pos[0], r.pos[1], r.state === 'room' ? r.col : r.state === 'work' ? colOf(r.zone) : WALK, !!j.back, now, psc, j.role, j.id, r.state === 'walk'); ctx.globalAlpha = 1; } });
     }
     items.sort((a, b) => a.d - b.d).forEach((it) => it.f());
+    if (hospOut()) skyFx(now);
     labels.forEach((q) => pill(q.text, q.x, q.y, q.col, q.sc, q.prio));
     if (!hospOn()) { gateSign('in', `เข้าแล้ว ${fmt(entered)} คน${dayOn() ? ` · ใหม่ ${fmt(entered - enteredBack)} · เดิม ${fmt(enteredBack)}` : ''}`); gateSign('out', `ออกแล้ว ${fmt(left)} คน`); }
     flushSigns(now); hud(F, here);
@@ -1659,7 +1675,45 @@ export function mountSiteFloor(host, opts = {}) {
   document.addEventListener('keydown', onKey);
 
   // ---------- loop ----------
-  function themeSync() { pal = document.documentElement.dataset.theme === 'dark' ? PAL.dark : PAL.light; font = getComputedStyle(document.body).fontFamily || 'sans-serif'; }
+  function saveSky() { try { localStorage.setItem(SKY_KEY, JSON.stringify(sky)); } catch { /* ignore */ } }
+  function drawSky() {
+    todEl.replaceChildren(...SKY_TOD.map(([id, l]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(sky.tod === id), onclick: () => { sky.tod = id; saveSky(); drawSky(); } }, l)));
+    rainBtn.textContent = `🌧 ฝน: ${sky.rain === 'auto' ? 'อัตโนมัติ' : sky.rain === 'on' ? 'ตก' : 'ปิด'}`; rainBtn.setAttribute('aria-pressed', String(sky.rain === 'on'));
+    skyHint.textContent = 'ใช้กับภาพรวมโรงพยาบาล · ตามเวลา: 18:00–06:00 เป็นกลางคืน · ฝนอัตโนมัติจะตกบางช่วงบ่าย';
+  }
+  const nightOf = (min) => { const hr = min / 60; if (hr >= 19 || hr < 5.5) return 1; if (hr >= 17.5) return (hr - 17.5) / 1.5; if (hr < 6.5) return 1 - (hr - 5.5); return 0; };   // 0 day · 1 night
+  const autoRain = (min) => { const day = Math.floor((Date.now() + 7 * 36e5) / 864e5); if (hash01(day * 5 + 1) < 0.72) return 0; const a = 13 + 3 * hash01(day * 11 + 2); const b = a + 1.5 + hash01(day * 3 + 7); const hr = min / 60; return Math.max(0, Math.min(1, Math.min((hr - a) / 0.25, (b - hr) / 0.25))); };
+  const nightNow = () => (sky.tod === 'night' ? 1 : sky.tod === 'day' ? 0 : nightOf(t));
+  const rainNow = () => (sky.rain === 'on' ? 1 : sky.rain === 'off' ? 0 : autoRain(t));
+  /** Palette follows the site theme, and — in the campus view only — the time of day: night = the dark palette (lamps, headlights and stall lights come on). */
+  function skySync() {
+    const dark = document.documentElement.dataset.theme === 'dark'; const on = hospOut() && !ins; NIGHT = on ? nightNow() : 0;
+    pal = dark || NIGHT > 0.5 ? PAL.dark : PAL.light;
+    const key = `${on ? (NIGHT > 0.5 ? 'n' : 'd') : 'x'}${dark ? 'k' : ''}`; if (key !== skyKey) { skyKey = key; stage.dataset.sky = on && NIGHT > 0.5 ? 'night' : 'day'; }
+    if (skyBar.hidden === on) skyBar.hidden = !on;
+  }
+  /** Dusk / dawn tint and rain over the campus: streaks, ripples on the public roads, an overcast veil. Drawn after the models and before the name plates. */
+  function skyFx(now) {
+    const dusk = sky.tod === 'auto' ? Math.sin(Math.PI * Math.min(1, Math.max(0, NIGHT))) : 0; const r = rainNow();
+    if (dusk < 0.04 && r < 0.02) return;
+    const w = cv.width / dpr; const hg = cv.height / dpr; const night = NIGHT > 0.5;
+    if (r >= 0.02) {   // ripples on the two public roads (never on a building)
+      ctx.save(); ctx.strokeStyle = night ? 'rgba(186,215,255,.9)' : 'rgba(255,255,255,.95)'; ctx.lineWidth = 1;
+      for (let i = 0; i < 46; i++) { const ph = reduced ? 0.5 : ((now / 1100 + hash01(i * 13 + 5) * 3) % 1); const onFront = i % 2 === 0; const x = onFront ? 0.4 + hash01(i * 17 + 1) * 26 : 27.4 + hash01(i * 17 + 1) * 1.8; const y = onFront ? 13.2 + hash01(i * 19 + 2) * 1.8 : -16 + hash01(i * 19 + 2) * 28.6; const [sx, sy] = P(x, y, 0); const rx = tw * 0.07 * (0.3 + ph); ctx.globalAlpha = (1 - ph) * 0.55 * r; ctx.beginPath(); ctx.ellipse(sx, sy, rx, rx * 0.5, 0, 0, 7); ctx.stroke(); }
+      ctx.restore();
+    }
+    ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (dusk >= 0.04) { ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = 0.3 * dusk; ctx.fillStyle = '#fb923c'; ctx.fillRect(0, 0, w, hg); ctx.globalCompositeOperation = 'source-over'; }
+    if (r >= 0.02) {
+      ctx.globalAlpha = 0.3 * r; ctx.fillStyle = night ? '#0f172a' : '#475569'; ctx.fillRect(0, 0, w, hg);   // overcast + wet
+      const tt = reduced ? 0 : now / 1000; ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = night ? 'rgba(186,215,255,.75)' : 'rgba(51,65,85,.6)'; ctx.beginPath();
+      const n = Math.round(Math.min(520, 160 + 360 * r) * Math.min(1, w / 900 + 0.4));
+      for (let i = 0; i < n; i++) { const sp = 480 + 380 * hash01(i * 3 + 1); const ln = 12 + 16 * hash01(i * 5 + 2); const x = hash01(i * 7 + 3) * (w + 120) - 60; const y = ((tt * sp + hash01(i * 11 + 4) * (hg + 80)) % (hg + 80)) - 40; ctx.moveTo(x, y); ctx.lineTo(x - ln * 0.28, y + ln); }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function themeSync() { skySync(); font = getComputedStyle(document.body).fontFamily || 'sans-serif'; }
   function loop(now) {
     raf = requestAnimationFrame(loop); const dt = last ? Math.min(100, Math.max(0, now - last)) : 0; last = now; if (document.hidden || !onScreen || !sites.length) return;
     if (liveOn && liveUsable()) {   // real time: follow the clock, widen the window when the day moves on
@@ -1671,7 +1725,7 @@ export function mountSiteFloor(host, opts = {}) {
     }
     const k = reduced ? 1 : 1 - Math.exp(-dt / 110); cam.z += (cam.tz - cam.z) * k; cam.tx += (cam.ttx - cam.tx) * k; cam.ty += (cam.tty - cam.ty) * k;
     if (v3) { if (now - v3At > 900) { v3At = now; v3.update(snapshot3d()); } return; }
-    draw(now);
+    skySync(); draw(now);
   }
   loadCss('site3d').catch(() => {});
   ctx = cv.getContext('2d'); themeSync(); resize(); drawRange(); sync();
@@ -1682,5 +1736,5 @@ export function mountSiteFloor(host, opts = {}) {
   document.addEventListener('visibilitychange', onVisible); timer = window.setInterval(onVisible, 15000);
   load().then(() => { if (!dead && !reduced && sites.length && !liveOn) play(); if (!dead && sites.length && want3d()) toggle3d(true); });   // starts playing "now" unless the visitor prefers reduced motion
   raf = requestAnimationFrame(loop);
-  return () => { dead = true; seq += 1; close3d(false); cancelAnimationFrame(raf); clearInterval(timer); ro.disconnect(); mo.disconnect(); if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVisible); document.removeEventListener('keydown', onKey); };
+  return () => { dead = true; skyStyle.remove(); seq += 1; close3d(false); cancelAnimationFrame(raf); clearInterval(timer); ro.disconnect(); mo.disconnect(); if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVisible); document.removeEventListener('keydown', onKey); };
 }
