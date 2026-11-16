@@ -115,3 +115,15 @@ test('uptime: down needs 2 failed checks; recovery is logged; around returns the
   const ar = e.post({ action: 'projects', session: s, op: 'around', key: A, t: evs[0].t, mins: 5 }).data; assert.equal(ar.items.length, 2);
   assert.equal(e.post({ action: 'projects', session: s, op: 'around', key: A }).error.code, 'BAD_REQUEST');
 });
+
+test('monitor: every item carries a safe open-site link and a 24 h uptime figure', () => {
+  const { e, s } = seed();
+  let code = 200; e.ctx.UrlFetchApp.fetch = () => ({ getResponseCode: () => code });
+  const item = () => { e.ctx.CacheService.getScriptCache().remove('mo:somchai@example.go.th'); return e.post({ action: 'projects', session: s, op: 'monitor' }).data.items[0]; };
+  assert.equal(item().link, 'https://hospital.example.go.th'); assert.equal(item().uptime24, null);   // not checked yet → no figure
+  e.ctx.anaPingJob(); assert.equal(item().uptime24, 100);
+  code = 500; e.ctx.anaPingJob(); e.ctx.anaPingJob(); const down = item(); assert.equal(down.state, 'down'); assert.ok(down.uptime24 <= 100 && down.uptime24 >= 0);
+  const safe = e.ctx.anaSafeLink;
+  assert.equal(safe('HTTPS://Site.go.th/a/b?token=1#x'), 'https://Site.go.th/a/b');
+  for (const bad of ['javascript:alert(1)', 'https://user:pw@x.go.th/', 'ftp://x.go.th', '//x.go.th', '', null]) assert.equal(safe(bad), '', String(bad));
+});

@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { sortFleet, stateCounts, fmtDuration, groupByDay, explain, parseFilters, filtersToParams, feedParams, defaultFilters, activeFilterCount, eventText, logSnippets } from '../../src/js/modules/monitor-engine.js';
+import { sortFleet, stateCounts, fmtDuration, groupByDay, explain, parseFilters, filtersToParams, feedParams, defaultFilters, activeFilterCount, eventText, logSnippets, safeLink, fmtUptime } from '../../src/js/modules/monitor-engine.js';
 import { buildHit, scrub } from '../../api/collect.js';
 import { findRoute } from '../../src/js/core/routes.js';
 
@@ -39,4 +39,9 @@ test('edge: log lines — POST only, server lines use h, bots/DNT dropped, bad k
   const srv = await buildHit(req('POST', {}), { ...f, h: 'App.Go.Th' }, 's'); assert.equal(srv.host, 'app.go.th'); assert.equal(srv.device, 'server'); assert.equal(srv.vid, '');
   assert.equal(await buildHit(req('POST', { dnt: '1' }), f, 's'), null);
   assert.equal(await buildHit(req('POST', { origin: 'https://a.go.th' }), { k: f.k, t: 'lg' }, 's'), null);
+});
+test('open-site link: http/https only, no credentials, no query; uptime text', () => {
+  assert.equal(safeLink('https://x.go.th/a/?b=1#c'), 'https://x.go.th/a/');
+  for (const bad of ['javascript:alert(1)', 'data:text/html,x', 'https://u:p@x.go.th', 'x.go.th', '', null, undefined]) assert.equal(safeLink(bad), '');
+  assert.equal(fmtUptime(99.9), '99.9%'); assert.equal(fmtUptime(100), '100%'); assert.equal(fmtUptime(null), ''); assert.equal(fmtUptime(undefined), '');
 });

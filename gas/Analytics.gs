@@ -828,11 +828,36 @@ function anaPruneEvents() {
 }
 
 /* ------------------------------ projects/monitor ------------------------------ */
-/** → {generated, totals:{down,error,warn,ok,wait,off}, items:[{key,name,url,tags,state,reasons[],health,err24,warn24,fail24,ok24,err1h,pv24,ev24,lastHit,lastEvent,series[24]}]} */
+/** Safe link for the "เปิดเว็บไซต์" button: http/https only, no credentials, no query/hash. '' when the address is not usable. */
+function anaSafeLink(u) {
+  var m = String(u || '').trim().match(/^(https?):\/\/([^\s\/?#]+)(\/[^\s?#]*)?/i);
+  if (m && m[2].indexOf('@') >= 0) return '';   // user:password@host → never show or open
+  return m ? (m[1].toLowerCase() + '://' + m[2] + (m[3] || '')).slice(0, 300) : '';
+}
+/** Share of the last 24 h each site was reachable (0-100, one decimal), worked out from the 'hc' up/down events. null = never checked. */
+function anaUptime24(keys, hl, now) {
+  var from = now - 86400000, ev = anaEvtRead(keys, from).filter(function (e) { return e.kind === 'hc'; }).sort(function (a, b) { return a.t - b.t; });
+  var downAt = Object.create(null), downMs = Object.create(null), out = Object.create(null), k;
+  ev.forEach(function (e) {
+    if (e.status === 'down') { if (downAt[e.key] == null) downAt[e.key] = e.t; }
+    else if (e.status === 'up') { downMs[e.key] = (downMs[e.key] || 0) + (e.t - (downAt[e.key] != null ? downAt[e.key] : from)); downAt[e.key] = null; }
+  });
+  for (k in keys) {
+    var h = hl[k];
+    if (!h) { out[k] = null; continue; }
+    var d = downMs[k] || 0;
+    if (h.state === 'down') d += now - Math.max(from, downAt[k] != null ? downAt[k] : h.since);
+    out[k] = Math.max(0, Math.min(100, Math.round((1 - d / 86400000) * 1000) / 10));
+  }
+  return out;
+}
+
+/** → {generated, totals:{down,error,warn,ok,wait,off}, items:[{key,name,url,link,uptime24,tags,state,reasons[],health,err24,warn24,fail24,ok24,err1h,pv24,ev24,lastHit,lastEvent,series[24]}]} */
 function anaMonitor(sc) {
   var ck = 'mo:' + simScope(sc), hit = simCacheGet(ck);
   if (hit) return hit;
-  var p = simPrepare(sc), now = Date.now(), pr = anaProblems(p.keys, now), hl = anaHealthAll(), agg = Object.create(null);
+  var p = simPrepare(sc), now = Date.now(), pr = anaProblems(p.keys, now), hl = anaHealthAll(), agg = Object.create(null), up24 = {};
+  try { up24 = anaUptime24(p.keys, hl, now); } catch (ux) { console.error('anaUptime24 ' + ux); }   // bonus: never break the page
   p.sites.forEach(function (s) { agg[s.key] = { last: 0, pv24: 0, ev24: 0, pv7: 0 }; });
   anaRead(null).forEach(function (r) {
     var a = agg[r.key]; if (!a || r.bot) return;
@@ -857,7 +882,7 @@ function anaMonitor(sc) {
     else if (reasons.length) state = 'warn';
     else state = 'ok';
     totals[state]++;
-    return { key: s.key, name: s.name, url: s.url, tags: s.tags, state: state, reasons: reasons, health: h ? { state: h.state, code: h.code, ms: h.ms, checked: h.checked, since: h.since } : null,
+    return { key: s.key, name: s.name, url: s.url, link: anaSafeLink(s.url), uptime24: up24[s.key] == null ? null : up24[s.key], tags: s.tags, state: state, reasons: reasons, health: h ? { state: h.state, code: h.code, ms: h.ms, checked: h.checked, since: h.since } : null,
       err24: q.err24, warn24: q.warn24, fail24: q.fail24, ok24: q.ok24, err1h: q.err1h, pv24: a.pv24, ev24: a.ev24, lastHit: a.last, lastEvent: q.lastEvt, series: q.series };
   });
   var out = { generated: now, totals: totals, items: items };

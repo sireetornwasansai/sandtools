@@ -12,7 +12,7 @@ import { loadCss } from '../core/css.js';
 import { fmt, ago } from '../core/charts.js';
 import {
   KIND, KIND_ORDER, LEVEL, HOURS, LEVEL_FILTERS, TASK_STATUS, STATE, sortFleet, stateCounts, fmtDuration, fmtClock, fmtFull, groupByDay, explain,
-  parseFilters, filtersToParams, feedParams, activeFilterCount, defaultFilters, eventText, headline, logSnippets
+  parseFilters, filtersToParams, feedParams, activeFilterCount, defaultFilters, eventText, headline, logSnippets, safeLink, fmtUptime
 } from './monitor-engine.js';
 
 const IC = {
@@ -28,6 +28,7 @@ const IC = {
   hc: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/>',
   ev: '<path d="M9 3v3M3 9h3M5 5l2 2M11 11l9 3-4 2-2 4z"/>',
   pv: '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>', code: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/>'
 };
 const call = (op, params = {}, timeout = 60000) => sessionCall('projects', op, params, timeout);
@@ -79,12 +80,16 @@ export async function mount(root, ctx = {}) {
     chipsBox.replaceChildren(chip('', 'ทั้งหมด', items.length), ...['down', 'error', 'warn', 'ok', 'wait', 'off'].filter((k) => c[k]).map((k) => chip(k, STATE[k].label, c[k])));
   }
   function fleetRow(p) {
+    const row = fleetButton(p); const href = safeLink(p.link || p.url);
+    return h('div', { class: 'mon-item' }, row, href ? h('a', { class: 'mon-open', href, target: '_blank', rel: 'noopener noreferrer', title: `เปิดเว็บไซต์ ${p.name} ในแท็บใหม่`, 'aria-label': `เปิดเว็บไซต์ ${p.name} ในแท็บใหม่` }, 'เปิดเว็บ', svgIcon(IC.ext, 14)) : h('span', { class: 'mon-open mon-open-none', 'aria-hidden': 'true' }, '—'));
+  }
+  function fleetButton(p) {
     const on = F.site === p.key; const meta = STATE[p.state] || STATE.ok; const why = explain(p);
     const hl = p.health; const live = hl ? `${hl.state === 'down' ? 'ล่ม' : 'ตอบกลับ'} ${hl.code ? `HTTP ${hl.code}` : ''}${hl.ms ? ` · ${fmtDuration(hl.ms)}` : ''}`.trim() : (p.state === 'off' ? '—' : 'ยังไม่ตรวจ');
     return h('button', { class: `mon-row mon-s-${p.state}`, type: 'button', 'aria-pressed': String(on), title: 'กดเพื่อดูบันทึกของโครงการนี้', onclick: () => { F.site = on ? '' : p.key; F.tab = 'feed'; syncUrl(); drawFleet(); drawTools(); loadFeed(true); drawTabs(); } },
       h('span', { class: 'mon-state' }, svgIcon(IC[p.state] || IC.ok, 18), h('span', null, meta.label)),
       h('span', { class: 'mon-name' }, h('b', { title: p.name }, p.name), h('small', { class: 'muted' }, why.length ? why[0] : (p.url ? p.url.replace(/^https?:\/\//, '').replace(/\/$/, '') : 'ยังไม่ระบุเว็บไซต์'))),
-      h('span', { class: 'mon-health' }, h('span', null, live), h('small', { class: 'muted' }, hl && hl.checked ? `ตรวจ ${ago(hl.checked)}` : '')),
+      h('span', { class: 'mon-health' }, h('span', null, live), h('small', { class: 'muted' }, [hl && hl.checked ? `ตรวจ ${ago(hl.checked)}` : '', fmtUptime(p.uptime24) ? `uptime ${fmtUptime(p.uptime24)}` : ''].filter(Boolean).join(' · '))),
       h('span', { class: 'mon-errs' }, strip(p.series, `ปัญหาต่อชั่วโมง ย้อนหลัง 24 ชม.: ${p.err24 + p.warn24} ครั้ง`), h('small', null, p.err24 || p.warn24 ? `${fmt(p.err24)} ผิดพลาด${p.warn24 ? ` · ${fmt(p.warn24)} เตือน` : ''}` : 'ไม่มีปัญหา')),
       h('span', { class: 'mon-last' }, h('b', null, p.lastHit || p.lastEvent ? ago(Math.max(p.lastHit, p.lastEvent)) : '—'), h('small', { class: 'muted' }, `${fmt(p.pv24)} เปิดหน้า · ${fmt(p.ev24)} เหตุการณ์ (24 ชม.)`)));
   }
@@ -92,7 +97,7 @@ export async function mount(root, ctx = {}) {
     if (!st.fleet) return;
     const all = sortFleet(st.fleet.items); const shown = st.stateFilter ? all.filter((p) => p.state === st.stateFilter) : all;
     if (!all.length) { fleetBox.replaceChildren(h('div', { class: 'empty' }, svgIcon(IC.hc, 28), h('p', null, 'ยังไม่มีโครงการ — เพิ่มเว็บไซต์ก่อน แล้วจะเห็นสถานะที่นี่'), h('a', { class: 'btn btn-primary', href: '#/projects' }, svgIcon(ICONS.plus, 18), 'ไปหน้าโครงการ'))); return; }
-    fleetBox.replaceChildren(h('div', { class: 'mon-head-row', 'aria-hidden': 'true' }, ['สถานะ', 'โครงการ', 'เว็บตอบกลับ', 'ปัญหา 24 ชม.', 'ข้อมูลล่าสุด'].map((x) => h('span', null, x))), ...shown.map(fleetRow));
+    fleetBox.replaceChildren(h('div', { class: 'mon-head-row', 'aria-hidden': 'true' }, ['สถานะ', 'โครงการ', 'เว็บตอบกลับ / uptime 24 ชม.', 'ปัญหา 24 ชม.', 'ข้อมูลล่าสุด'].map((x) => h('span', null, x))), ...shown.map(fleetRow));
   }
 
   /* ---------- filters ---------- */

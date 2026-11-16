@@ -23,7 +23,13 @@
 .mon-fleet { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
 .mon-head-row, .mon-row { display: grid; grid-template-columns: 9.5rem minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.1fr); gap: .8rem; align-items: center; padding: .7rem 1rem; }
 .mon-head-row { padding-block: .5rem; background: var(--surface-2); color: var(--muted); font-size: .76rem; font-weight: 600; }
-.mon-row { width: 100%; border: 0; border-top: 1px solid var(--border); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: background-color .15s; }
+.mon-row { width: 100%; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: background-color .15s; }
+.mon-item { display: grid; grid-template-columns: minmax(0, 1fr) 6.5rem; align-items: stretch; border-top: 1px solid var(--border); }
+.mon-open { display: flex; align-items: center; justify-content: center; gap: .3rem; padding: .4rem .6rem; font-size: .82rem; font-weight: 600; color: var(--primary); text-decoration: none; border-left: 1px solid var(--border); }
+a.mon-open:hover { background: var(--primary-soft); text-decoration: underline; }
+a.mon-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.mon-open-none { color: var(--muted); font-weight: 400; }
+.mon-head-row { padding-right: calc(1rem + 6.5rem); }
 .mon-row:hover { background: var(--surface-2); }
 .mon-row[aria-pressed="true"] { background: var(--primary-soft); }
 .mon-row.mon-s-down { background: color-mix(in srgb, var(--error) 7%, var(--surface)); }
@@ -103,6 +109,8 @@
   .mon-updated { margin-left: 0; width: 100%; }
 }
 @media (max-width: 640px) {
+  .mon-item { grid-template-columns: 1fr; }
+  .mon-open { border-left: 0; border-top: 1px dashed var(--border); justify-content: flex-start; padding: .5rem 1rem; }
   .mon-ev, .mon-ev-c, .mon-issue { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "time kind" "main main" "badge badge"; gap: .3rem .6rem; }
   .mon-ev .mon-time { grid-area: time; } .mon-ev .mon-kind { grid-area: kind; } .mon-ev .mon-main { grid-area: main; } .mon-ev .mon-badge, .mon-ev .mon-trend { grid-area: badge; justify-self: start; }
   .mon-issue { grid-template-areas: "time kind" "main main" "badge badge"; } .mon-issue .mon-count-n { grid-area: time; } .mon-issue .mon-kind { grid-area: kind; }

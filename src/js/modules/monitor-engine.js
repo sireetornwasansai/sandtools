@@ -164,3 +164,12 @@ export function logSnippets(origin, key, host) {
   ].join('\n');
   return { web, server };
 }
+
+/** Address for the "เปิดเว็บไซต์" button: http/https only, no user:password@, no query/hash. '' when it cannot be opened safely. (The backend sends `link` already cleaned; this is the second check.) */
+export function safeLink(u) {
+  const m = /^(https?):\/\/([^\s/?#]+)(\/[^\s?#]*)?/i.exec(String(u == null ? '' : u).trim());
+  if (!m || m[2].includes('@')) return '';
+  return `${m[1].toLowerCase()}://${m[2]}${m[3] || ''}`.slice(0, 300);
+}
+/** 99.9 → "99.9%" · null/undefined → '' (never checked). */
+export function fmtUptime(v) { return typeof v === 'number' && Number.isFinite(v) ? `${v % 1 ? v.toFixed(1) : v}%` : ''; }
