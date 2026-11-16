@@ -78,6 +78,7 @@ export function mountSiteFloor(host, opts = {}) {
   /** Sky of the campus view: time of day (auto = follows the clock of the plan: night 18:00–06:00, dusk / dawn in between) and rain (auto = some afternoons, on, off). */
   let sky = { tod: 'auto', rain: 'auto' }; try { const q = JSON.parse(localStorage.getItem(SKY_KEY) || 'null'); if (q && typeof q === 'object') sky = { tod: ['auto', 'day', 'night'].includes(q.tod) ? q.tod : 'auto', rain: ['auto', 'on', 'off'].includes(q.rain) ? q.rain : 'auto' }; } catch { /* ignore */ }
   let NIGHT = 0; let skyKey = '';
+  const tmd = { ok: false, obs: 0, rain: 0, rain24: 0, name: '' };   // latest rain observation of the Thai Meteorological Department (via /api/tmd-rain)
   const R = { rep: null, st: null, busy: false, at: 0, src: '' }; const RC = Object.create(null); let rseq = 0;   // R = the replayed real day · RC = 60 s memory per mode
   let sites = []; let themes = []; let more = 0; let LAY = []; let vis = []; let range = { from: cfg.open, to: cfg.close }; let pf = 1; let sm = summarize([]); let hits = [];
   let started = false; let t = 0; let playing = false; let speed = 20; let raf = 0; let last = 0; let lastMin = -1; let seq = 0; let dead = false; let onScreen = true; let hover = -1;
@@ -1675,16 +1676,27 @@ export function mountSiteFloor(host, opts = {}) {
   document.addEventListener('keydown', onKey);
 
   // ---------- loop ----------
+  async function loadTmd() {
+    if (dead || document.hidden) return;
+    try { const r = await fetch('/api/tmd-rain', { cache: 'no-store' }); const j = await r.json(); const ms = Date.parse(j && j.observedAt); if (j && j.ok && Number.isFinite(ms)) Object.assign(tmd, { ok: true, obs: ms, rain: Number(j.rain) || 0, rain24: Number(j.rain24) || 0, name: String(j.station || '') }); else tmd.ok = false; } catch { tmd.ok = false; }
+    drawSky();
+  }
   function saveSky() { try { localStorage.setItem(SKY_KEY, JSON.stringify(sky)); } catch { /* ignore */ } }
   function drawSky() {
     todEl.replaceChildren(...SKY_TOD.map(([id, l]) => h('button', { class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(sky.tod === id), onclick: () => { sky.tod = id; saveSky(); drawSky(); } }, l)));
-    rainBtn.textContent = `🌧 ฝน: ${sky.rain === 'auto' ? 'อัตโนมัติ' : sky.rain === 'on' ? 'ตก' : 'ปิด'}`; rainBtn.setAttribute('aria-pressed', String(sky.rain === 'on'));
-    skyHint.textContent = 'ใช้กับภาพรวมโรงพยาบาล · ตามเวลา: 18:00–06:00 เป็นกลางคืน · ฝนอัตโนมัติจะตกบางช่วงบ่าย';
+    rainBtn.textContent = `🌧 ฝน: ${sky.rain === 'auto' ? 'ตามกรมอุตุฯ' : sky.rain === 'on' ? 'ตก (ทดลอง)' : 'ปิด'}`; rainBtn.setAttribute('aria-pressed', String(sky.rain === 'on'));
+    const om = tmd.ok ? ((new Date(tmd.obs).getUTCHours() + 7) % 24) * 60 + new Date(tmd.obs).getUTCMinutes() : 0;
+    skyHint.textContent = `ใช้กับภาพรวมโรงพยาบาล · กลางคืน 18:00–06:00 · ${tmd.ok ? `ฝนตามกรมอุตุฯ สถานี${tmd.name || 'เชียงใหม่'} ตรวจวัดเมื่อ ${hhmm(om)} น. ได้ ${tmd.rain} มม. (แสดงเมื่อผังอยู่ที่เวลาปัจจุบัน)` : 'ยังโหลดข้อมูลฝนของกรมอุตุฯ ไม่ได้ จึงไม่แสดงฝนในโหมดนี้'}`;
   }
   const nightOf = (min) => { const hr = min / 60; if (hr >= 19 || hr < 5.5) return 1; if (hr >= 17.5) return (hr - 17.5) / 1.5; if (hr < 6.5) return 1 - (hr - 5.5); return 0; };   // 0 day · 1 night
-  const autoRain = (min) => { const day = Math.floor((Date.now() + 7 * 36e5) / 864e5); if (hash01(day * 5 + 1) < 0.72) return 0; const a = 13 + 3 * hash01(day * 11 + 2); const b = a + 1.5 + hash01(day * 3 + 7); const hr = min / 60; return Math.max(0, Math.min(1, Math.min((hr - a) / 0.25, (b - hr) / 0.25))); };
+  /** Auto rain = the latest TMD observation (Chiang Mai station, every 3 h): none → 0, light → .3, moderate → .5, heavy → .75, very heavy → .95; full for 1.5 h after the observation, then fading out by 3 h. Only when the plan shows (about) the real time. */
+  const autoRain = (min) => {
+    if (!tmd.ok || Math.abs(min - bkkMinutes()) > 90) return 0;
+    const age = (Date.now() - tmd.obs) / 36e5; if (age < -0.1 || age > 3) return 0; const mm = tmd.rain;
+    return (mm <= 0 ? 0 : mm < 2.5 ? 0.3 : mm < 10 ? 0.5 : mm < 50 ? 0.75 : 0.95) * (age <= 1.5 ? 1 : Math.max(0, 1 - (age - 1.5) / 1.5));
+  };
   const nightNow = () => (sky.tod === 'night' ? 1 : sky.tod === 'day' ? 0 : nightOf(t));
-  const rainNow = () => (sky.rain === 'on' ? 1 : sky.rain === 'off' ? 0 : autoRain(t));
+  const rainNow = () => (sky.rain === 'on' ? 0.65 : sky.rain === 'off' ? 0 : autoRain(t));
   /** Palette follows the site theme, and — in the campus view only — the time of day: night = the dark palette (lamps, headlights and stall lights come on). */
   function skySync() {
     const dark = document.documentElement.dataset.theme === 'dark'; const on = hospOut() && !ins; NIGHT = on ? nightNow() : 0;
@@ -1699,16 +1711,16 @@ export function mountSiteFloor(host, opts = {}) {
     const w = cv.width / dpr; const hg = cv.height / dpr; const night = NIGHT > 0.5;
     if (r >= 0.02) {   // ripples on the two public roads (never on a building)
       ctx.save(); ctx.strokeStyle = night ? 'rgba(186,215,255,.9)' : 'rgba(255,255,255,.95)'; ctx.lineWidth = 1;
-      for (let i = 0; i < 46; i++) { const ph = reduced ? 0.5 : ((now / 1100 + hash01(i * 13 + 5) * 3) % 1); const onFront = i % 2 === 0; const x = onFront ? 0.4 + hash01(i * 17 + 1) * 26 : 27.4 + hash01(i * 17 + 1) * 1.8; const y = onFront ? 13.2 + hash01(i * 19 + 2) * 1.8 : -16 + hash01(i * 19 + 2) * 28.6; const [sx, sy] = P(x, y, 0); const rx = tw * 0.07 * (0.3 + ph); ctx.globalAlpha = (1 - ph) * 0.55 * r; ctx.beginPath(); ctx.ellipse(sx, sy, rx, rx * 0.5, 0, 0, 7); ctx.stroke(); }
+      for (let i = 0; i < 24; i++) { const ph = reduced ? 0.5 : ((now / 1100 + hash01(i * 13 + 5) * 3) % 1); const onFront = i % 2 === 0; const x = onFront ? 0.4 + hash01(i * 17 + 1) * 26 : 27.4 + hash01(i * 17 + 1) * 1.8; const y = onFront ? 13.2 + hash01(i * 19 + 2) * 1.8 : -16 + hash01(i * 19 + 2) * 28.6; const [sx, sy] = P(x, y, 0); const rx = tw * 0.07 * (0.3 + ph); ctx.globalAlpha = (1 - ph) * 0.35 * r; ctx.beginPath(); ctx.ellipse(sx, sy, rx, rx * 0.5, 0, 0, 7); ctx.stroke(); }
       ctx.restore();
     }
     ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (dusk >= 0.04) { ctx.globalCompositeOperation = 'multiply'; ctx.globalAlpha = 0.3 * dusk; ctx.fillStyle = '#fb923c'; ctx.fillRect(0, 0, w, hg); ctx.globalCompositeOperation = 'source-over'; }
     if (r >= 0.02) {
-      ctx.globalAlpha = 0.3 * r; ctx.fillStyle = night ? '#0f172a' : '#475569'; ctx.fillRect(0, 0, w, hg);   // overcast + wet
-      const tt = reduced ? 0 : now / 1000; ctx.globalAlpha = 1; ctx.lineWidth = 1.5; ctx.strokeStyle = night ? 'rgba(186,215,255,.75)' : 'rgba(51,65,85,.6)'; ctx.beginPath();
-      const n = Math.round(Math.min(520, 160 + 360 * r) * Math.min(1, w / 900 + 0.4));
-      for (let i = 0; i < n; i++) { const sp = 480 + 380 * hash01(i * 3 + 1); const ln = 12 + 16 * hash01(i * 5 + 2); const x = hash01(i * 7 + 3) * (w + 120) - 60; const y = ((tt * sp + hash01(i * 11 + 4) * (hg + 80)) % (hg + 80)) - 40; ctx.moveTo(x, y); ctx.lineTo(x - ln * 0.28, y + ln); }
+      ctx.globalAlpha = 0.1 * r; ctx.fillStyle = night ? '#0f172a' : '#64748b'; ctx.fillRect(0, 0, w, hg);   // a faint overcast veil
+      const tt = reduced ? 0 : now / 1000; ctx.globalAlpha = 1; ctx.lineWidth = 1; ctx.strokeStyle = night ? 'rgba(186,215,255,.4)' : 'rgba(71,85,105,.32)'; ctx.beginPath();
+      const n = Math.round((20 + 130 * r) * Math.min(1, w / 900 + 0.4));
+      for (let i = 0; i < n; i++) { const sp = 480 + 380 * hash01(i * 3 + 1); const ln = 8 + 10 * hash01(i * 5 + 2); const x = hash01(i * 7 + 3) * (w + 120) - 60; const y = ((tt * sp + hash01(i * 11 + 4) * (hg + 80)) % (hg + 80)) - 40; ctx.moveTo(x, y); ctx.lineTo(x - ln * 0.28, y + ln); }
       ctx.stroke();
     }
     ctx.restore();
@@ -1728,7 +1740,7 @@ export function mountSiteFloor(host, opts = {}) {
     skySync(); draw(now);
   }
   loadCss('site3d').catch(() => {});
-  ctx = cv.getContext('2d'); themeSync(); resize(); drawRange(); sync();
+  ctx = cv.getContext('2d'); themeSync(); resize(); drawRange(); sync(); loadTmd(); const tmdTimer = window.setInterval(loadTmd, 600000);
   const ro = new ResizeObserver(() => { resize(); if (sites.length) draw(performance.now()); }); ro.observe(scroller);
   const mo = new MutationObserver(themeSync); mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   const io = typeof IntersectionObserver === 'function' ? new IntersectionObserver((e) => { onScreen = e[e.length - 1].isIntersecting; }) : null; if (io) io.observe(stage);
@@ -1736,5 +1748,5 @@ export function mountSiteFloor(host, opts = {}) {
   document.addEventListener('visibilitychange', onVisible); timer = window.setInterval(onVisible, 15000);
   load().then(() => { if (!dead && !reduced && sites.length && !liveOn) play(); if (!dead && sites.length && want3d()) toggle3d(true); });   // starts playing "now" unless the visitor prefers reduced motion
   raf = requestAnimationFrame(loop);
-  return () => { dead = true; skyStyle.remove(); seq += 1; close3d(false); cancelAnimationFrame(raf); clearInterval(timer); ro.disconnect(); mo.disconnect(); if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVisible); document.removeEventListener('keydown', onKey); };
+  return () => { dead = true; skyStyle.remove(); seq += 1; close3d(false); cancelAnimationFrame(raf); clearInterval(timer); clearInterval(tmdTimer); ro.disconnect(); mo.disconnect(); if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVisible); document.removeEventListener('keydown', onKey); };
 }
