@@ -91,6 +91,13 @@ function inbDateLoose(name) {
   return best ? best.iso : '';
 }
 
+/** Urgency from a file name whose tone marks / vowels were replaced by "_" ("ด่วนที่สุด" → "ด_วนท__ส_ด"). Compared without marks, "_" and spaces. 'most' | 'very' | 'urgent' | ''. */
+function inbUrgencyLoose(name) {
+  var raw = inbDigits(String(name || '')), k = raw.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E_\s.\-]/g, '');
+  if (/ดวนทสด/.test(k)) return 'most';
+  if (/ดวนมาก/.test(k)) return 'very';
+  return /(^|[\s\-(_])ด[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E_]*วน(?=$|[\s\-)_.]|\d)/.test(raw) ? 'urgent' : '';
+}
 function inbMonthIdx(name) {
   var n = String(name).replace(/\.$/, '');
   for (var i = 0; i < INB_MONTHS.length; i++) for (var j = 0; j < INB_MONTHS[i].length; j++) if (INB_MONTHS[i][j].replace(/\.$/, '') === n) return i + 1;

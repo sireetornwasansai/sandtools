@@ -1099,7 +1099,7 @@ function sarQueueFile(sc, b) {
     var nm = file.getName();
     hints.bookNo = inbBookNo(inbFileText(nm)) || inbBookNoLoose(nm);
     hints.bookDate = inbDateLoose(nm);
-    hints.urgency = sarGuessUrgency(inbFileText(nm));
+    hints.urgency = sarGuessUrgency(inbFileText(nm)) || inbUrgencyLoose(nm);
   } catch (x) { console.error('queuefile hints ' + x); }
   return { name: file.getName(), mime: mime, size: bytes.length, data: Utilities.base64Encode(bytes), hints: hints };
 }
