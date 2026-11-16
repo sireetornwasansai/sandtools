@@ -1093,7 +1093,15 @@ function sarQueueFile(sc, b) {
   var bytes = file.getBlob().getBytes(), mime = sarMagicOk(bytes);
   if (mime !== 'application/pdf' && mime.indexOf('image/') !== 0) throw httpError('BAD_FILE', 'ไฟล์ในคิวไม่ใช่ PDF หรือรูปภาพ — อ่านอัตโนมัติไม่ได้');
   sarLog(sc.email, 'queuefile', id, { size: bytes.length });
-  return { name: file.getName(), mime: mime, size: bytes.length, data: Utilities.base64Encode(bytes) };
+  // hints from the file name (letter number / date / urgency): the page cross-checks its OCR against them (a misread digit is the commonest OCR error)
+  var hints = { bookNo: '', bookDate: '', urgency: '' };
+  try {
+    var nm = file.getName();
+    hints.bookNo = inbBookNo(inbFileText(nm)) || inbBookNoLoose(nm);
+    hints.bookDate = inbDateLoose(nm);
+    hints.urgency = sarGuessUrgency(inbFileText(nm));
+  } catch (x) { console.error('queuefile hints ' + x); }
+  return { name: file.getName(), mime: mime, size: bytes.length, data: Utilities.base64Encode(bytes), hints: hints };
 }
 function sarAgg() { return { k: { inToday: 0, outToday: 0, inYear: 0, outYear: 0, lastIn: 0, lastOut: 0, unrouted: 0, overdue: 0, urgentOpen: 0, returned: 0, inprogress: 0, routedOpen: 0, imported: 0, inMonth: 0, outMonth: 0 }, ch: {}, perDay: {}, pend: {} }; }
 function sarAggAdd(a, o, tos, pub, c) {
