@@ -144,3 +144,36 @@ test('parseLetter: a book number quoted in อ้างถึง is not taken as
   const r = parseLetter('เรื่อง ทดสอบ\nเรียน ผอ.\nอ้างถึง หนังสือ สธ 0201/ว 5 ลงวันที่ 1 มกราคม 2569');
   assert.equal(r.docNo, '');
 });
+
+test('parseLetter: อ้างถึง with several numbered items split by blank lines keeps every item', () => {
+  const r = parseLetter('เรื่อง ทดสอบ\nเรียน ผอ.\nอ้างถึง 1. หนังสือ ที่ สธ 0201/ว 5 ลงวันที่ 1 มกราคม 2569\n\n2. หนังสือ ที่ ชม 0017/ว 88 ลงวันที่ 3 กุมภาพันธ์ 2569\nสิ่งที่ส่งมาด้วย 1. แบบรายงาน จำนวน 1 ชุด\n\n2. รายชื่อ จำนวน 1 ชุด\nด้วย สำนักงาน มีความประสงค์');
+  assert.match(r.refs, /^1\. .*5 .*2\. .*88/);
+  assert.match(r.encl, /^1\. แบบรายงาน.*2\. รายชื่อ/);
+  assert.ok(r.found.refs && r.found.encl);
+});
+
+test('parseLetter: a wrapped ลงวันที่ tail belongs to the อ้างถึง line above it', () => {
+  const r = parseLetter('เรื่อง ทดสอบ\nเรียน ผอ.\nอ้างถึง หนังสือสำนักงานสาธารณสุขจังหวัด ที่ สธ 0201/ว 5\n\nลงวันที่ 1 มกราคม 2569\nสิ่งที่ส่งมาด้วย แบบรายงาน จำนวน 1 ชุด\nด้วย สำนักงาน');
+  assert.equal(r.refs, 'หนังสือสำนักงานสาธารณสุขจังหวัด ที่ สธ 0201/ว 5 ลงวันที่ 1 มกราคม 2569');
+  assert.equal(r.encl, 'แบบรายงาน จำนวน 1 ชุด');
+});
+
+test('parseLetter: numbered body paragraphs are NOT swallowed into a single-item อ้างถึง', () => {
+  const r = parseLetter('เรื่อง ทดสอบ\nเรียน ผอ.\nอ้างถึง หนังสือ ที่ สธ 0201/ว 5 ลงวันที่ 1 มกราคม 2569\n\n1. ให้หน่วยงานดำเนินการตามที่ระบุ\n2. รายงานผลภายใน 7 วัน');
+  assert.equal(r.refs, 'หนังสือ ที่ สธ 0201/ว 5 ลงวันที่ 1 มกราคม 2569');
+});
+
+test('parseLetter: อ้างถึง / สิ่งที่ส่งมาด้วย after a scanned label table (layout → plainText → parse)', async () => {
+  const { layoutToMarkdown } = await import('../../src/js/modules/converters/ocr-layout.js');
+  const { plainText } = await import('../../src/js/modules/saraban-engine.js');
+  const row = (y, runs) => runs.map(([x0, text]) => ({ text, bbox: { x0, y0: y - 15, x1: x0 + text.length * 16, y1: y + 15 }, confidence: 90 }));
+  const words = [
+    ...row(300, [[250, 'เรื่อง'], [520, 'ขอความอนุเคราะห์']]), ...row(348, [[250, 'เรียน'], [520, 'ผู้อำนวยการ']]),
+    ...row(396, [[250, 'อ้างถึง'], [520, '1. หนังสือ ที่ สธ 0201/ว 5']]), ...row(444, [[520, '2. หนังสือ ที่ ชม 0017/ว 88']]),
+    ...row(492, [[250, 'สิ่งที่ส่งมาด้วย'], [520, '1. แบบรายงาน จำนวน 1 ชุด']]), ...row(540, [[520, '2. รายชื่อ จำนวน 1 ชุด']]),
+    ...row(588, [[450, 'ด้วย สำนักงานสาธารณสุขจังหวัด มีความประสงค์']])
+  ];
+  const r = parseLetter(plainText(layoutToMarkdown(words, { width: 2480 }).markdown));
+  assert.match(r.refs, /1\. หนังสือ.*5.*2\. หนังสือ.*88/);
+  assert.match(r.encl, /1\. แบบรายงาน.*2\. รายชื่อ/);
+});

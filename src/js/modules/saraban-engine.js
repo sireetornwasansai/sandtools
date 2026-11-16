@@ -90,6 +90,22 @@ export function plainText(md) {
 }
 const ORG_RE = /(โรงพยาบาล|รพ\.|สำนักงาน|สำนัก|กระทรวง|กรม|กอง|จังหวัด|สาธารณสุข|มหาวิทยาลัย|วิทยาลัย|องค์การ|องค์กร|สถาบัน|ศูนย์|เทศบาล|องค์การบริหาร|สภา|คณะ|ศาล|อำเภอ|สสจ\.|สสอ\.)/;
 
+/* อ้างถึง / สิ่งที่ส่งมาด้วย often hold several numbered items or a wrapped tail ("ลงวันที่ …"); the page layout puts a blank line between them,
+   so the first paragraph alone lost the rest. listBlock() joins the first paragraph with the items that clearly belong to it. */
+const LIST_STOP = /^(?:สิ่งที่ส่งมาด้วย|อ้างถึง|เรียน|เรื่อง|ด้วย|ตามที่|เนื่องจาก|เพื่อ|บัดนี้|จึง)/;
+const LIST_NUM = /^\(?\d{1,2}\s*[.)]/;
+const LIST_TAIL = /^(?:ลงวันที่|ลว\.|ฉบับที่|จำนวน)/;
+function listBlock(text, m) {
+  const first = m[1].replace(/\s*\n\s*/g, ' ').trim();
+  const numbered = LIST_NUM.test(first); const extra = []; let wrapOk = false, gap = false;
+  for (const raw of text.slice(m.index + m[0].length).split('\n')) {
+    const l = raw.trim();
+    if (!l) { gap = true; continue; }
+    if (LIST_STOP.test(l)) break;
+    if ((numbered && LIST_NUM.test(l)) || LIST_TAIL.test(l) || (wrapOk && !gap)) { extra.push(l); wrapOk = true; gap = false; if (extra.length >= 8) break; } else break;
+  }
+  return [first, ...extra].join(' ').replace(/\s+/g, ' ').trim();
+}
 /**
  * Read a Thai letter. Returns the fields it could find plus `found` (which ones were actually located) — the clerk always confirms,
  * nothing here is trusted blindly. `dueDays` is "within N days" (counted from the registration day by the caller).
@@ -124,8 +140,8 @@ export function parseLetter(raw) {
   tag('subject', !!out.subject);
 
   m = /(?:^|\n)\s*เรียน\s+([^\n]+)/.exec(text); if (m) out.salut = m[1].trim().slice(0, 160); tag('salut', !!out.salut);
-  m = /อ้างถึง\s+([\s\S]+?)(?=\n\s*(?:สิ่งที่ส่งมาด้วย|ด้วย|ตามที่|เนื่องจาก|เรียน)|\n\s*\n|$)/.exec(text); if (m) out.refs = m[1].replace(/\s*\n\s*/g, ' ').trim().slice(0, 400); tag('refs', !!out.refs);
-  m = /สิ่งที่ส่งมาด้วย\s+([\s\S]+?)(?=\n\s*(?:ด้วย|ตามที่|เนื่องจาก|เรียน|อ้างถึง)|\n\s*\n|$)/.exec(text); if (m) out.encl = m[1].replace(/\s*\n\s*/g, ' ').trim().slice(0, 400); tag('encl', !!out.encl);
+  m = /อ้างถึง\s+([\s\S]+?)(?=\n\s*(?:สิ่งที่ส่งมาด้วย|ด้วย|ตามที่|เนื่องจาก|เรียน)|\n\s*\n|$)/.exec(text); if (m) out.refs = listBlock(text, m).slice(0, 400); tag('refs', !!out.refs);
+  m = /สิ่งที่ส่งมาด้วย\s+([\s\S]+?)(?=\n\s*(?:ด้วย|ตามที่|เนื่องจาก|เรียน|อ้างถึง)|\n\s*\n|$)/.exec(text); if (m) out.encl = listBlock(text, m).slice(0, 400); tag('encl', !!out.encl);
 
   const top = head;
   if (/ด่วนที่สุด/.test(top)) out.urgency = 'most'; else if (/ด่วนมาก/.test(top)) out.urgency = 'very'; else if (/(?:^|[\s(])ด่วน(?:$|[\s)])/m.test(top)) out.urgency = 'urgent';
