@@ -90,12 +90,30 @@ export function plainText(md) {
 }
 const ORG_RE = /(โรงพยาบาล|รพ\.|สำนักงาน|สำนัก|กระทรวง|กรม|กอง|จังหวัด|สาธารณสุข|มหาวิทยาลัย|วิทยาลัย|องค์การ|องค์กร|สถาบัน|ศูนย์|เทศบาล|องค์การบริหาร|สภา|คณะ|ศาล|อำเภอ|สสจ\.|สสอ\.)/;
 
+const STRONG_ORG = /(โรงพยาบาล|รพ\.|สำนักงาน|สำนัก|กระทรวง|กรม|กอง|มหาวิทยาลัย|วิทยาลัย|องค์การ|องค์กร|สถาบัน|ศูนย์|เทศบาล|สภา|คณะ|ศาล|อำเภอ|สสจ\.|สสอ\.)/;
+const ADDRESS_LINE = /^(ถนน|ถ\.|ซอย|ตำบล|ต\.|แขวง|เขต|โทร|โทรสาร|เลขที่\s*\d)|\b\d{5}\s*$/;
+/**
+ * The urgency stamp (ด่วนที่สุด / ด่วนมาก / ด่วน) printed alone at the top of page 1. OCR often drops its tone marks or adds noise
+ * (\"ดวนทสด\", \"ด่วนทีสุด\", \". ด่วนทีสุด\"), so it is compared by skeleton, and only on short lines near the top — never on the body or อ้างถึง.
+ * @param {string[]} lines @returns {'most'|'very'|'urgent'|''}
+ */
+export function stampUrgency(lines) {
+  for (const l of (lines || []).slice(0, 6)) {
+    const t = String(l).replace(/[^\u0e01-\u0e5b]/g, ''); if (!t || t.length > 14) continue;
+    const k = skeleton(t);
+    if (k.length >= 5 && k.length <= 7 && editDistance(k, 'ดวนทสด') <= 1) return 'most';
+    if (k.length >= 5 && k.length <= 7 && editDistance(k, 'ดวนมาก') <= 1) return 'very';
+    if (k === 'ดวน') return 'urgent';
+  }
+  return '';
+}
+
 /**
  * Read a Thai letter. Returns the fields it could find plus `found` (which ones were actually located) — the clerk always confirms,
  * nothing here is trusted blindly. `dueDays` is "within N days" (counted from the registration day by the caller).
  */
 export function parseLetter(raw) {
-  const rep = repairLabels(fixDigitLook(thaiDigitsToArabic(plainText(raw))));
+  const rep = repairLabels(fixDigitLook(thaiDigitsToArabic(plainText(raw).replace(/\u0e4d\u0e32/g, '\u0e33'))));   // OCR writes "สำ" as นิคหิต+สระอา ("สํา")
   const text = rep.text;
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   // The letterhead = everything above เรื่อง / เรียน / อ้างถึง (date, urgency, secrecy and the sender are printed there).
@@ -108,7 +126,7 @@ export function parseLetter(raw) {
   let m = /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(text) || /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?[ก-ฮ]?\d*)/.exec(text);   // ที่ ชม 0033.002/ว1190 · ที่ อว78.06/ว.20419 · ที่ สธ 0123/พิเศษ 9
   if (m) out.docNo = m[1].replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
   if (!out.docNo) {   // OCR often drops the small "ที่" at the line start: accept a bare book number in the letterhead
-    m = /(?:^|\s)([ก-ฮ]{2,4}\s?\d{3,5}(?:\.\d+)*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(head);
+    m = /(?<![ก-ฮ])([ก-ฮ]{2,4}\s?\d{3,5}(?:\.\d+)*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(head);
     if (m) out.docNo = m[1].replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
   }
   tag('docNo', !!out.docNo);
@@ -129,6 +147,7 @@ export function parseLetter(raw) {
 
   const top = head;
   if (/ด่วนที่สุด/.test(top)) out.urgency = 'most'; else if (/ด่วนมาก/.test(top)) out.urgency = 'very'; else if (/(?:^|[\s(])ด่วน(?:$|[\s)])/m.test(top)) out.urgency = 'urgent';
+  if (out.urgency === 'normal') { const u = stampUrgency(lines); if (u) out.urgency = u; }   // the stamp alone on a top line, tone marks lost
   tag('urgency', out.urgency !== 'normal');
   if (headLines.some((l) => /^ลับที่สุด$/.test(l))) out.secrecy = 'tsecret';
   else if (headLines.some((l) => /^ลับมาก$/.test(l))) out.secrecy = 'vsecret';
@@ -139,8 +158,11 @@ export function parseLetter(raw) {
   if (m) { out.due = parseThaiDate(m[1]); tag('due', !!out.due); }
   if (!out.due) { m = /ภายใน\s*(\d{1,3})\s*วัน/.exec(text); if (m && Number(m[1]) <= 365) { out.dueDays = Number(m[1]); tag('due', true); } }
 
-  const org = lines.slice(0, 12).find((l) => ORG_RE.test(l) && !/^(เรียน|เรื่อง|อ้างถึง|ที่ )/.test(l) && l.length <= 90);
-  if (org) out.party = org.replace(/^(ส่วนราชการ|จาก)\s*/, '').trim(); tag('party', !!out.party);
+  // the sender sits beside the crest, often on the same line as \"ที่ …/ว …\" and followed by the address line: cut from the organisation word, skip address lines
+  const orgLines = lines.slice(0, 12).filter((l) => !/^(เรียน|เรื่อง|อ้างถึง)/.test(l) && !ADDRESS_LINE.test(l));
+  let org = orgLines.find((l) => STRONG_ORG.test(l) && l.length <= 120) || orgLines.find((l) => ORG_RE.test(l) && !/^ที่ /.test(l) && l.length <= 90);
+  if (org) { const sm = STRONG_ORG.exec(org); if (sm) org = org.slice(sm.index); org = org.replace(/\s+[A-Za-z0-9|'\"“”‘’]{1,4}$/, '').replace(/^(ส่วนราชการ|จาก)\s*/, '').trim(); }
+  if (org) out.party = org; tag('party', !!out.party);
   return out;
 }
 

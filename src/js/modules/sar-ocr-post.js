@@ -97,11 +97,19 @@ const SarOcrPost = (function () {
     return out;
   }
 
+  /** ความเร่งด่วนจากชื่อไฟล์ — ชื่อจาก Telegram/Drive มักถูกแทนสระ/วรรณยุกต์ด้วย "_" ("ด่วนที่สุด" → "ด_วนท__ส_ด") จึงเทียบแบบไม่สนสระ/วรรณยุกต์/ขีดล่าง */
+  function urgencyFromName(name) {
+    var raw = digits(String(name || '')), k = raw.replace(/[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e_\s.\-]/g, '');
+    if (/ดวนทสด/.test(k)) return 'most';
+    if (/ดวนมาก/.test(k)) return 'very';
+    return /(^|[\s\-(_])ด[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e_]*วน(?=$|[\s\-)_.]|\d)/.test(raw) ? 'urgent' : '';
+  }
+
   /** ชื่อไฟล์ → ค่าช่วยตรวจ. รองรับชื่อที่ถูกแทน "." และช่องว่างด้วย "_" และคำนำหน้า dd-HHmmss_ ที่ Inbox.gs เติมให้ */
   function hintsFromFileName(name) {
     var t = digits(String(name || '')).replace(/\.[A-Za-z0-9]{1,5}$/, '').replace(/^\d{2}-\d{6}_/, '').replace(/_+/g, ' ');
     var d = parseDate(t), no = parseDocNo(t);
-    return { bookNo: no ? no.text : '', bookDate: d && d.iso ? d.iso : '', urgency: (/ด่วนที่สุด/.test(t) ? 'most' : /ด่วนมาก/.test(t) ? 'very' : /(^|[\s\-(])ด่วน($|[\s\-)])/.test(t) ? 'urgent' : '') };
+    return { bookNo: no ? no.text : '', bookDate: d && d.iso ? d.iso : '', urgency: (/ด่วนที่สุด/.test(t) ? 'most' : /ด่วนมาก/.test(t) ? 'very' : /(^|[\s\-(])ด่วน($|[\s\-)])/.test(t) ? 'urgent' : urgencyFromName(name)) };
   }
 
   /** ตรวจ "อ้างถึง": ปีผิดปกติ (เช่น 25020) และวันที่อ้างถึงที่ใหม่กว่าวันที่หนังสือ */
