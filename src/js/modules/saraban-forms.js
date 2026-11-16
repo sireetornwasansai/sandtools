@@ -305,7 +305,7 @@ export function receiveView(root, X, pre = {}) {
       fileLine.replaceChildren(svgIcon(ICONS.file, 18), `${pdf.name} · ${mbText(pdf.size)}`); setPreview(sp.main);
       markScan(1); status.textContent = `กำลังอ่านข้อมูลจาก ${READ_MAX_PAGES} หน้าแรกของหนังสือ (ในเครื่อง ไม่ส่งออกอินเทอร์เน็ต)…`;
       const rd = await readLetter(pdf, sp.main, (s2) => { if (run === scanRun) status.textContent = s2; }); if (run !== scanRun) return;
-      markScan(2); const r = parseLetter(rd.text);
+      markScan(2); const r = parseLetter(rd.text, { today });
       /* cross-check the OCR with the file name (a Telegram/Drive name often carries the letter number + date; a misread digit is the commonest OCR error) */
       const fh = hintsFromFileName(sp.main.name); const hints = { bookNo: (o.hints && o.hints.bookNo) || fh.bookNo, bookDate: (o.hints && o.hints.bookDate) || fh.bookDate, urgency: (o.hints && o.hints.urgency) || fh.urgency };
       const rc = ocrReconcile({ docNo: r.docNo, docDate: r.docDate, urgency: r.urgency === 'normal' ? '' : r.urgency, refs: r.refs, party: r.party }, hints);

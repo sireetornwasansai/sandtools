@@ -98,7 +98,7 @@ const normNo = (s) => String(s).replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').t
 
 /**
  * Cut runs of OCR junk out of the text ("v% 33 ส J a 1 5) a จี่ ov a =% o a" between two real words).
- * A run needs at least 2 junk tokens made of Latin letters / symbols; lone digits and one-consonant tokens only go when they sit inside such a run.
+ * A run needs at least 2 junk tokens made of Latin letters / symbols; the lone digits and one-consonant tokens beside them go with it.
  * @returns {{text:string, cut:number}} cut = number of tokens removed
  */
 export function stripOcrNoise(text) {
@@ -109,7 +109,7 @@ export function stripOcrNoise(text) {
     if (/^[A-Z]{2,3}$/.test(c)) return 'k';                                                  // IT, ICT, QR — real acronyms stay
     if (c.length <= 3 && /[A-Za-z%=~|^*_\\<>{}]/.test(c) && !/[ก-๙]/.test(c)) return 'j';   // strong junk
     if (/^\d{1,2}$/.test(c)) return 'n';
-    if (/^[ก-ฮ][\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]{0,2}$/.test(c) && c !== 'ณ') return 't';
+    if (/^[ก-ฮ][\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]{0,2}$/.test(c) && !/^(ณ|ที่|ที|นี้|นี่|นี|ก็|ซึ่ง)$/.test(c)) return 't';   // a lone consonant is junk, but ที่ นี้ ก็ are words
     return 'k';
   };
   const out = String(text || '').split('\n').map((line) => {
@@ -117,9 +117,10 @@ export function stripOcrNoise(text) {
     for (let i = 0; i < toks.length;) {
       if (ks[i] === 'k') { i += 1; continue; }
       let j = i; while (j < toks.length && ks[j] !== 'k') j += 1;
-      let a = i; let b = j - 1; while (a <= b && ks[a] !== 'j') a += 1; while (b >= a && ks[b] !== 'j') b -= 1;
-      let strong = 0; for (let x = a; x <= b; x += 1) if (ks[x] === 'j') strong += 1;
-      if (a <= b && strong >= 2) { for (let x = a; x <= b; x += 1) keep[x] = false; cut += b - a + 1; }
+      let strong = 0; for (let x = i; x < j; x += 1) if (ks[x] === 'j') strong += 1;
+      if (strong >= 2) { for (let x = i; x < j; x += 1) keep[x] = false; cut += j - i; }   // the whole run: lone digits and consonants beside the junk are junk too
+      else { let nn = 0; let tt = 0; for (let x = i; x < j; x += 1) { if (ks[x] === 'n') nn += 1; if (ks[x] === 't') tt += 1; }
+        if (j - i >= 4 && nn >= 2 && tt >= 1 && nn + tt === j - i) { for (let x = i; x < j; x += 1) keep[x] = false; cut += j - i; } }   // "1 9) 2 3 ซ่": only lone digits and lone consonants, ≥ 4 in a row
       i = j;
     }
     return toks.filter((_, x) => keep[x]).join(' ');
@@ -166,6 +167,11 @@ export function digitsFromRef(subject, ref) {
 }
 
 const subjectKey = (s) => skeleton(s).replace(/[\d/()\-.,]/g, '');
+/** Drop short OCR leftovers ("เขอ่", "TUN") that the clean copy of the subject does not contain; real words and numbers stay. */
+export function dropStrays(subject, ref) {
+  const hay = subjectKey(ref);
+  return String(subject).split(/\s+/).map((t) => { const k = subjectKey(t); return t.length > 4 || /\d/.test(t) || !k || hay.includes(k) ? t : (t[0] === '(' ? '(' : ''); }).join(' ').replace(/\(\s+/g, '(').replace(/\s+/g, ' ').trim();
+}
 /** Same subject despite OCR damage? (compared on consonant skeletons, first 30 letters) */
 export function sameSubject(a, b) {
   const x = subjectKey(a).slice(0, 30); const y = subjectKey(b).slice(0, 30); const n = Math.min(x.length, y.length);
@@ -190,28 +196,55 @@ export function findAttachmentHeader(text) {
 }
 
 const ASK_VERB = /ขอให้|โปรด|ส่ง|ตอบ|แจ้ง|รายงาน|ลงทะเบียน|ยืนยัน|นำส่ง|ดำเนินการ|เสนอ|สมัคร/;
+/** Thai digits OCR mixes up most (๘→๕ ๙→๕ ๗→๑ ๖→๒ …), as Arabic digits: tried one at a time when a day cannot be right. */
+const DIGIT_MIX = { 5: '8693', 8: '53', 9: '501', 1: '794', 7: '1', 6: '52', 3: '8', 0: '96', 2: '6', 4: '1' };
+function dayVariants(dd) {
+  const out = [String(dd)]; const str = String(dd);
+  for (let k = 0; k < str.length; k += 1) for (const c of (DIGIT_MIX[str[k]] || '')) { const v = Number(str.slice(0, k) + c + str.slice(k + 1)); if (v >= 1 && v <= 31 && !out.includes(String(v))) out.push(String(v)); }
+  return out;
+}
 /**
  * The date the sender wants an answer / the work by ("ภายในวันที่ ๒๘ เมษายน ๒๕๖๙", "ไม่เกินวันที่ …", "ก่อนวันที่ …").
  * Several can exist (the meeting day is not a deadline): the one after a request verb wins, one followed by "เวลา / ณ" loses.
- * A year that is missing or garbled becomes the first year that puts the date on or after the letter date.
+ * The year (missing or garbled) comes from the letter date, else from `today`. A deadline can never be before the letter,
+ * so a day that comes out earlier is read again with the digits OCR confuses (25 → 28); that guess is added to `notes`.
+ * @param {string} text @param {string} docISO letter date or '' @param {string} [today] ISO date used when the letter date is unknown @param {string[]} [notes] receives a warning when a digit was guessed
  * @returns {string} ISO date or ''
  */
-export function findDue(text, docISO) {
-  const t = String(text || ''); const be = docISO ? beOf(docISO) : 0;
+export function findDue(text, docISO, today, notes) {
+  const t = String(text || ''); const anchor = docISO || today || ''; const be = anchor ? beOf(anchor) : 0; const limit = anchor ? addDays(anchor, 150) : '';
   const re = /(?:ภายใน|ไม่เกิน|ก่อน)\s*(?:วัน[ก-๙]{0,10}?(?:ที่)?)?\s*(\d{1,2})\s*([ก-๙.]{3,12})\s*(?:พ\.?\s?ศ\.?\s*)?(\d{2,5})?(?!\d)/g;
   let best = null; let m;
   while ((m = re.exec(t))) {
     const mo = monthOfWord(m[2]); if (!mo) continue;
     let y = m[3] || ''; if (y.length === 2) y = String(2500 + Number(y));
-    let iso = /^\d{4}$/.test(y) ? isoFrom(y, mo, m[1]) : '';
-    if (iso && docISO && (iso < docISO || iso > addDays(docISO, 730))) { if (Number(y) >= be - 1 && Number(y) <= be + 2) continue; iso = ''; }   // a stated, sensible year before the letter date: not a deadline
-    if (!iso && be) for (let yy = be; yy <= be + 1 && !iso; yy += 1) { const c = isoFrom(yy, mo, m[1]); if (c && c >= docISO) iso = c; }
+    const stated = /^\d{4}$/.test(y) && Number(y) >= be - 1 && Number(y) <= be + 2 && be ? Number(y) : 0;     // a sensible printed year is kept
+    let iso = ''; let guessed = false;
+    for (const dd of dayVariants(m[1])) {
+      for (const yy of stated ? [stated] : be ? [be, be + 1] : [Number(y) || 0]) {
+        const c = yy ? isoFrom(yy, mo, dd) : '';
+        if (c && (!anchor || (c >= anchor && c <= limit))) { iso = c; guessed = dd !== String(Number(m[1])); break; }
+      }
+      if (iso) break;
+    }
     if (!iso) continue;
     const before = t.slice(Math.max(0, m.index - 140), m.index); const after = t.slice(m.index + m[0].length, m.index + m[0].length + 30);
     const score = 1 + (ASK_VERB.test(before) ? 2 : 0) + (/วัน[ก-๙]{0,10}ที่/.test(m[0]) ? 1 : 0) - (/^\s*(เวลา|ณ)/.test(after) ? 2 : 0);
-    if (!best || score > best.score) best = { iso, score };
+    if (!best || score > best.score) best = { iso, score, guessed, raw: m[1] };
   }
+  if (best && best.guessed && notes) notes.push(`กำหนดตอบกลับ: OCR อ่านวันที่เป็น “${best.raw}” ซึ่งเป็นไปไม่ได้ (ก่อนวันที่หนังสือ) — เดาว่าเป็น ${best.iso.slice(8)} ตรวจกับต้นฉบับ`);
   return best ? best.iso : '';
+}
+
+/** Letter date when OCR garbled it: day + month are read, the year is the latest one that is not after `today` ("๒๗ เมษายน ๒๕๖๙" → "(๒๕| เมษายน ๒๕๐๕"). */
+export function inferDocDate(head, today) {
+  if (!today) return '';
+  const be = beOf(today); const re = /(\d{1,2})\s*\|?\s*([ก-๙.]{3,12})\s*(?:พ\.?\s?ศ\.?\s*)?(\d{3,5})?(?!\d)/g; let m;
+  while ((m = re.exec(String(head || '')))) {
+    const mo = monthOfWord(m[2]); if (!mo) continue;
+    for (let y = be; y >= be - 1; y -= 1) { const c = isoFrom(y, mo, m[1]); if (c && c <= today) return c; }
+  }
+  return '';
 }
 
 /** Urgency / secrecy stamps at the top of the letter, found on consonant skeletons so lost tone marks ("ดวนทสี่ ุด") still count. */
@@ -242,7 +275,8 @@ function orgFromLine(l) {
  * Read a Thai letter. Returns the fields it could find plus `found` (which ones were actually located) — the clerk always confirms,
  * nothing here is trusted blindly. `dueDays` is "within N days" (counted from the registration day by the caller).
  */
-export function parseLetter(raw) {
+export function parseLetter(raw, opts = {}) {
+  const today = opts && opts.today ? String(opts.today) : '';
   const rep = repairLabels(fixDigitLook(thaiDigitsToArabic(plainText(raw))));
   const text = rep.text;
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -265,6 +299,7 @@ export function parseLetter(raw) {
   let d = parseThaiDate(head);
   if (!d) { m = /ลงวันที่\s*([^\n]{4,40})/.exec(noRefs); d = m ? parseThaiDate(m[1]) : ''; }
   if (!d) d = parseThaiDate(noRefs.slice(0, 2500));
+  if (!d) { d = inferDocDate(head, today); if (d) out.checks.push('วันที่หนังสือ: OCR อ่านปี/ตัวเลขไม่ชัด — ประมาณจากวัน-เดือนที่อ่านได้และวันนี้ ตรวจกับต้นฉบับ'); }
   out.docDate = d; tag('docDate', !!d);
 
   m = /เรื่อง\s+([\s\S]+?)(?=\n\s*(?:เรียน|อ้างถึง|สิ่งที่ส่งมาด้วย|ด้วย|ตามที่|เนื่องจาก)|\n\s*\n|$)/.exec(text);
@@ -274,9 +309,10 @@ export function parseLetter(raw) {
   if (ref && (!out.subject || sameSubject(out.subject, ref.subject))) {
     if (!out.docNo || out.docNo.replace(/\s/g, '') !== ref.docNo.replace(/\s/g, '')) { if (out.docNo) out.checks.push(`เลขที่หน้าแรกอ่านได้ “${out.docNo}” — ใช้ “${ref.docNo}” ตามหน้าบัญชีแนบท้าย`); out.docNo = ref.docNo; out.suspect = true; tag('docNo', true); }
     if (out.docDate !== ref.docDate) { if (out.docDate) out.checks.push('วันที่หน้าแรกไม่ตรงกับหน้าบัญชีแนบท้าย — ใช้ค่าจากหน้าบัญชีแนบท้าย'); out.docDate = ref.docDate; tag('docDate', true); }
+    if (out.subject) { const dropped = dropStrays(out.subject, ref.subject); if (dropped !== out.subject) { out.subject = dropped; out.checks.push('เรื่อง: ตัดคำขยะที่ไม่มีในหน้าบัญชีแนบท้ายออก — ตรวจทาน'); } }
     if (out.subject) { const fixed = digitsFromRef(out.subject, ref.subject); if (fixed !== out.subject) { out.subject = fixed; out.checks.push('เรื่อง: ตัวเลขแก้ตามหน้าบัญชีแนบท้าย — ตรวจทาน'); } } else { out.subject = ref.subject.slice(0, 300); out.checks.push('เรื่องอ่านจากหน้าบัญชีแนบท้าย (วรรณยุกต์อาจขาด) — ตรวจทาน'); }
   }
-  if (out.subject) { const y = repairYears(out.subject, out.docDate); if (y !== out.subject) { out.subject = y; out.suspect = true; out.checks.push('เรื่อง: แก้ปีที่ OCR อ่านผิดให้ตรงกับวันที่หนังสือ — ตรวจทาน'); } }
+  if (out.subject) { const y = repairYears(out.subject, out.docDate || today); if (y !== out.subject) { out.subject = y; out.suspect = true; out.checks.push('เรื่อง: แก้ปีที่ OCR อ่านผิดให้ตรงกับวันที่หนังสือ — ตรวจทาน'); } }
   tag('subject', !!out.subject);
 
   m = /(?:^|\n)\s*เรียน\s+([^\n]+)/.exec(text); if (m) out.salut = m[1].trim().slice(0, 160); tag('salut', !!out.salut);
@@ -291,7 +327,7 @@ export function parseLetter(raw) {
   out.secrecy = st.secrecy;
   tag('secrecy', out.secrecy !== 'normal');
 
-  out.due = findDue(text, out.docDate); tag('due', !!out.due);
+  out.due = findDue(text, out.docDate, today, out.checks); tag('due', !!out.due);
   if (!out.due) { m = /ภายใน\s*(\d{1,3})\s*วัน/.exec(text); if (m && Number(m[1]) <= 365) { out.dueDays = Number(m[1]); tag('due', true); } }
 
   out.party = lines.slice(0, 12).map(orgFromLine).find(Boolean) || ''; tag('party', !!out.party);

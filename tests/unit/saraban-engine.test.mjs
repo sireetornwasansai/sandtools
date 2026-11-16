@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLetter, stripOcrNoise, repairYears, findDue, readStamps, parseThaiDate, toCsv, thaiDate, thaiDateTime, dueLabel, addDays, plainText } from '../../src/js/modules/saraban-engine.js';
+import { parseLetter, dropStrays, stripOcrNoise, repairYears, findDue, readStamps, parseThaiDate, toCsv, thaiDate, thaiDateTime, dueLabel, addDays, plainText } from '../../src/js/modules/saraban-engine.js';
 
 const LETTER = `ด่วนที่สุด
 ที่ สธ ๐๑๒๓.๔/ว ๕๖๗
@@ -194,4 +194,71 @@ test('v1.18 stamps survive lost tone marks; a stamp-like word in the body does n
   assert.deepEqual(readStamps(['ด่วนมาก']), { urgency: 'very', secrecy: 'normal' });
   assert.deepEqual(readStamps(['ที่ สธ 0201/ว 5', 'ลับหลัง']), { urgency: 'normal', secrecy: 'normal' });
   assert.equal(parseLetter('ลับที่สุด\nด่วนที่สุด\nที่ กห 0401/55\nเรื่อง ทดสอบ').secrecy, 'tsecret');
+});
+
+/* real tesseract output (tha+eng) of page 1 of the Chiang Mai letter: Thai digits misread (๗→๕, ๘→๕, ๙→๕/๐), junk lines under the subject */
+const REAL_P1 = `|
+|
+|
+|                                                             hy
+|                  ที่ ชม ๐๐๑๕.๕/ว ๑๕6๓๓ส่               ศาลากลางจังหวัดเชียงใหม่
+|                                                           RR
+|                                                                                  ถนนโชตนา ชม ๕๐๓๐๐
+(๒๕| เมษายน ๒๕๐๕
+ฆ่         a             ว)                    =           a wa             ข               ฆ        © |      =
+เรือง ขอเชิญประชุมกลันกรองผลการประเมินผลการปฏิบัติราชการของข้าราชการพลเรือนสามัญส่วนภูมิภาค
+v wv a      เขอ่           ๑   9)             a ซ่    oa                 2 ๓ ซ่
+จังหวัดเชียงใหม่ ครั้งที ๒/๒๕๒๕ สําหรับรอบการประเมินที ๑ (TUN ๑ ตุลาคม ๒๕๒๕ ถึงวันทิ
+๓๑ มีนาคม ๒๕๒๑๕)
+เรียน หัวหนาสวนราชการประจําจังหวัดเชียงใหม่ (รายชื่อตามบัญชีแนบทาย)
+a a   บ       a                                             ๐        9)
+สิงทิส่งมาด้วย ระเบียบวาระการประชุม                              |        จํานวน ๑ ฉบับ
+ด้วยจังหวัดเชียงใหม่ได้กําหนดประชุมกลันกรองผลการประเมินผลการปฏิบัติราชการ
+ของข้าราชการพลเรือนสามัญส่วนภูมิภาค ผู้ดํารงตําแหน่งประเภทวิชาการ ระดับปฏิบัติการ ระดับชํานาญการ
+๑7  ๐         a         ๐     1         ๑         ๑7   ชร a           ๐   ๑7             a  จ่
+ระดับชํานาญการพิเศษ และตําแหน่งประเภททัวไปทุกระดับ ครั้งที ๒/๒๕๒๕ สําหรับรอบการประเมินที ๑
+ย ซ่           = ou ซ่   =          IY)   ฆ ซฆจข่
+(วันที่ ๑ ตุลาคม ๒๕๒๕ ถึงวันที ๓๑ มีนาคม ๒๕๐๑) ในวันพฤหัสบดีที่ ๓๐ เมษายน ๒๕๒๕ เวลา ๐๕.๓๐ น.
+เว        ซ่       ๐            ๓ ๓๓ ส    |              a a)   ขย
+ณ ห้องประชุม ๑ ชั้น ๒ อาคารอํานวยการ ศาลากลางจังหวัดเชียงใหม่ รายละเอียดปรากฏตามสิงที่ส่งมาด้วย
+ในการนี จังหวัดเชียงใหม่จึงขอเรียนเชิญท่านหรือผู้แทน จํานวน ๑ คน เข้าร่วมประชุม
+เพื่อซีแจงผลการประเมินผลการปฏิบัติราชการของข้าราชการพลเรือนสามัญในสังกัด ทั้งนี่ ขอให้ส่งแบบตอบรับ
+ผ่านช่องทาง 0๐8 Code ด้านท้ายหนังสือนี ให้กลุ่มงานบริหารทรัพยากรบุคคล สํานักงานจังหวัดเชียงใหม่
+ภายในวันที ๒๕ เมษายน ๒๕๒๕
+= a      ซ่ a       ข เ           ๑7               Ao เ       ขย    ซ= 0
+จึงเรียนมาเพื่อพิจารณาเข้าร่วมประชุมในวัน เวลา และสถานทีดังกล่าวโดยพร้อมเพรียงกัน
+ขอแสดงความนับถือ
+.                    ร์
+มฯษ% ชม ๓
+(นนย์บุญลือ  ธรรมธรานุรกษ)
+รองผู้ว่าราชการจังหวัดเชียงใหม่
+ประธานกรรมการกลันกรองผลการประเมินผลการปฏิบัติราชการ
+ของข้าราชการพลเรือนสามัญส่วนภูมิภาค จังหวัดเชียงใหม่
+mem
+[+
+|                    [=
+แบบตอบรับ
+|                 สํานักงานจังหวัด
+|                 กลุ่มงานบริหารทรัพยากรบุคคล
+|                   โทรศัพท์ ๐ ๕๓๑๑ ๒๓๐๕
+|
+`;
+const REAL_ATT = `บัญชีแนบทายแจงหัวหนาสวนราชการประจำจังหวัดเชียงใหม
+หนังสือจังหวัดเชียงใหม ที่ ชม 0017.5/ว 14379 ลงวันที่ 27 เมษายน 2569
+เรื่อง ขอเชิญประชุมกลั่นกรองผลการประเมินผลการปฏิบัติราชการของขาราชการพลเรือนสามัญ
+สวนภูมิภาคจังหวัดเชียงใหม
+ครั้งที่ 2/2569 สำหรับรอบการประเมินที่ 1 (วันที่ 1 ตุลาคม 2568 ถึงวันที่ 31 มีนาคม 2569)
+
+1     พัฒนาสังคมและความมั่นคงของมนุษยจังหวัดเชียงใหม`;
+test('v1.18 real OCR: letter number and subject digits come from the attachment page, reply-by day is repaired, sender is clean', () => {
+  const r = parseLetter(`${REAL_P1}\n\n${REAL_ATT}`, { today: '2026-04-27' });
+  assert.equal(r.docNo, 'ชม 0017.5/ว 14379'); assert.equal(r.docDate, '2026-04-27');
+  assert.match(r.subject, /ครั้งที 2\/2569/); assert.match(r.subject, /1 ตุลาคม 2568 ถึงวันทิ 31 มีนาคม 2569/); assert.ok(!/TUN|เขอ่|v%/.test(r.subject));
+  assert.equal(r.party, 'ศาลากลางจังหวัดเชียงใหม่'); assert.equal(r.due, '2026-04-28');
+  assert.ok(r.checks.some((c) => /“25”/.test(c) && /28/.test(c)), 'the guessed day is reported');
+});
+test('v1.18 without an attachment page the damaged fields are flagged, never silently trusted; dropStrays keeps real words', () => {
+  const r = parseLetter(REAL_P1, { today: '2026-04-27' });
+  assert.equal(r.suspect, true); assert.ok(r.checks.length >= 1); assert.equal(r.party, 'ศาลากลางจังหวัดเชียงใหม่');
+  assert.equal(dropStrays('ขอเชิญประชุม ครั้งที่ 2 (TUN 1 ตุลาคม', 'ขอเชิญประชุม ครั้งที่ 2 (วันที่ 1 ตุลาคม'), 'ขอเชิญประชุม ครั้งที่ 2 ( 1 ตุลาคม'.replace('( ', '(') );
 });
