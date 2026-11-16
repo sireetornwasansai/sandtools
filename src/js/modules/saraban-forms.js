@@ -276,7 +276,7 @@ export function receiveView(root, X, pre = {}) {
   function paintFound(found, note) {
     const keys = ['docNo', 'docDate', 'subject', 'party', 'salut']; const n = keys.filter((k) => found[k]).length;
     foundBox.replaceChildren(h('div', { class: 'sar-found-h' }, h('strong', null, 'ผลการอ่านอัตโนมัติ'), badge(`${n}/${keys.length} รายการหลัก`, n >= 4 ? 'ok' : n >= 2 ? 'warn' : 'bad')),
-      h('div', { class: 'sar-found-chips' }, [...keys, 'urgency', 'due', 'refs'].filter((k) => found[k] || keys.includes(k)).map((k) => h('span', { class: `sar-chip ${found[k] ? 'ok' : 'miss'}`, title: found[k] ? 'อ่านได้ — โปรดตรวจทาน' : 'อ่านไม่พบ — กรอกเอง' }, `${found[k] ? '✓' : '–'} ${SCAN_FIELD_LABELS[k]}`))), note ? h('p', { class: 'hint' }, note) : null);
+      h('div', { class: 'sar-found-chips' }, [...keys, 'urgency', 'secrecy', 'due', 'refs'].filter((k) => found[k] || keys.includes(k)).map((k) => h('span', { class: `sar-chip ${found[k] ? 'ok' : 'miss'}`, title: found[k] ? 'อ่านได้ — โปรดตรวจทาน' : 'อ่านไม่พบ — กรอกเอง' }, `${found[k] ? '✓' : '–'} ${SCAN_FIELD_LABELS[k]}`))), note ? h('p', { class: 'hint' }, note) : null);
   }
   function setPreview(files) {
     if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = ''; }
@@ -312,7 +312,7 @@ export function receiveView(root, X, pre = {}) {
       if (rc.fields.docNo) { r.docNo = rc.fields.docNo; r.found.docNo = true; }
       if (rc.fields.docDate) { r.docDate = rc.fields.docDate; r.found.docDate = true; }
       if (rc.fields.urgency) { r.urgency = rc.fields.urgency; r.found.urgency = true; }
-      const checks = rc.notes.filter((x) => x.field !== 'party').map((x) => x.msg);          // the sender is already shown as a missing/found chip
+      const checks = rc.notes.filter((x) => x.field !== 'party').map((x) => x.msg).concat(r.checks || []);          // the sender is already shown as a missing/found chip
       const set = (k, v) => { if (v && (!F[k].value.trim() || !touched.has(k))) F[k].value = v; };    // a re-scan never overwrites what the clerk typed
       ['docNo', 'docDate', 'subject', 'party', 'salut', 'refs', 'encl', 'due'].forEach((k) => set(k, r[k]));
       if (!r.due && r.dueDays) set('due', addDays(today, r.dueDays));

@@ -90,6 +90,154 @@ export function plainText(md) {
 }
 const ORG_RE = /(โรงพยาบาล|รพ\.|สำนักงาน|สำนัก|กระทรวง|กรม|กอง|จังหวัด|สาธารณสุข|มหาวิทยาลัย|วิทยาลัย|องค์การ|องค์กร|สถาบัน|ศูนย์|เทศบาล|องค์การบริหาร|สภา|คณะ|ศาล|อำเภอ|สสจ\.|สสอ\.)/;
 
+/* ---- v1.18 reading accuracy: OCR junk, garbled years, deadline, stamps, attachment-page cross-check ---- */
+const beOf = (iso) => Number(String(iso).slice(0, 4)) + 543;
+const monthOfWord = (w) => monthIndex(w) || fuzzyMonth(String(w).replace(/\./g, ''));
+const NO_PAT = '[ก-ฮ]{1,5}\\s?\\d[\\d.]*\\s?\\/\\s?(?:ว\\s?\\.?\\s?|พิเศษ\\s?)?\\d+(?:-\\d+)?';
+const normNo = (s) => String(s).replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
+
+/**
+ * Cut runs of OCR junk out of the text ("v% 33 ส J a 1 5) a จี่ ov a =% o a" between two real words).
+ * A run needs at least 2 junk tokens made of Latin letters / symbols; lone digits and one-consonant tokens only go when they sit inside such a run.
+ * @returns {{text:string, cut:number}} cut = number of tokens removed
+ */
+export function stripOcrNoise(text) {
+  let cut = 0;
+  const kind = (t) => {
+    const c = t.replace(/[()[\].,;:!?'"“”‘’]/g, '');
+    if (!c) return 'p';
+    if (/^[A-Z]{2,3}$/.test(c)) return 'k';                                                  // IT, ICT, QR — real acronyms stay
+    if (c.length <= 3 && /[A-Za-z%=~|^*_\\<>{}]/.test(c) && !/[ก-๙]/.test(c)) return 'j';   // strong junk
+    if (/^\d{1,2}$/.test(c)) return 'n';
+    if (/^[ก-ฮ][\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]{0,2}$/.test(c) && c !== 'ณ') return 't';
+    return 'k';
+  };
+  const out = String(text || '').split('\n').map((line) => {
+    const toks = line.split(/\s+/).filter(Boolean); const ks = toks.map(kind); const keep = toks.map(() => true);
+    for (let i = 0; i < toks.length;) {
+      if (ks[i] === 'k') { i += 1; continue; }
+      let j = i; while (j < toks.length && ks[j] !== 'k') j += 1;
+      let a = i; let b = j - 1; while (a <= b && ks[a] !== 'j') a += 1; while (b >= a && ks[b] !== 'j') b -= 1;
+      let strong = 0; for (let x = a; x <= b; x += 1) if (ks[x] === 'j') strong += 1;
+      if (a <= b && strong >= 2) { for (let x = a; x <= b; x += 1) keep[x] = false; cut += b - a + 1; }
+      i = j;
+    }
+    return toks.filter((_, x) => keep[x]).join(' ');
+  });
+  return { text: out.join('\n'), cut };
+}
+
+/**
+ * OCR turns Thai digits (๒๕๖๙) into other numbers ("2525", "25001"). Fix only years that cannot be right, from the letter's own date:
+ * "ครั้งที่ 2/2525" → the letter's year; "1 ตุลาคม 2525 ถึงวันที่ 31 มีนาคม 25001" → the dates nearest the letter date, a range start never after its end.
+ * A year that is plausible is never touched.
+ */
+export function repairYears(text, docISO) {
+  if (!docISO) return String(text || '');
+  const be = beOf(docISO); const docT = Date.parse(`${docISO}T00:00:00Z`);
+  const okYear = (y) => /^\d{4}$/.test(y) && Number(y) >= be - 3 && Number(y) <= be + 1;
+  const s = String(text || '').replace(/(ครั้งที่\s*\d{1,2}\s*\/\s*)(\d{3,5})(?!\d)/g, (m, p, y) => (okYear(y) ? m : p + be));
+  const re = /(\d{1,2})\s+([ก-๙.]{3,12})\s*(?:พ\.?\s?ศ\.?\s*)?(\d{3,5})(?!\d)/g; const ms = []; let m;
+  while ((m = re.exec(s))) { const mo = monthOfWord(m[2]); if (mo) ms.push({ at: m.index, end: m.index + m[0].length, d: Number(m[1]), mo, y: m[3] }); }
+  const pick = (d, mo, hi) => {
+    let best = 0; let score = hi == null ? Infinity : -Infinity;
+    for (let y = be - 2; y <= be + 1; y += 1) {
+      const iso = isoFrom(y, mo, d); if (!iso) continue; const t = Date.parse(`${iso}T00:00:00Z`);
+      if (hi == null) { const dist = Math.abs(t - docT); if (dist < score) { score = dist; best = y; } } else if (t <= hi && t > score) { score = t; best = y; }
+    }
+    return best;
+  };
+  const res = []; const fixes = [];
+  for (let i = ms.length - 1; i >= 0; i -= 1) {
+    const x = ms[i]; const next = ms[i + 1];
+    const hi = next && res[i + 1] && /ถึง/.test(s.slice(x.end, next.at)) ? res[i + 1] : null;
+    const y = okYear(x.y) ? Number(x.y) : pick(x.d, x.mo, hi);
+    const iso = y ? isoFrom(y, x.mo, x.d) : ''; res[i] = iso ? Date.parse(`${iso}T00:00:00Z`) : null;
+    if (y && !okYear(x.y)) fixes.push({ at: x.end - x.y.length, len: x.y.length, to: String(y) });
+  }
+  return fixes.reduce((acc, f) => acc.slice(0, f.at) + f.to + acc.slice(f.at + f.len), s);   // fixes run last → first, so earlier offsets stay valid
+}
+
+/** Put the digits of a clean copy of the subject (attachment page) into the OCR subject — only when both hold the same count of numbers. */
+export function digitsFromRef(subject, ref) {
+  const num = /\d+(?:\/\d+)?/g; const a = String(subject).match(num) || []; const b = String(ref).match(num) || [];
+  if (!a.length || a.length !== b.length) return subject;
+  let i = 0; return String(subject).replace(num, () => b[i++]);
+}
+
+const subjectKey = (s) => skeleton(s).replace(/[\d/()\-.,]/g, '');
+/** Same subject despite OCR damage? (compared on consonant skeletons, first 30 letters) */
+export function sameSubject(a, b) {
+  const x = subjectKey(a).slice(0, 30); const y = subjectKey(b).slice(0, 30); const n = Math.min(x.length, y.length);
+  return n >= 12 && editDistance(x.slice(0, n), y.slice(0, n)) / n <= 0.4;
+}
+
+/**
+ * Attachment page ("บัญชีแนบท้าย…") that prints this letter again: "หนังสือจังหวัด… ที่ ชม 0017.5/ว 14379 ลงวันที่ 27 เมษายน 2569" + "เรื่อง …".
+ * Its text layer holds clean digits, so it is the cross-check for the number, the date and the digits of the subject (tone marks may be missing there).
+ */
+export function findAttachmentHeader(text) {
+  const ls = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const re = new RegExp(`^หนังสือ[^\\d\\n]{0,70}?ที่\\s*(${NO_PAT})\\s*ลงวันที่\\s*([^\\n]{4,40})$`);
+  for (let i = 0; i < ls.length - 1; i += 1) {
+    const m = re.exec(ls[i]); if (!m || !/^เรื่อง/.test(ls[i + 1])) continue;
+    const docDate = parseThaiDate(m[2]); if (!docDate) continue;
+    const sub = [ls[i + 1].replace(/^เรื่อง\s*:?\s*/, '')];
+    for (let j = i + 2; j < ls.length && sub.length < 4 && !/^(\d+\s|เรียน|อ้างถึง)/.test(ls[j]); j += 1) sub.push(ls[j]);
+    return { docNo: normNo(m[1]), docDate, subject: sub.join(' ').replace(/\s+/g, ' ').trim() };
+  }
+  return null;
+}
+
+const ASK_VERB = /ขอให้|โปรด|ส่ง|ตอบ|แจ้ง|รายงาน|ลงทะเบียน|ยืนยัน|นำส่ง|ดำเนินการ|เสนอ|สมัคร/;
+/**
+ * The date the sender wants an answer / the work by ("ภายในวันที่ ๒๘ เมษายน ๒๕๖๙", "ไม่เกินวันที่ …", "ก่อนวันที่ …").
+ * Several can exist (the meeting day is not a deadline): the one after a request verb wins, one followed by "เวลา / ณ" loses.
+ * A year that is missing or garbled becomes the first year that puts the date on or after the letter date.
+ * @returns {string} ISO date or ''
+ */
+export function findDue(text, docISO) {
+  const t = String(text || ''); const be = docISO ? beOf(docISO) : 0;
+  const re = /(?:ภายใน|ไม่เกิน|ก่อน)\s*(?:วัน[ก-๙]{0,10}?(?:ที่)?)?\s*(\d{1,2})\s*([ก-๙.]{3,12})\s*(?:พ\.?\s?ศ\.?\s*)?(\d{2,5})?(?!\d)/g;
+  let best = null; let m;
+  while ((m = re.exec(t))) {
+    const mo = monthOfWord(m[2]); if (!mo) continue;
+    let y = m[3] || ''; if (y.length === 2) y = String(2500 + Number(y));
+    let iso = /^\d{4}$/.test(y) ? isoFrom(y, mo, m[1]) : '';
+    if (iso && docISO && (iso < docISO || iso > addDays(docISO, 730))) { if (Number(y) >= be - 1 && Number(y) <= be + 2) continue; iso = ''; }   // a stated, sensible year before the letter date: not a deadline
+    if (!iso && be) for (let yy = be; yy <= be + 1 && !iso; yy += 1) { const c = isoFrom(yy, mo, m[1]); if (c && c >= docISO) iso = c; }
+    if (!iso) continue;
+    const before = t.slice(Math.max(0, m.index - 140), m.index); const after = t.slice(m.index + m[0].length, m.index + m[0].length + 30);
+    const score = 1 + (ASK_VERB.test(before) ? 2 : 0) + (/วัน[ก-๙]{0,10}ที่/.test(m[0]) ? 1 : 0) - (/^\s*(เวลา|ณ)/.test(after) ? 2 : 0);
+    if (!best || score > best.score) best = { iso, score };
+  }
+  return best ? best.iso : '';
+}
+
+/** Urgency / secrecy stamps at the top of the letter, found on consonant skeletons so lost tone marks ("ดวนทสี่ ุด") still count. */
+export function readStamps(headLines) {
+  const RK = { normal: 0, urgent: 1, very: 2, most: 3, secret: 1, vsecret: 2, tsecret: 3 }; const out = { urgency: 'normal', secrecy: 'normal' };
+  const near = (s, k) => s === k || (s.length >= 4 && s.length <= k.length + 1 && editDistance(s, k) <= 1);
+  const up = (u) => { if (RK[u] > RK[out.urgency]) out.urgency = u; };
+  headLines.slice(0, 8).forEach((l) => {
+    const s = skeleton(l);
+    if (s.startsWith('ดวนทสด') || near(s, 'ดวนทสด')) up('most'); else if (s.startsWith('ดวนมาก') || near(s, 'ดวนมาก')) up('very'); else if (s === 'ดวน') up('urgent');
+    const sec = s.startsWith('ลบทสด') || near(s, 'ลบทสด') ? 'tsecret' : s.startsWith('ลบมาก') || near(s, 'ลบมาก') ? 'vsecret' : s === 'ลบ' ? 'secret' : '';
+    if (sec && RK[sec] > RK[out.secrecy]) out.secrecy = sec;
+  });
+  return out;
+}
+
+const DOCNO_LEAD = new RegExp(`^ที่?\\s*${NO_PAT}\\s*`);
+/** Sender from a letterhead line. OCR often joins the letter number (left) and the agency (beside the emblem) into one line. */
+function orgFromLine(l) {
+  const t0 = stripOcrNoise(l.replace(DOCNO_LEAD, '')).text.trim();
+  if (!t0 || /^(เรียน|เรื่อง|อ้างถึง|ที่\s)/.test(t0) || /^(ถนน|ถ\.|ตำบล|แขวง|โทร)/.test(t0) || /\d{5}/.test(t0) || t0.length > 90) return '';
+  const m = ORG_RE.exec(t0); if (!m) return '';
+  const t = m.index && t0.slice(0, m.index).trim().length <= 3 ? t0.slice(m.index) : t0;
+  return t.replace(/^(ส่วนราชการ|จาก)\s*/, '').trim();
+}
+
 /**
  * Read a Thai letter. Returns the fields it could find plus `found` (which ones were actually located) — the clerk always confirms,
  * nothing here is trusted blindly. `dueDays` is "within N days" (counted from the registration day by the caller).
@@ -102,7 +250,7 @@ export function parseLetter(raw) {
   let cut = lines.findIndex((l) => /^(เรื่อง|เรียน|อ้างถึง|สิ่งที่ส่งมาด้วย)/.test(l));
   if (cut < 0) cut = Math.min(lines.length, 4);
   const headLines = lines.slice(0, Math.min(cut, 12)); const head = headLines.join('\n');
-  const out = { docNo: '', docDate: '', subject: '', party: '', salut: '', refs: '', encl: '', urgency: 'normal', secrecy: 'normal', due: '', dueDays: 0, found: {}, repaired: rep.fixed };
+  const out = { docNo: '', docDate: '', subject: '', party: '', salut: '', refs: '', encl: '', urgency: 'normal', secrecy: 'normal', due: '', dueDays: 0, found: {}, repaired: rep.fixed, checks: [], suspect: false };
   const tag = (k, ok) => { if (ok) out.found[k] = true; };
 
   let m = /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(text) || /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?[ก-ฮ]?\d*)/.exec(text);   // ที่ ชม 0033.002/ว1190 · ที่ อว78.06/ว.20419 · ที่ สธ 0123/พิเศษ 9
@@ -121,6 +269,14 @@ export function parseLetter(raw) {
 
   m = /เรื่อง\s+([\s\S]+?)(?=\n\s*(?:เรียน|อ้างถึง|สิ่งที่ส่งมาด้วย|ด้วย|ตามที่|เนื่องจาก)|\n\s*\n|$)/.exec(text);
   if (m) out.subject = m[1].replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (out.subject) { const c = stripOcrNoise(out.subject); if (c.cut) { out.subject = c.text.replace(/\s+/g, ' ').trim(); out.suspect = true; out.checks.push('เรื่อง: ตัดตัวอักษรขยะจาก OCR ออก — ตรวจกับต้นฉบับ'); } }
+  const ref = findAttachmentHeader(text);   // the attachment page prints this letter's number / date / subject again, with clean digits
+  if (ref && (!out.subject || sameSubject(out.subject, ref.subject))) {
+    if (!out.docNo || out.docNo.replace(/\s/g, '') !== ref.docNo.replace(/\s/g, '')) { if (out.docNo) out.checks.push(`เลขที่หน้าแรกอ่านได้ “${out.docNo}” — ใช้ “${ref.docNo}” ตามหน้าบัญชีแนบท้าย`); out.docNo = ref.docNo; out.suspect = true; tag('docNo', true); }
+    if (out.docDate !== ref.docDate) { if (out.docDate) out.checks.push('วันที่หน้าแรกไม่ตรงกับหน้าบัญชีแนบท้าย — ใช้ค่าจากหน้าบัญชีแนบท้าย'); out.docDate = ref.docDate; tag('docDate', true); }
+    if (out.subject) { const fixed = digitsFromRef(out.subject, ref.subject); if (fixed !== out.subject) { out.subject = fixed; out.checks.push('เรื่อง: ตัวเลขแก้ตามหน้าบัญชีแนบท้าย — ตรวจทาน'); } } else { out.subject = ref.subject.slice(0, 300); out.checks.push('เรื่องอ่านจากหน้าบัญชีแนบท้าย (วรรณยุกต์อาจขาด) — ตรวจทาน'); }
+  }
+  if (out.subject) { const y = repairYears(out.subject, out.docDate); if (y !== out.subject) { out.subject = y; out.suspect = true; out.checks.push('เรื่อง: แก้ปีที่ OCR อ่านผิดให้ตรงกับวันที่หนังสือ — ตรวจทาน'); } }
   tag('subject', !!out.subject);
 
   m = /(?:^|\n)\s*เรียน\s+([^\n]+)/.exec(text); if (m) out.salut = m[1].trim().slice(0, 160); tag('salut', !!out.salut);
@@ -129,18 +285,16 @@ export function parseLetter(raw) {
 
   const top = head;
   if (/ด่วนที่สุด/.test(top)) out.urgency = 'most'; else if (/ด่วนมาก/.test(top)) out.urgency = 'very'; else if (/(?:^|[\s(])ด่วน(?:$|[\s)])/m.test(top)) out.urgency = 'urgent';
+  const st = readStamps(headLines); const RK = ['normal', 'urgent', 'very', 'most'];
+  if (RK.indexOf(st.urgency) > RK.indexOf(out.urgency)) out.urgency = st.urgency;
   tag('urgency', out.urgency !== 'normal');
-  if (headLines.some((l) => /^ลับที่สุด$/.test(l))) out.secrecy = 'tsecret';
-  else if (headLines.some((l) => /^ลับมาก$/.test(l))) out.secrecy = 'vsecret';
-  else if (headLines.some((l) => /^ลับ$/.test(l))) out.secrecy = 'secret';
+  out.secrecy = st.secrecy;
   tag('secrecy', out.secrecy !== 'normal');
 
-  m = /ภายใน(?:วันที่)?\s*(\d{1,2}\s*[^\d\s]+\s*\d{4}|\d{1,2}[/.-]\d{1,2}[/.-]\d{4})/.exec(text);
-  if (m) { out.due = parseThaiDate(m[1]); tag('due', !!out.due); }
+  out.due = findDue(text, out.docDate); tag('due', !!out.due);
   if (!out.due) { m = /ภายใน\s*(\d{1,3})\s*วัน/.exec(text); if (m && Number(m[1]) <= 365) { out.dueDays = Number(m[1]); tag('due', true); } }
 
-  const org = lines.slice(0, 12).find((l) => ORG_RE.test(l) && !/^(เรียน|เรื่อง|อ้างถึง|ที่ )/.test(l) && l.length <= 90);
-  if (org) out.party = org.replace(/^(ส่วนราชการ|จาก)\s*/, '').trim(); tag('party', !!out.party);
+  out.party = lines.slice(0, 12).map(orgFromLine).find(Boolean) || ''; tag('party', !!out.party);
   return out;
 }
 
@@ -217,7 +371,7 @@ export function splitDrop(files) {
 }
 /** Enough read to stop OCR early: เลขที่ + เรื่อง + เรียน are all found (they sit on page 1, so pages 2–3 are only read when page 1 fell short). */
 export function readEnough(text) {
-  try { const r = parseLetter(text); return !!(r.found.subject && r.found.docNo && r.found.salut); } catch { return false; }
+  try { const r = parseLetter(text); return !!(r.found.subject && r.found.docNo && r.found.salut && !r.suspect); } catch { return false; }
 }
 
 /** The four steps a received letter walks through (the progress bar on the tracking page). */

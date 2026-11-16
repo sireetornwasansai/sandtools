@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLetter, parseThaiDate, toCsv, thaiDate, thaiDateTime, dueLabel, addDays, plainText } from '../../src/js/modules/saraban-engine.js';
+import { parseLetter, stripOcrNoise, repairYears, findDue, readStamps, parseThaiDate, toCsv, thaiDate, thaiDateTime, dueLabel, addDays, plainText } from '../../src/js/modules/saraban-engine.js';
 
 const LETTER = `ด่วนที่สุด
 ที่ สธ ๐๑๒๓.๔/ว ๕๖๗
@@ -143,4 +143,55 @@ test('parseLetter: book number is still found when OCR drops the word "ที่
 test('parseLetter: a book number quoted in อ้างถึง is not taken as this letter\'s number', () => {
   const r = parseLetter('เรื่อง ทดสอบ\nเรียน ผอ.\nอ้างถึง หนังสือ สธ 0201/ว 5 ลงวันที่ 1 มกราคม 2569');
   assert.equal(r.docNo, '');
+});
+
+/* ---- v1.18: reading accuracy on a noisy scan (real case: OCR of a Chiang Mai provincial letter, Thai digits misread, junk between words) ---- */
+const SCAN_P1 = `ที่ชม 0013.5/ว 15113 ส ศาลากลางจังหวัดเชียงใหม่
+ถนนโชตนา ชม 50300
+27 เมษายน 2569
+เรื่อง ขอเชิญประชุมกลั่นกรองผลการประเมินผลการปฏิบัติราชการของข้าราชการพลเรือนสามัญส่วนภูมิภาค v% 33 ส J a 1 5) a จี่ ov a =% o a
+จังหวัดเชียงใหม่ ครั้งที่ 2/2525 สำหรับรอบการประเมินที่ 1 (วันที่ 1 ตุลาคม 2525 ถึงวันที่ 31 มีนาคม 25001)
+เรียน หัวหน้าส่วนราชการประจำจังหวัดเชียงใหม่ (รายชื่อตามบัญชีแนบท้าย)
+ด้วยจังหวัดเชียงใหม่ได้กำหนดประชุม ในวันพฤหัสบดีที่ 30 เมษายน 2569 เวลา 09.30 น. ณ ห้องประชุม 1
+ทั้งนี้ ขอให้ส่งแบบตอบรับผ่านช่องทาง QR Code ให้กลุ่มงานบริหารทรัพยากรบุคคล
+ภายในวันที่ 28 เมษายน 2569`;
+const SCAN_SUBJECT = 'ขอเชิญประชุมกลั่นกรองผลการประเมินผลการปฏิบัติราชการของข้าราชการพลเรือนสามัญส่วนภูมิภาค จังหวัดเชียงใหม่ ครั้งที่ 2/2569 สำหรับรอบการประเมินที่ 1 (วันที่ 1 ตุลาคม 2568 ถึงวันที่ 31 มีนาคม 2569)';
+const SCAN_P2 = `บัญชีแนบทายแจงหัวหนาสวนราชการประจำจังหวัดเชียงใหม
+หนังสือจังหวัดเชียงใหม ที่ ชม 0017.5/ว 14379 ลงวันที่ 27 เมษายน 2569
+เรื่อง ขอเชิญประชุมกลั่นกรองผลการประเมินผลการปฏิบัติราชการของขาราชการพลเรือนสามัญ
+สวนภูมิภาคจังหวัดเชียงใหม
+ครั้งที่ 2/2569 สำหรับรอบการประเมินที่ 1 (วันที่ 1 ตุลาคม 2568 ถึงวันที่ 31 มีนาคม 2569)
+1 พัฒนาสังคมและความมั่นคงของมนุษยจังหวัดเชียงใหม`;
+
+test('v1.18 noisy scan: junk is cut, years are repaired, sender and reply-by date are read', () => {
+  const r = parseLetter(SCAN_P1);
+  assert.equal(r.subject, SCAN_SUBJECT);
+  assert.equal(r.party, 'ศาลากลางจังหวัดเชียงใหม่', 'the letter number joined to the sender line is not part of the sender');
+  assert.equal(r.due, '2026-04-28', 'the reply-by date, not the meeting day (30 เม.ย.)');
+  assert.equal(r.docDate, '2026-04-27'); assert.ok(r.suspect && r.checks.length);
+});
+test('v1.18 the attachment page (clean digits) corrects the letter number and the digits of the subject', () => {
+  const r = parseLetter(`${SCAN_P1}\n\n${SCAN_P2}`);
+  assert.equal(r.docNo, 'ชม 0017.5/ว 14379'); assert.equal(r.subject, SCAN_SUBJECT);
+  assert.ok(r.checks.some((c) => /0013\.5/.test(c) && /0017\.5/.test(c)));
+  assert.equal(parseLetter('ที่ ชม 0017.5/ว 14379\nเรื่อง ก\nเรียน ข\nอ้างถึง หนังสือจังหวัด ที่ ชม 0017.5/ว 1 ลงวันที่ 1 มกราคม 2569\nเรื่อง อื่น').docNo, 'ชม 0017.5/ว 14379', 'a reference to another letter is not an attachment header');
+});
+test('v1.18 stripOcrNoise / repairYears keep real text and plausible years', () => {
+  assert.equal(stripOcrNoise('ขอความร่วมมือ ประเมิน IT ครั้งที่ 2').cut, 0);
+  assert.equal(stripOcrNoise('ขอ a ส ประชุม').cut, 0, 'one stray token is not a junk run');
+  assert.equal(repairYears('ประชุมวันที่ 5 พฤษภาคม 2569 ปีงบประมาณ 2570', '2026-04-27'), 'ประชุมวันที่ 5 พฤษภาคม 2569 ปีงบประมาณ 2570');
+  assert.equal(repairYears('ครั้งที่ 3/2509 วันที่ 1 ตุลาคม 2525 ถึง 31 มีนาคม 25001', '2026-04-27'), 'ครั้งที่ 3/2569 วันที่ 1 ตุลาคม 2568 ถึง 31 มีนาคม 2569');
+});
+test('v1.18 findDue: garbled / missing year, other cues, meeting day is not a deadline', () => {
+  assert.equal(findDue('ขอให้ตอบกลับภายในวันที่ 28 เมษายน 25OO', '2026-04-27'), '2026-04-28');
+  assert.equal(findDue('โปรดส่งไม่เกินวันที่ 5 พ.ค. 69', '2026-04-27'), '2026-05-05');
+  assert.equal(findDue('โปรดแจ้งก่อนวันที่ 3 มกราคม', '2026-12-20'), '2027-01-03');
+  assert.equal(findDue('ประชุมภายในวันที่ 30 เมษายน 2569 เวลา 09.30 น. ขอให้ตอบภายในวันที่ 28 เมษายน 2569', '2026-04-27'), '2026-04-28');
+  assert.equal(findDue('ขอให้ใช้ภายในวงเงินร้อยละ 2.97', '2026-04-27'), '');
+});
+test('v1.18 stamps survive lost tone marks; a stamp-like word in the body does not count', () => {
+  assert.deepEqual(readStamps(['ดวนทสี่ ุด', 'ลับที่สุด', 'ที่ สธ 1/2']), { urgency: 'most', secrecy: 'tsecret' });
+  assert.deepEqual(readStamps(['ด่วนมาก']), { urgency: 'very', secrecy: 'normal' });
+  assert.deepEqual(readStamps(['ที่ สธ 0201/ว 5', 'ลับหลัง']), { urgency: 'normal', secrecy: 'normal' });
+  assert.equal(parseLetter('ลับที่สุด\nด่วนที่สุด\nที่ กห 0401/55\nเรื่อง ทดสอบ').secrecy, 'tsecret');
 });
