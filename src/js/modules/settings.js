@@ -5,6 +5,7 @@ import { getSettings, setSettings, clearRecent, clearAllLocalData } from '../cor
 import { backendHealth, backendConfigured } from '../core/api.js';
 import { toast } from '../core/toast.js';
 import { currentUser } from '../core/auth.js';
+import { ocrEnginePicker } from './ocr-engine-picker.js';
 
 export function mount(root) {
   const s = getSettings();
@@ -35,6 +36,9 @@ export function mount(root) {
     h('div', { class: 'page-head' }, h('div', null, h('h1', null, 'ตั้งค่า'), h('p', null, 'การตั้งค่าทั้งหมดเก็บไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น'))),
     h('div', { class: 'card' }, h('h2', null, 'รูปลักษณ์'),
       sel([['system', 'ตามระบบ'], ['light', 'สว่าง'], ['dark', 'มืด']], s.theme, (v) => setSettings({ theme: v }), 'ธีม')),
+    h('div', { class: 'card' }, h('h2', null, 'การอ่านข้อความจากภาพสแกน (OCR)'),
+      h('p', { class: 'muted' }, 'เลือกโมเดลได้ — Typhoon แม่นยำกว่าสำหรับภาษาไทย แต่มีโควตา 20 หน้า/นาทีรวมทั้งหน่วยงาน โหมดอัตโนมัติจึงสลับไปอ่านในเครื่องเองเมื่อเต็ม'),
+      ocrEnginePicker()),
     h('div', { class: 'card' }, h('h2', null, 'ความเป็นส่วนตัว'),
       h('p', { class: 'muted' }, 'ล้างข้อมูลที่ระบบเก็บไว้ในเบราว์เซอร์นี้ ได้แก่ รายการล่าสุด และการตั้งค่า'),
       h('div', { class: 'btn-row' },

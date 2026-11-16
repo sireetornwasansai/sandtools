@@ -5,6 +5,7 @@
 import { ConversionError, Deadline } from './common.js';
 import { tesseractToMarkdown, wordsFromTesseract } from './ocr-layout.js';
 import { preprocess, toGray, toRgba } from './ocr-preprocess.js';
+import { getOcrEngine, typhoonRead, cloudConfigured } from './ocr-cloud.js';
 
 const VENDOR = new URL('../../vendor/ocr/', import.meta.url);
 export const OCR_LANGS = ['tha', 'eng'];
@@ -71,6 +72,60 @@ export async function createOcrEngine(o = {}) {
   };
 }
 
+/** The signed-in session token (the cloud relay /api/ocr only answers signed-in staff). '' when nobody is signed in. */
+async function sessionToken() { try { const { getSession } = await import('../../core/auth.js'); const s = getSession(); return s && s.token ? s.token : ''; } catch { return ''; } }
+
+const CLOUD_DEAD = new Set(['AUTH', 'KEY_REJECTED', 'QUOTA', 'NO_KEY']);   // reasons that will not clear in a minute: stop asking for the rest of this file
+
+/**
+ * Chooses the engine for each page by the person's setting (see ocr-cloud.js): local Tesseract · Typhoon · auto (Typhoon, then local).
+ * The heavy local engine (≈ 8 MB WASM) is started only when a page really needs it, so a document read entirely by Typhoon never loads it.
+ * @param {{signal?:AbortSignal,onStatus?:(s:string)=>void,engine?:any,forceLocal?:boolean}} [o] engine = an already running local engine to reuse · forceLocal = ignore the setting (word positions are needed)
+ */
+export async function createOcrReader(o = {}) {
+  const mode = o.forceLocal ? 'local' : getOcrEngine();
+  const info = { mode, cloudPages: 0, localPages: 0, reason: '' };
+  let local = o.engine || null; const ownLocal = !o.engine; let token = ''; let cloudOk = false; let dead = false;
+  if (mode !== 'local') {
+    token = await sessionToken(); cloudOk = Boolean(token) && await cloudConfigured();
+    if (!cloudOk) {
+      const why = !token ? 'ต้องเข้าสู่ระบบก่อนจึงจะใช้ Typhoon OCR ได้' : 'ยังไม่ได้ตั้งค่า Typhoon (TYPHOON_API_KEY) บนเซิร์ฟเวอร์';
+      if (mode === 'typhoon') throw new ConversionError('CLOUD_FAILED', `${why} — เปลี่ยนเป็นโหมด “อัตโนมัติ” หรือ “ในเครื่อง” เพื่ออ่านต่อ`);
+      info.reason = why;
+    }
+  }
+  return {
+    info, mode,
+    /** Typhoon's reading of one page ({markdown, engine}), or null when this page must be read by the local engine (setting, or auto-mode fallback). Typhoon-only mode throws instead of falling back. */
+    async cloud(source) {
+      if (!cloudOk || dead) return null;
+      try {
+        const r = await typhoonRead(source, { token, mode, signal: o.signal, onStatus: o.onStatus });
+        info.cloudPages += 1; return r;
+      } catch (e) {
+        const code = e && e.code;
+        if (code === 'CANCELLED' || mode === 'typhoon') throw e;
+        info.reason = (e && e.message) || 'Typhoon ใช้งานไม่ได้';
+        if (CLOUD_DEAD.has(e && e.detail)) dead = true;
+        if (o.onStatus) o.onStatus(`${info.reason} — อ่านต่อด้วย OCR ในเครื่อง`);
+        return null;
+      }
+    },
+    /** The local Tesseract engine (started on first use). */
+    async local() { if (!local) local = await createOcrEngine({ signal: o.signal, onStatus: o.onStatus }); info.localPages += 1; return local; },
+    async terminate() { if (ownLocal && local) { const e = local; local = null; await e.terminate(); } }
+  };
+}
+
+/** One warning line saying which engine read the pages (shown under the result so staff know how far to trust it). */
+export function readerNote(info, avgConf) {
+  const parts = [];
+  if (info.cloudPages) parts.push(`Typhoon OCR ${info.cloudPages} หน้า`);
+  if (info.localPages) parts.push(`OCR ในเครื่อง ${info.localPages} หน้า${avgConf ? ` (ความมั่นใจเฉลี่ย ${avgConf}%)` : ''}`);
+  const why = info.mode === 'auto' && info.localPages && info.reason ? ` · เหตุที่ใช้ในเครื่อง: ${info.reason}` : '';
+  return `อ่านข้อความจากภาพสแกนด้วย ${parts.join(' + ') || 'OCR'}${why} — โปรดตรวจทานเทียบกับต้นฉบับ โดยเฉพาะเลขไทย วันที่ ชื่อ-สกุล และเลขที่เอกสาร ซึ่งอาจอ่านผิดได้`;
+}
+
 /** Render one PDF.js page to a white-backed canvas at ~300 dpi (never above OCR_MAX_PIXELS). */
 async function renderPage(pdf, pageNo) {
   const page = await pdf.getPage(pageNo);
@@ -123,14 +178,19 @@ async function imageToCanvas(blob) {
  * OCR one photo/scan image directly (no image→PDF round trip, so nothing is lost to re-encoding). Cleans the picture first, reads it, and when the
  * result is poor tries the page turned 90/180/270° (people photograph letters sideways). Page-segmentation 6 (one block of lines) is used: official letters are a single column.
  * @param {Blob} blob
- * @param {{signal?:AbortSignal,onStatus?:(s:string)=>void,engine?:any}} [opts] pass a running `engine` to reuse it
- * @returns {Promise<{markdown:string,confidence:number,words:any[],width:number,height:number,steps:string[],rotated:number}>}
+ * Which engine reads it follows the person's setting (local / Typhoon / auto — see ocr-cloud.js).
+ * @param {{signal?:AbortSignal,onStatus?:(s:string)=>void,engine?:any,reader?:any}} [opts] pass a running `reader` (createOcrReader) or local `engine` to reuse it across several images
+ * @returns {Promise<{markdown:string,confidence:number,words:any[],width:number,height:number,steps:string[],rotated:number,engine:'local'|'typhoon'}>}
  */
 export async function ocrImageBlob(blob, opts = {}) {
-  const own = !opts.engine; const engine = opts.engine || await createOcrEngine({ signal: opts.signal, onStatus: opts.onStatus });
+  const reader = opts.reader || await createOcrReader({ signal: opts.signal, onStatus: opts.onStatus, engine: opts.engine }); const own = !opts.reader;
   try {
     if (opts.onStatus) opts.onStatus('กำลังปรับภาพให้อ่านง่าย');
-    let base = await imageToCanvas(blob); const enh = enhanceCanvas(base); base = enh.canvas;
+    const raw = await imageToCanvas(blob);
+    const cloud = await reader.cloud(raw);                                       // Typhoon reads the untouched photo (it was trained on natural pages; our binarising is for Tesseract)
+    if (cloud) return { markdown: cloud.markdown, confidence: 0, words: [], width: raw.width, height: raw.height, steps: [], rotated: 0, engine: 'typhoon' };
+    const engine = await reader.local();
+    let base = raw; const enh = enhanceCanvas(base); base = enh.canvas;
     const run = async (cv) => { const data = await engine.recognize(await toBlob(cv), 6); const r = tesseractToMarkdown(data, { width: cv.width }); return { data, r, cv }; };
     if (opts.onStatus) opts.onStatus('กำลังอ่านข้อความภาษาไทย');
     let best = await run(base); let rotated = 0;
@@ -143,8 +203,8 @@ export async function ocrImageBlob(blob, opts = {}) {
         if (score(t) > score(best) + 8) { best = t; rotated = q * 90; }
       }
     }
-    return { markdown: best.r.markdown, confidence: best.r.confidence || 0, words: wordsFromTesseract(best.data), width: best.cv.width, height: best.cv.height, steps: enh.steps, rotated };
-  } finally { if (own) await engine.terminate(); }
+    return { markdown: best.r.markdown, confidence: best.r.confidence || 0, words: wordsFromTesseract(best.data), width: best.cv.width, height: best.cv.height, steps: enh.steps, rotated, engine: 'local' };
+  } finally { if (own) await reader.terminate(); }
 }
 
 /** True when OCR may stop after page n+1 of `total`: more pages are waiting and the caller's enough(textSoFar) says what was read already has everything it needs. */
@@ -169,7 +229,7 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
   if (indexes.length > todo.length && !(opts.maxPages > 0)) warnings.push(`OCR อ่านได้สูงสุด ${OCR_MAX_PAGES} หน้าต่อไฟล์ — ข้ามหน้าที่เหลืออีก ${indexes.length - todo.length} หน้า`);
   if (opts.onStage) opts.onStage('ocr');
   if (opts.onProgress) opts.onProgress(0);
-  const engine = await createOcrEngine({ signal: opts.signal, onStatus: opts.onStatus });
+  const reader = await createOcrReader({ signal: opts.signal, onStatus: opts.onStatus, forceLocal: Boolean(wordsOut) });   // the Word layout writer needs word boxes, which only Tesseract gives
   const deadline = new Deadline(opts.ocrTimeoutMs || 15 * 60 * 1000);
   const chunks = new Map(); const conf = [];
   try {
@@ -178,21 +238,24 @@ export async function ocrPdfPages(pdf, indexes, opts, warnings, wordsOut) {
       if (opts.signal && opts.signal.aborted) throw new ConversionError('CANCELLED', 'ยกเลิกการแปลงแล้ว');
       if (opts.onStatus) opts.onStatus(`กำลังอ่านข้อความจากภาพ หน้า ${n + 1} จาก ${todo.length}`);
       const rendered = await renderPage(pdf, todo[n] + 1);
-      const canvas = opts.enhance === false ? rendered : enhanceCanvas(rendered).canvas;   // scanned PDFs are photos too: flatten light, straighten, size text
-      if (canvas !== rendered) { rendered.width = 0; rendered.height = 0; }
-      let data; const width = canvas.width, height = canvas.height;
-      try { data = await engine.recognize(await toBlob(canvas)); } finally { canvas.width = 0; canvas.height = 0; }
-      const r = tesseractToMarkdown(data, { width });
-      if (wordsOut) wordsOut.set(todo[n], { words: wordsFromTesseract(data), width, height });
-      chunks.set(todo[n], r.markdown);
-      if (r.markdown && r.words) conf.push(r.confidence);
+      const cloud = await reader.cloud(rendered);
+      if (cloud) {
+        chunks.set(todo[n], cloud.markdown); rendered.width = 0; rendered.height = 0;
+      } else {
+        const engine = await reader.local();
+        const canvas = opts.enhance === false ? rendered : enhanceCanvas(rendered).canvas;   // scanned PDFs are photos too: flatten light, straighten, size text
+        if (canvas !== rendered) { rendered.width = 0; rendered.height = 0; }
+        let data; const width = canvas.width, height = canvas.height;
+        try { data = await engine.recognize(await toBlob(canvas)); } finally { canvas.width = 0; canvas.height = 0; }
+        const r = tesseractToMarkdown(data, { width });
+        if (wordsOut) wordsOut.set(todo[n], { words: wordsFromTesseract(data), width, height });
+        chunks.set(todo[n], r.markdown);
+        if (r.markdown && r.words) conf.push(r.confidence);
+      }
       if (opts.onProgress) opts.onProgress((n + 1) / todo.length);
       if (ocrEnough(opts, chunks, n, todo.length)) break;                   // the fields we came for are already read
     }
-  } finally { await engine.terminate(); }
-  if (conf.length) {
-    const avg = Math.round(conf.reduce((a, b) => a + b, 0) / conf.length);
-    warnings.push(`อ่านข้อความจากภาพสแกนด้วย OCR (ความมั่นใจเฉลี่ย ${avg}%) — โปรดตรวจทานเทียบกับต้นฉบับ โดยเฉพาะเลขไทย วันที่ ชื่อ-สกุล และเลขที่เอกสาร ซึ่งอาจอ่านผิดได้`);
-  }
+  } finally { await reader.terminate(); }
+  if (reader.info.cloudPages || conf.length) warnings.push(readerNote(reader.info, conf.length ? Math.round(conf.reduce((a, b) => a + b, 0) / conf.length) : 0));
   return chunks;
 }

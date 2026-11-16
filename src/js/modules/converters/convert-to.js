@@ -64,18 +64,21 @@ function plainToMd(text) {
 }
 
 async function ocrImage(file, o, warnings) {
-  const { createOcrEngine } = await import('./ocr.js');
+  const { createOcrReader, readerNote } = await import('./ocr.js');
   const { tesseractToMarkdown } = await import('./ocr-layout.js');
   if (o.onStage) o.onStage('ocr');
-  const engine = await createOcrEngine({ signal: o.signal, onStatus: o.onStatus });
+  const reader = await createOcrReader({ signal: o.signal, onStatus: o.onStatus });
   try {
     const bmp = await createImageBitmap(file).catch(() => { throw new ConversionError('CORRUPT', 'ไฟล์รูปภาพเสียหายหรืออ่านไม่ได้'); });
-    const width = bmp.width; bmp.close();
+    const width = bmp.width;
+    const cloud = await reader.cloud(file).finally(() => { bmp.close(); });
+    if (cloud) { warnings.push(readerNote(reader.info, 0)); return cloud.markdown; }
+    const engine = await reader.local();
     const r = tesseractToMarkdown(await engine.recognize(file), { width });
     if (!r.markdown.trim()) throw new ConversionError('PDF_NO_TEXT', 'ไม่พบข้อความในรูปนี้ (ภาพอาจเบลอ เอียง หรือไม่มีตัวอักษร)');
-    warnings.push(`อ่านข้อความด้วย OCR (ความมั่นใจเฉลี่ย ${r.confidence}%) กรุณาตรวจทานกับต้นฉบับ`);
+    warnings.push(reader.info.mode === 'auto' && reader.info.reason ? readerNote(reader.info, r.confidence) : `อ่านข้อความด้วย OCR (ความมั่นใจเฉลี่ย ${r.confidence}%) กรุณาตรวจทานกับต้นฉบับ`);
     return r.markdown;
-  } finally { await engine.terminate(); }
+  } finally { await reader.terminate(); }
 }
 
 /** Font installed note: the .docx names the font but cannot carry it. */

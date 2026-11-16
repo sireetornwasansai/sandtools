@@ -6,6 +6,8 @@ import { modal } from '../core/layers.js';
 import { cameraSupported, openScanner, cameraErrorText } from './saraban-scan.js';
 import { URGENCY, SECRECY, RECEIVE_STEPS, SCAN_FIELD_LABELS, READ_MAX_PAGES, ATT_MAX, ATT_LIMIT, ATT_TARGET, attachKind, splitDrop, readEnough, parseLetter, plainText, addDays, newRid, fileToBase64 } from './saraban-engine.js';
 import { reconcile as ocrReconcile, hintsFromFileName } from './sar-ocr-post.js';
+import { ocrEnginePicker } from './ocr-engine-picker.js';
+import { getOcrEngine } from './converters/ocr-cloud.js';
 
 const badge = (label, tone = 'muted') => h('span', { class: `sar-badge sar-${tone}` }, label);
 
@@ -42,25 +44,28 @@ async function shrinkToFit(file, onStatus) {
 /**
  * Read the letter on this device — ONLY its first READ_MAX_PAGES pages (เลขที่ · วันที่ · เรื่อง · เรียน are on page 1; a 24-page letter used to be OCR-ed page by page for minutes).
  * A long PDF is first cut to its first pages (pdf/engine.js firstPages), then read from the text layer or by on-device OCR, and OCR stops as soon as เลขที่ + เรื่อง + เรียน are found.
- * Photos are OCR-ed directly (cleaned first — see converters/ocr-preprocess.js). Nothing is sent anywhere.
+ * Photos are OCR-ed directly (cleaned first — see converters/ocr-preprocess.js). By default nothing leaves the device; Typhoon is used only when the person picked it.
  * Reading never decides what is stored: the file is attached on its own (see the attachment list in receiveView).
  * @returns {Promise<{text:string,pages:number}>} pages = pages in the whole file (0 when unknown)
  */
+/** "อ่านข้อความจากภาพสแกนด้วย Typhoon OCR 2 หน้า — โปรดตรวจทาน…" → "อ่านด้วย Typhoon OCR 2 หน้า" (the long reminder is shown elsewhere). */
+function shortEngine(w) { const m = /^อ่านข้อความจากภาพสแกนด้วย (.+?)(?: — โปรดตรวจทาน|$)/.exec(w || ''); return m ? `อ่านด้วย ${m[1]}` : ''; }
+
 async function readLetter(pdf, originals, onStatus) {
   const imgs = originals.filter((f) => attachKind(f) === 'image');
   if (imgs.length && imgs.length === originals.length) {
-    const { ocrImageBlob, createOcrEngine } = await import('./converters/ocr.js');
-    const engine = await createOcrEngine({ onStatus });
+    const { ocrImageBlob, createOcrReader, readerNote } = await import('./converters/ocr.js');
+    const reader = await createOcrReader({ onStatus });             // local / Typhoon / auto — the person's choice (ocr-engine-picker.js)
     try {
       const n = Math.min(imgs.length, READ_MAX_PAGES); const parts = [];
       for (let i = 0; i < n; i += 1) {
         if (onStatus && n > 1) onStatus(`กำลังอ่านหน้า ${i + 1} จาก ${n}${imgs.length > n ? ` (อ่านเฉพาะ ${READ_MAX_PAGES} หน้าแรก)` : ''}`);
-        const r = await ocrImageBlob(imgs[i], { engine, onStatus: n > 1 ? undefined : onStatus });
+        const r = await ocrImageBlob(imgs[i], { reader, onStatus: n > 1 ? undefined : onStatus });
         parts.push(r.markdown);
         if (readEnough(plainText(parts.join('\n\n')))) break;                 // the first page carries every field we need
       }
-      return { text: plainText(parts.join('\n\n')), pages: imgs.length };
-    } finally { await engine.terminate(); }
+      return { text: plainText(parts.join('\n\n')), pages: imgs.length, engineNote: shortEngine(readerNote(reader.info, 0)) };
+    } finally { await reader.terminate(); }
   }
   let head = { file: pdf, total: 0, trimmed: false };
   try { if (onStatus) onStatus('กำลังเลือกหน้าแรกของหนังสือ'); const { firstPages } = await import('./pdf/engine.js'); head = await firstPages(pdf, READ_MAX_PAGES); } catch { /* encrypted / odd file: the converter below reports it, or reads the start of the whole file */ }
@@ -68,7 +73,7 @@ async function readLetter(pdf, originals, onStatus) {
   const named = /\.pdf$/i.test(head.file.name || '') ? head.file : new File([head.file], `${head.file.name || 'letter'}.pdf`, { type: 'application/pdf' });
   const { convertFile } = await import('./converters/index.js');
   const r = await convertFile(named, { maxBytes: 15 * 1024 * 1024, timeoutMs: 90000, ocr: true, ocrTimeoutMs: 3 * 60 * 1000, maxPages: READ_MAX_PAGES, enough: readEnough, onStatus });
-  return { text: plainText(r.markdown), pages: head.total };
+  return { text: plainText(r.markdown), pages: head.total, engineNote: shortEngine((r.warnings || []).find((w) => /^อ่านข้อความจากภาพสแกนด้วย/.test(w)) || '') };
 }
 
 /** Receive stamp on page 1 (top LEFT, 20 pt from the edges): หน่วยงาน · เลขรับ · วันที่ · เวลา. Returns a new PDF Blob. */
@@ -255,10 +260,10 @@ export function receiveView(root, X, pre = {}) {
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   drop.addEventListener('dragleave', (e) => { e.preventDefault(); drop.classList.remove('over'); });
   drop.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); document.body.classList.remove('dragging'); if (busy) return; const fs = e.dataTransfer && e.dataTransfer.files; if (fs && fs.length) pickFiles(fs); });
-  const bullets = h('ul', { class: 'sar-dz-feat' }, ['แนบไฟล์เข้าทะเบียนทันทีที่วาง (ไม่ใช่แค่อ่าน)', 'อ่านเฉพาะ 3 หน้าแรก — PDF / OCR ภาษาไทย (ในเครื่อง)', 'เติมเลขที่ เรื่อง จาก เรียน กำหนด ให้เอง', 'ตรวจหนังสือซ้ำ · ออกเลขรับและประทับตราบนหน้าจริง'].map((t) => h('li', null, svgIcon(ICONS.check, 16), t)));
+  const bullets = h('ul', { class: 'sar-dz-feat' }, ['แนบไฟล์เข้าทะเบียนทันทีที่วาง (ไม่ใช่แค่อ่าน)', 'อ่านเฉพาะ 3 หน้าแรก — PDF / OCR ภาษาไทย (เลือกโมเดลได้ด้านล่าง)', 'เติมเลขที่ เรื่อง จาก เรียน กำหนด ให้เอง', 'ตรวจหนังสือซ้ำ · ออกเลขรับและประทับตราบนหน้าจริง'].map((t) => h('li', null, svgIcon(ICONS.check, 16), t)));
   const scanSteps = h('ol', { class: 'sar-scan-steps', hidden: true }, ['เตรียม + แนบไฟล์', 'อ่านข้อความ 3 หน้าแรก (PDF/OCR)', 'จัดข้อมูลลงแบบฟอร์ม'].map((l) => h('li', null, l)));
   const scanBtns = h('div', { class: 'sar-scan-more' }, bullets);
-  scanCard.append(drop, scanSteps, status, scanBtns, camIn);
+  scanCard.append(drop, scanSteps, status, scanBtns, ocrEnginePicker({ compact: true }), camIn);
   function markScan(i) { [...scanSteps.children].forEach((li, j) => { li.classList.toggle('done', j < i); li.classList.toggle('now', j === i); }); }
 
   /* ---- step 2: check / edit ---- */
@@ -303,7 +308,7 @@ export function receiveView(root, X, pre = {}) {
       if (old) { if (old.from === 'queue') old.kind = 'extra'; else { atts.splice(atts.indexOf(old), 1); old.removed = true; if (old.ref) discard(old.ref.id); } }
       addAtt(pdf, 'main', { from }); addExtras(sp.extras, { from });   // attached NOW, while the page is still being read
       fileLine.replaceChildren(svgIcon(ICONS.file, 18), `${pdf.name} · ${mbText(pdf.size)}`); setPreview(sp.main);
-      markScan(1); status.textContent = `กำลังอ่านข้อมูลจาก ${READ_MAX_PAGES} หน้าแรกของหนังสือ (ในเครื่อง ไม่ส่งออกอินเทอร์เน็ต)…`;
+      markScan(1); status.textContent = `กำลังอ่านข้อมูลจาก ${READ_MAX_PAGES} หน้าแรกของหนังสือ ${getOcrEngine() === 'local' ? '(ในเครื่อง ไม่ส่งออกอินเทอร์เน็ต)' : getOcrEngine() === 'auto' ? '(Typhoon ก่อน ถ้าเต็มอ่านในเครื่อง)' : '(Typhoon OCR)'}…`;
       const rd = await readLetter(pdf, sp.main, (s2) => { if (run === scanRun) status.textContent = s2; }); if (run !== scanRun) return;
       markScan(2); const r = parseLetter(rd.text, { today });
       /* cross-check the OCR with the file name (a Telegram/Drive name often carries the letter number + date; a misread digit is the commonest OCR error) */
@@ -319,7 +324,8 @@ export function receiveView(root, X, pre = {}) {
       if (r.urgency !== 'normal') F.urgency.value = r.urgency; if (r.secrecy !== 'normal') F.secrecy.value = r.secrecy;
       found = r.found; autoMark(found); const n = Object.keys(found).length;
       const pageNote = rd.pages > READ_MAX_PAGES ? `อ่านจาก ${READ_MAX_PAGES} หน้าแรก (ไฟล์มี ${rd.pages} หน้า — แนบครบทุกหน้า) · ` : '';
-      note = n ? `${pageNote}ตรวจทานช่องที่ไฮไลต์สีให้ถูกต้อง แก้ไขได้ทุกช่องก่อนกดยืนยัน${checks.length ? ` · ตรวจก่อนยืนยัน: ${checks.join(' · ')}` : ''}` : `${pageNote}อ่านข้อความจากไฟล์ไม่ได้ (อาจเป็นภาพไม่ชัด) — กรอกข้อมูลเองได้ ไฟล์ยังแนบอยู่ตามปกติ`;
+      const engNote = rd.engineNote ? `${rd.engineNote} · ` : '';
+      note = n ? `${engNote}${pageNote}ตรวจทานช่องที่ไฮไลต์สีให้ถูกต้อง แก้ไขได้ทุกช่องก่อนกดยืนยัน${checks.length ? ` · ตรวจก่อนยืนยัน: ${checks.join(' · ')}` : ''}` : `${pageNote}อ่านข้อความจากไฟล์ไม่ได้ (อาจเป็นภาพไม่ชัด) — กรอกข้อมูลเองได้ ไฟล์ยังแนบอยู่ตามปกติ`;
       if (r.secrecy !== 'normal') toast('พบคำว่าชั้นความลับในหนังสือ — ตรวจสอบและให้เจ้าหน้าที่ที่ได้รับอนุญาตลงรับ', 'error', 6000);
       dupCheck.flush();
     } catch (e) {
@@ -446,7 +452,7 @@ export function receiveView(root, X, pre = {}) {
   function clearForm() { if (busy) return; if (!registered) atts.forEach((a) => { a.removed = true; if (a.ref && a.from !== 'queue') discard(a.ref.id); }); X.refresh('receive'); }
   checkCard.append(h('div', { class: 'sar-check-top' }, h('div', { class: 'sar-check-file' }, preview, fileLine, h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { scanRun += 1; drop.hidden = false; scanBtns.hidden = false; scanSteps.hidden = true; status.textContent = ''; setStep('import'); } }, 'เปลี่ยนไฟล์หนังสือ / สแกนใหม่'))), foundBox), dupBox, grid,
     h('div', { class: 'btn-row sar-submit' }, submit, h('button', { class: 'btn', type: 'button', onclick: clearForm }, 'ล้างแบบฟอร์ม')), prog.root);
-  root.append(privacyNotice({ detail: 'หนังสือราชการอาจมีชื่อ-ข้อมูลผู้ป่วย ไฟล์ที่วางจะถูกแนบเข้า Google Drive ของหน่วยงาน (โฟลเดอร์ _saraban) เฉพาะเจ้าหน้าที่ที่ได้รับสิทธิ์ — การอ่านข้อความด้วย OCR ทำบนเครื่องของคุณ ไม่ส่งออกอินเทอร์เน็ต' }), stepper, scanCard, attCard, checkCard, resultCard, fwdCard);
+  root.append(privacyNotice({ detail: 'หนังสือราชการอาจมีชื่อ-ข้อมูลผู้ป่วย ไฟล์ที่วางจะถูกแนบเข้า Google Drive ของหน่วยงาน (โฟลเดอร์ _saraban) เฉพาะเจ้าหน้าที่ที่ได้รับสิทธิ์ — การอ่านข้อความด้วย OCR ค่าเริ่มต้นทำบนเครื่องของคุณ ไม่ส่งออกอินเทอร์เน็ต — ถ้าเลือกโมเดล Typhoon ภาพหน้าหนังสือจะถูกส่งไปประมวลผลที่ Typhoon' }), stepper, scanCard, attCard, checkCard, resultCard, fwdCard);
   paintAtt();
   if (pre.inboxId) {
     checkCard.prepend(notice('info', 'ลงรับจากคิว', 'ระบบดึงไฟล์จากคิวมาอ่านให้อัตโนมัติ — ตรวจทานและแก้ไขได้ทุกช่องก่อนกดยืนยัน'));
