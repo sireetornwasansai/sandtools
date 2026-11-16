@@ -29,11 +29,11 @@ export function monthIndex(word) {
 /** "9 ตุลาคม 2569" / "๙ ต.ค. ๒๕๖๙" / "09/10/2569" → "2026-10-09" (or ''). */
 export function parseThaiDate(text) {
   const t = thaiDigitsToArabic(text);
-  let m = /(\d{1,2})\s*(มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s*(\d{4})/.exec(t);
+  let m = /(\d{1,2})\s*(มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s*(?:พ\.?\s?ศ\.?\s*)?(\d{4})/.exec(t);
   if (m) return isoFrom(m[3], monthIndex(m[2]), m[1]);
   m = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/.exec(t);
   if (m) return isoFrom(m[3], m[2], m[1]);
-  m = /(\d{1,2})\s*([ก-๙.]{3,12})\s*(\d{4})/.exec(t);     // OCR-damaged month name
+  m = /(\d{1,2})\s*([ก-๙.]{3,12}?)\s*(?:พ\.?\s?ศ\.?\s*)?(\d{4})/.exec(t);     // OCR-damaged month name
   if (m) { const mo = fuzzyMonth(m[2]); if (mo) return isoFrom(m[3], mo, m[1]); }
   return '';
 }
@@ -107,6 +107,10 @@ export function parseLetter(raw) {
 
   let m = /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(text) || /(?:^|\s)ที่?\s*([ก-ฮ]{1,5}\s?\d[\d.]*\s?\/\s?[ก-ฮ]?\d*)/.exec(text);   // ที่ ชม 0033.002/ว1190 · ที่ อว78.06/ว.20419 · ที่ สธ 0123/พิเศษ 9
   if (m) out.docNo = m[1].replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
+  if (!out.docNo) {   // OCR often drops the small "ที่" at the line start: accept a bare book number in the letterhead
+    m = /(?:^|\s)([ก-ฮ]{2,4}\s?\d{3,5}(?:\.\d+)*\s?\/\s?(?:ว\s?\.?\s?|พิเศษ\s?)?\d+(?:-\d+)?)/.exec(head);
+    if (m) out.docNo = m[1].replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
+  }
   tag('docNo', !!out.docNo);
 
   const noRefs = text.replace(/(?:อ้างถึง|สิ่งที่ส่งมาด้วย)[\s\S]*?(?=\n\s*(?:ด้วย|ตามที่|เนื่องจาก|เรียน)|\n\s*\n|$)/g, ' ');   // dates quoted from other letters are not this letter's date
