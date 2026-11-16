@@ -16,7 +16,6 @@
  *   SARABAN_STAFF_EMAILS   เจ้าหน้าที่สารบรรณ (INBOX_STAFF_EMAILS are staff too)
  *   SARABAN_EXEC_EMAILS    ผู้บริหาร: เห็นทุกเรื่องรวมชั้นความลับ, สั่งการ.  (members of a unit of type "exec" count as well)
  *   SARABAN_SECRET_EMAILS  เจ้าหน้าที่ที่ได้รับอนุญาตให้ลงทะเบียน/เห็นหนังสือชั้นความลับ
- * OCR (optional):     TYPHOON_API_KEY (turns on Typhoon OCR for reading letters; without it the page reads on the clerk's device) · TYPHOON_OCR_MODEL · TYPHOON_BASE_URL · SARABAN_OCR_PER_MIN
  * Other properties:  SAR_ORG_NAME · SAR_BOOK_PREFIX (e.g. "สธ 0xxx.xxx") · SAR_HOLIDAYS (yyyy-mm-dd, comma) · SAR_SLA_DAYS ("0,1,3,7")
  *                    SAR_RESERVE_DAYS (7) · SARABAN_FOLDER_ID (optional: Drive folder for files; default <DRIVE_FOLDER_ID>/_saraban)
  * Tabs created by setupSaraban():  Saraban (ทะเบียนรวม รับ+ส่ง) · SarTo (ผู้รับ/สถานะรายหน่วย) · SarTrack (ประวัติ — เพิ่มอย่างเดียว) · SarUnits · SarNo (ตัวนับเลข)
@@ -1301,7 +1300,7 @@ function sarBoot(sc) {
 function sarConfig(sc) {
   var units = sarUnits(sc).map(function (u) { return { code: u.code, name: u.name, short: u.short, type: u.type, active: u.active, registry: u.registry, parent: u.parent, prefix: u.prefix }; });
   return { org: sarOrg(), today: sc.today, year: sarYearBE(), me: { email: sc.email, admin: sc.admin, staff: sc.staff, exec: sc.exec, clear: sc.clear, units: sc.units, headOf: sc.headUnits }, channels: SAR_CHANNELS, categories: SAR_CATEGORIES, urgencies: SAR_URGENCY, secrecies: SAR_SECRECY, units: units,
-    sla: sc.sla, holidays: sc.holidays, bookPrefix: prop('SAR_BOOK_PREFIX'), reserveDays: sarReserveDays(), queue: typeof inbAll === 'function', ocr: { typhoon: !!prop('TYPHOON_API_KEY') }, driveReady: !!(prop('SARABAN_FOLDER_ID') || prop('DRIVE_FOLDER_ID')) };
+    sla: sc.sla, holidays: sc.holidays, bookPrefix: prop('SAR_BOOK_PREFIX'), reserveDays: sarReserveDays(), queue: typeof inbAll === 'function', driveReady: !!(prop('SARABAN_FOLDER_ID') || prop('DRIVE_FOLDER_ID')) };
 }
 
 /* ------------------------------------- units (admin) ------------------------------------- */
@@ -1395,64 +1394,6 @@ function sarUnitSave(sc, b) {
   });
 }
 
-/* ------------------------------------- Typhoon OCR (v1.21) ------------------------------------- */
-/**
- * op "ocr" — read ONE page image of a letter with Typhoon OCR (OpenTyphoon, Thai/English document model) and return its Markdown text.
- * The page (browser) sends a JPEG/PNG of page 1-3 only; this function is the only place the API key lives (Script property TYPHOON_API_KEY),
- * so the key never reaches the browser. Nothing is stored or logged except "who / when / how long" — never the image or the text.
- * Off by default: without TYPHOON_API_KEY the op answers NOT_CONFIGURED and the page keeps reading on the clerk's own device (Tesseract).
- * Optional properties: TYPHOON_OCR_MODEL (default "typhoon-ocr") · TYPHOON_BASE_URL (default https://api.opentyphoon.ai/v1; https only — e.g. your own vLLM) · SARABAN_OCR_PER_MIN (default 30)
- */
-var SAR_OCR_BASE = 'https://api.opentyphoon.ai/v1';
-var SAR_OCR_MODEL = 'typhoon-ocr';
-var SAR_OCR_IMG_MAX = 3 * 1024 * 1024;      // decoded bytes of one page image (the page sends ≈1800 px JPEG, 0.3–1 MB)
-var SAR_OCR_TEXT_MAX = 40000;
-// Official Typhoon OCR v1.5 prompt (typhoon-ocr package, ocr_utils.py PROMPTS_SYS["v1.5"]) — the model was trained with exactly this text, so it is not reworded.
-var SAR_OCR_PROMPT = 'Extract all text from the image.\n\n\nInstructions:\n- Only return the clean Markdown.\n- Do not include any explanation or extra text.\n- You must include all information on the page.\n\n\nFormatting Rules:\n- Tables: Render tables using <table>...</table> in clean HTML format.\n- Equations: Render equations using LaTeX syntax with inline ($...$) and block ($$...$$).\n- Images/Charts/Diagrams: Wrap any clearly defined visual areas (e.g. charts, diagrams, pictures) in:\n\n\n<figure>\nDescribe the image\'s main elements (people, objects, text), note any contextual clues (place, event, culture), mention visible text and its meaning, provide deeper analysis when relevant (especially for financial charts, graphs, or documents), comment on style or architecture if relevant, then give a concise overall summary. Describe in Thai.\n</figure>\n\n\n- Page Numbers: Wrap page numbers in <page_number>...</page_number> (e.g., <page_number>14</page_number>).\n- Checkboxes: Use ☐ for unchecked and ☑ for checked boxes.';
-
-/** The model normally answers with plain Markdown (v1.5); older models answer {"natural_text": "..."} — accept both, and drop a ```markdown fence. */
-function sarOcrText(content) {
-  var t = String(content == null ? '' : content).replace(/^\s+|\s+$/g, '');
-  if (t.charAt(0) === '{') { try { var o = JSON.parse(t); if (o && typeof o.natural_text === 'string') t = o.natural_text; } catch (x) { /* not JSON: keep as is */ } }
-  var f = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/.exec(t); if (f) t = f[1];
-  return t.slice(0, SAR_OCR_TEXT_MAX);
-}
-function sarOcrBase() {
-  var u = prop('TYPHOON_BASE_URL').replace(/\/+$/, '');
-  return /^https:\/\/[^\s\/]+(\/[^\s?#]*)?$/.test(u) ? u : SAR_OCR_BASE;
-}
-function sarOcr(sc, b) {
-  sarNeedStaff(sc);
-  var key = prop('TYPHOON_API_KEY');
-  if (!key) throw httpError('NOT_CONFIGURED', 'ยังไม่ได้เปิดใช้ Typhoon OCR (ผู้ดูแลระบบตั้งค่า TYPHOON_API_KEY ใน Script Properties)');
-  rateLimit('sarocr', intProp('SARABAN_OCR_PER_MIN', 30));
-  if (typeof b.data !== 'string' || !b.data) throw httpError('BAD_REQUEST', 'ไม่พบข้อมูลภาพ');
-  var bytes = Utilities.base64Decode(b.data);
-  if (bytes.length > SAR_OCR_IMG_MAX) throw httpError('FILE_TOO_LARGE', 'ภาพหน้าหนังสือใหญ่เกินไป');
-  var mime = sarMagicOk(bytes);
-  if (mime !== 'image/jpeg' && mime !== 'image/png') throw httpError('BAD_FILE', 'อ่านได้เฉพาะภาพ JPG/PNG');
-  var t0 = Date.now(), res, code;
-  try {
-    res = UrlFetchApp.fetch(sarOcrBase() + '/chat/completions', {
-      method: 'post', contentType: 'application/json', headers: { Authorization: 'Bearer ' + key }, muteHttpExceptions: true,
-      payload: JSON.stringify({
-        model: prop('TYPHOON_OCR_MODEL') || SAR_OCR_MODEL,
-        messages: [{ role: 'user', content: [{ type: 'text', text: SAR_OCR_PROMPT }, { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + b.data } }] }],
-        max_tokens: 8192, temperature: 0.1, top_p: 0.6, repetition_penalty: 1.1
-      })
-    });
-    code = res.getResponseCode();
-  } catch (x) { sarLog(sc.email, 'ocr', '', { ok: 0, ms: Date.now() - t0 }); throw httpError('OCR_FAILED', 'เชื่อมต่อบริการอ่านเอกสารไม่ได้ — ระบบจะอ่านในเครื่องแทน'); }
-  if (code === 401 || code === 403) { sarLog(sc.email, 'ocr', '', { ok: 0, code: code }); throw httpError('OCR_AUTH', 'คีย์ Typhoon OCR ใช้ไม่ได้ (ผู้ดูแลระบบตรวจ TYPHOON_API_KEY) — ระบบจะอ่านในเครื่องแทน'); }
-  if (code === 429) throw httpError('OCR_BUSY', 'บริการอ่านเอกสารถูกใช้งานหนัก — ระบบจะอ่านในเครื่องแทน');
-  if (code < 200 || code >= 300) { sarLog(sc.email, 'ocr', '', { ok: 0, code: code }); throw httpError('OCR_FAILED', 'บริการอ่านเอกสารตอบกลับผิดปกติ — ระบบจะอ่านในเครื่องแทน'); }
-  var text = '';
-  try { var j = JSON.parse(res.getContentText()); text = sarOcrText(j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content); } catch (x2) { text = ''; }
-  sarLog(sc.email, 'ocr', '', { ok: text ? 1 : 0, ms: Date.now() - t0 });
-  if (!text) throw httpError('OCR_EMPTY', 'อ่านข้อความจากหน้านี้ไม่ได้');
-  return { text: text, model: prop('TYPHOON_OCR_MODEL') || SAR_OCR_MODEL };
-}
-
 /* ------------------------------------- entry point ------------------------------------- */
 
 function saraban(b) {
@@ -1476,7 +1417,6 @@ function sarabanOp(u, op, b) {
     case 'reject':   return sarReject(sc, b);
     case 'dup':      sarNeedStaff(sc); { var f = sarFields(b, 'in'); return { items: sarDupFind(sarAll(sarTab(SAR_TAB)), f, String(b.inboxId || ''), sarInboxRows()).map(function (d) { return sarDupPublic(sc, d); }), suggest: sarSuggestUnits(f.subject, sarUnits(sc)) }; }
     case 'upload':   return sarUpload(sc, b);
-    case 'ocr':      return sarOcr(sc, b);                  // v1.21 Typhoon OCR (off unless TYPHOON_API_KEY is set)
     case 'discard':  return sarDiscard(sc, b);
     case 'receive':  return sarReceive(sc, b);
     case 'send':     return sarSend(sc, b);
