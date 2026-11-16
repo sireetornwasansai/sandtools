@@ -129,3 +129,18 @@ test('buildReceiptsHtml: หนึ่งตราต่อฉบับ เรี
   assert.ok(!html.includes('<สันทราย>') && html.includes('&lt;สันทราย&gt;'));
   assert.match(buildReceiptsHtml({ org: 'o', docs: [] }), /<body><\/body>/);
 });
+
+test('parseLetter: date written with "พ.ศ." between month and year', () => {
+  const r = parseLetter('ที่ ศธ 04001/ว 456\nวันที่ 20 กุมภาพันธ์ พ.ศ. 2569\nเรื่อง ประชุม\nเรียน ผอ.');
+  assert.equal(r.docDate, '2026-02-20');
+});
+
+test('parseLetter: book number is still found when OCR drops the word "ที่"', () => {
+  const r = parseLetter('สธ 0201.032/ว 1234\nสำนักงานสาธารณสุขจังหวัด\nเรื่อง ทดสอบ\nเรียน ผอ.');
+  assert.equal(r.docNo, 'สธ 0201.032/ว 1234');
+});
+
+test('parseLetter: a book number quoted in อ้างถึง is not taken as this letter\'s number', () => {
+  const r = parseLetter('เรื่อง ทดสอบ\nเรียน ผอ.\nอ้างถึง หนังสือ สธ 0201/ว 5 ลงวันที่ 1 มกราคม 2569');
+  assert.equal(r.docNo, '');
+});
